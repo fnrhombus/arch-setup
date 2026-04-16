@@ -1,0 +1,30 @@
+REM Windows install disk layout — per decisions.md §Q9.
+REM Target: Samsung SSD 840 PRO 512GB (the ~500-600 GB disk).
+REM Netac 128GB is NOT touched during Windows install — it is partitioned by the Arch installer later (recovery / swap / /var/log+cache).
+REM Prerequisites:
+REM   - SATA switched from RAID to AHCI in BIOS (decisions.md §Q9).
+REM   - Secure Boot left ON (decisions.md §System).
+REM
+REM %DISK% is substituted at runtime by windows-diskpart-preflight.ps1, which
+REM auto-detects the Samsung by size. Running this file directly (without the
+REM preflight) will fail — that is intentional.
+REM
+REM Resulting layout on the Samsung:
+REM   partition 1   EFI 512 MB     FAT32  "System"   letter S
+REM   partition 2   MSR 16 MB
+REM   partition 3   NTFS 160 GiB          "Windows"  letter W
+REM   ~316 GiB trailing unallocated — Arch installer creates btrfs here.
+
+SELECT DISK=%DISK%
+CLEAN
+CONVERT GPT
+
+CREATE PARTITION EFI SIZE=512
+FORMAT QUICK FS=FAT32 LABEL="System"
+ASSIGN LETTER=S
+
+CREATE PARTITION MSR SIZE=16
+
+CREATE PARTITION PRIMARY SIZE=163840
+FORMAT QUICK FS=NTFS LABEL="Windows"
+ASSIGN LETTER=W
