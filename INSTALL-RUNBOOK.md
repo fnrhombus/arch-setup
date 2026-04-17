@@ -158,7 +158,7 @@ Do this before starting Phase 3 — you want the BitLocker key mess handled whil
 1. Reboot. At the systemd-boot menu, pick **Windows Boot Manager**.
 2. BitLocker prompts for the recovery key. Type the 48-digit key from Bitwarden ("Inspiron BitLocker recovery").
 3. Windows boots. Log in as `Tom`. Let it sit for 30 seconds so BitLocker re-seals against the new PCR values.
-4. Shut down (don't just log out — Fast Startup is off, but a clean shutdown is still cleaner). `shutdown /s /t 0` from PowerShell.
+4. Shut down (don't just log out — Fast Startup is off, but a clean shutdown is still cleaner). Start → Power → Shut down, or from an **elevated** PowerShell (right-click → Run as administrator) run `shutdown /s /t 0`. A non-elevated `shutdown` call fails silently with "Access is denied" on stock Windows 11 unless the `Tom` account is in the local Administrators group (it is, per autounattend — so a normal PowerShell works too; the elevation path is the belt-and-suspenders option).
 5. Power on → systemd-boot → pick **Arch Linux** → back into Arch. No more BitLocker prompts from here.
 
 If the BitLocker key doesn't work: you have the phone photo from Phase 1 step 7 as a last-ditch copy. If even that doesn't work, Windows is gone and you need to reinstall — Arch is unaffected.
@@ -184,7 +184,7 @@ It will:
 1. `sudo` prompt for your password — type it. (No fingerprint/PIN yet.)
 2. **pacman** — all CLI tooling, Bitwarden (desktop + CLI), Ghostty, fuzzel, cliphist, swaync, satty, hyprshot, mise, chezmoi, gh, snapper. Signed binaries from `extra`, ~5 min.
 3. **yay** — only the 4 AUR-exclusive packages: `visual-studio-code-bin`, `microsoft-edge-stable-bin`, `catppuccin-sddm-theme-mocha`, `pinpam-git`. ~5 min build time.
-4. Installs Claude Code CLI via `mise use -g claude-code` and grabs its bash completion. **No local SSH keys are generated** — keys live in your Bitwarden vault as "SSH key" items and surface via `~/.bitwarden-ssh-agent.sock` once Bitwarden desktop is running with the SSH-agent toggle on (Phase 3e). A planter in `~/.zshrc.d/arch-ssh-signing.zsh` waits until `ssh-add -L` returns a pubkey, then wires git commit signing + registers the key with GitHub automatically.
+4. Installs Claude Code CLI: `mise use -g node@lts` pulls a LTS Node via mise, then `mise exec -- npm install -g @anthropic-ai/claude-code`. (There is no mise plugin named "claude-code" — Claude Code is shipped through npm. Completions are printed at runtime by `claude --print-completion zsh`; no external file download.) **No local SSH keys are generated** — keys live in your Bitwarden vault as "SSH key" items and surface via `~/.bitwarden-ssh-agent.sock` once Bitwarden desktop is running with the SSH-agent toggle on (Phase 3e). A planter in `~/.zshrc.d/arch-ssh-signing.zsh` waits until `ssh-add -L` returns a pubkey, then wires git commit signing + registers the key with GitHub automatically.
 5. **Points Bitwarden at your self-hosted server** `https://hass4150.duckdns.org:7277` — CLI via `bw config server`, desktop via pre-seeded `~/.config/Bitwarden/data.json`. If the desktop login screen still shows "bitwarden.com" in the "Logging in on:" dropdown, pick **Self-hosted** and paste that URL manually.
 6. **Prompt you to enroll your fingerprint** — touch the sensor 5 times, slight re-position each touch. Reader is auto-detected; if enrollment fails the script prints a diagnostic (full `lsusb`, `fprintd-list`, last 20 log lines) and offers to install `libfprint-git` from AUR and retry.
 7. **Prompt you to set a TPM-PIN** (`pinutil setup`) — 6+ chars. This is what you'll type for sudo from now on.
@@ -273,18 +273,37 @@ ssh-add -l                     # should list keys once Bitwarden desktop is unlo
    cd arch-setup@fnrhombus
    ```
 
-   **If the clone fails** (repo not pushed, or gh auth not wired yet), recover from the Ventoy USB — it still has everything:
+   **If the clone fails** (repo not pushed, or gh auth not wired yet), recover from the Ventoy USB — it still has the repo contents synced there pre-install:
    ```bash
    # Re-insert the Ventoy USB (you pulled it at end of Phase 2d).
    sudo mkdir -p /mnt/ventoy
    sudo mount /dev/disk/by-label/Ventoy /mnt/ventoy
-   cp -r /mnt/ventoy/phase-2-arch-install /mnt/ventoy/phase-3-arch-postinstall \
-         /mnt/ventoy/INSTALL-RUNBOOK.md /mnt/ventoy/autounattend.xml \
-         /mnt/ventoy/decisions.md /mnt/ventoy/handoff.md \
+
+   # Sanity-check what's actually at the USB root before copying — the sync
+   # step (pre-install) may have only pushed the phase-2/3 script dirs and
+   # not the markdown docs. If the `.md` files are missing, Claude still has
+   # enough to proceed with just phase-3 script + CLAUDE.md.
+   ls /mnt/ventoy/*.md /mnt/ventoy/CLAUDE.md 2>/dev/null
+
+   mkdir -p ~/src/arch-setup@fnrhombus
+   # Copy every repo file that IS on the USB; missing ones silently skip
+   # thanks to 2>/dev/null. Falls through to a whole-USB snapshot only if
+   # the targeted copy produced no files at all.
+   cp -r /mnt/ventoy/phase-2-arch-install \
+         /mnt/ventoy/phase-3-arch-postinstall \
+         /mnt/ventoy/INSTALL-RUNBOOK.md \
+         /mnt/ventoy/autounattend.xml \
+         /mnt/ventoy/decisions.md \
+         /mnt/ventoy/handoff.md \
          /mnt/ventoy/CLAUDE.md \
-         ~/src/arch-setup@fnrhombus/ 2>/dev/null || \
-     cp -r /mnt/ventoy ~/src/arch-setup-snapshot
-   cd ~/src/arch-setup@fnrhombus    # or arch-setup-snapshot
+         ~/src/arch-setup@fnrhombus/ 2>/dev/null
+   if [[ -z "$(ls -A ~/src/arch-setup@fnrhombus 2>/dev/null)" ]]; then
+       warn "Targeted copy got nothing — falling back to a whole-USB snapshot."
+       cp -r /mnt/ventoy ~/src/arch-setup-snapshot
+       cd ~/src/arch-setup-snapshot
+   else
+       cd ~/src/arch-setup@fnrhombus
+   fi
    ```
 
 3. Start Claude in that directory:
@@ -444,6 +463,23 @@ After reboot, `sudo` takes your **password** (TPM-PIN + fingerprint are gone unt
 2. If missing: launch Bitwarden desktop, unlock, Settings → SSH agent → toggle on. Quit and reopen a terminal.
 3. If present but `ssh-add -l` still errors: `SSH_AUTH_SOCK=~/.bitwarden-ssh-agent.sock ssh-add -l` to rule out an env issue.
 4. If the SSH-signing planter at `~/.zshrc.d/arch-ssh-signing.zsh` was never deleted, it will try again on each login — once Bitwarden is back online with at least one "SSH key" vault item, the planter fires and self-deletes.
+
+### K. "Login incorrect" at SDDM / first TTY — you fat-fingered `tom`'s password during chroot
+
+**Cause:** `chroot.sh` calls `passwd tom` interactively. If you mistyped both times (the `until passwd tom; do :; done` loop only retries on non-matching password confirmation, NOT on wrong-but-matching typos), you've set a password you can't reproduce. Same goes for `root`.
+
+**Fix — from the Ventoy USB Arch live environment:**
+```bash
+# Boot Ventoy → Arch ISO → live env.
+mount -o subvol=@ /dev/disk/by-label/ArchRoot /mnt
+arch-chroot /mnt
+passwd tom        # set a new one
+passwd            # while you're here, reset root too if needed
+exit
+umount -R /mnt
+reboot
+```
+No other state needs resetting — PAM, keyring, and Bitwarden are all keyed off the new password automatically from the next login.
 
 ---
 

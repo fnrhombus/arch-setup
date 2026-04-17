@@ -126,8 +126,12 @@ log "Adding btrfs partition in trailing free space on $SAMSUNG..."
 sgdisk --largest-new=0 --typecode=0:8300 --change-name=0:ArchRoot "$SAMSUNG"
 partprobe "$SAMSUNG"; sleep 2
 
-# Find the newly-created partition (highest partition number on Samsung).
-SAMSUNG_ROOT=$(lsblk -n -o NAME "$SAMSUNG" | tail -n +2 | tail -1)
+# Find the new partition by its PARTLABEL rather than "highest partition number"
+# — if Windows ever adds a Recovery partition between MSR and Windows (which
+# some install paths do), `tail -1` would pick the wrong one and we'd mkfs over
+# Windows. PARTLABEL="ArchRoot" is set by --change-name above and is unique.
+SAMSUNG_ROOT=$(lsblk -n -o NAME,PARTLABEL "$SAMSUNG" | awk '$2 == "ArchRoot" {print $1; exit}')
+[[ -n "$SAMSUNG_ROOT" ]] || die "Could not find ArchRoot partition after sgdisk — check lsblk output."
 SAMSUNG_ROOT="/dev/$SAMSUNG_ROOT"
 log "New Linux root partition: $SAMSUNG_ROOT"
 

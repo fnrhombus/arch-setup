@@ -121,7 +121,11 @@ EOF
 # \EFI\Microsoft\Boot\bootmgfw.efi (Windows install writes it there).
 
 # ---------- TPM2 stack (for pinpam in phase-3) ----------
+# Sync the mirror DB first. pacstrap populated /var/lib/pacman/sync from the
+# live ISO's snapshot, which can be days old; a stale DB makes `pacman -S`
+# error with "target not found" for packages that were just rebuilt. Cheap.
 log "Installing TPM2 userspace..."
+pacman -Sy --noconfirm
 pacman -S --noconfirm --needed tpm2-tss tpm2-tools libsecret gnome-keyring
 
 # ---------- PAM: gnome-keyring auto-unlock on SDDM login ----------

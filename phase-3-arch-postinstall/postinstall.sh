@@ -148,8 +148,15 @@ fi
 # Configured as 'sufficient' in PAM so your Linux password stays as fallback.
 if command -v pinutil >/dev/null; then
     if [[ -z "${SKIP_PIN:-}" ]]; then
-        log "Setting up TPM-backed PIN (follow prompt; 6+ chars recommended)..."
-        sudo pinutil setup || warn "pinutil setup failed; skipping PIN wiring."
+        # `pinutil setup` reads the new PIN interactively from stdin. Without a
+        # TTY (postinstall piped over ssh, or run from a headless systemd unit)
+        # it'd block forever with no way to type. Skip and warn instead.
+        if [[ -t 0 ]]; then
+            log "Setting up TPM-backed PIN (follow prompt; 6+ chars recommended)..."
+            sudo pinutil setup || warn "pinutil setup failed; skipping PIN wiring."
+        else
+            warn "No TTY — skipping 'pinutil setup'. Run it manually after login: sudo pinutil setup"
+        fi
     fi
     log "Wiring pinpam into sudo, polkit, hyprlock PAM stacks..."
     for svc in sudo polkit-1 hyprlock; do
@@ -616,7 +623,8 @@ check "gh (github-cli)"     "command -v gh"
 check "zgenom"              "test -d $HOME/.zgenom"
 check "p10k"                "test -d $HOME/.zgenom/sources/romkatv/powerlevel10k-master"
 check "bat / fd / rg / eza" "command -v bat && command -v fd && command -v rg && command -v eza"
-check "claude completion"   "test -f $HOME/.local/share/bash-completion/completions/claude"
+check "mise node@lts"       "mise exec -- node --version"
+check "claude (CLI)"        "mise exec -- command -v claude || command -v claude"
 check "vscode"              "command -v code"
 check "edge"                "command -v microsoft-edge-stable"
 check "ghostty"             "command -v ghostty"
