@@ -50,10 +50,11 @@ if (-not $winAsset) { throw "No ventoy-*-windows.zip in latest release ($($rel.t
 $zipOut = Join-Path $assetsDir $winAsset.name
 Get-WebFile $winAsset.browser_download_url $zipOut
 
-# Extract. The zip contains a single top-level dir matching its basename
-# (e.g. ventoy-1.1.12/). Nuke any older extracted ventoy-*/ trees first so we
-# don't leave stale boot binaries behind.
-$extractedName = [IO.Path]::GetFileNameWithoutExtension($winAsset.name)
+# Extract. The zip contains a single top-level dir whose name is the
+# release tag without the "-windows" suffix (e.g. ventoy-1.1.12/). Clean
+# any older extracted ventoy-X.Y.Z/ trees first so we don't leave stale
+# boot binaries behind.
+$extractedName = $winAsset.name -replace '-windows\.zip$',''
 Get-ChildItem $assetsDir -Directory -Filter 'ventoy-*' |
     Where-Object { $_.Name -ne $extractedName } |
     ForEach-Object {
@@ -62,7 +63,6 @@ Get-ChildItem $assetsDir -Directory -Filter 'ventoy-*' |
     }
 $extractedDir = Join-Path $assetsDir $extractedName
 if ($Force -or -not (Test-Path (Join-Path $extractedDir 'Ventoy2Disk.exe') -PathType Leaf)) {
-    # Probe without full recursion: zip may nest a same-named dir.
     if (Test-Path $extractedDir) { Remove-Item -Recurse -Force $extractedDir }
     Write-Host "[extract] $($winAsset.name)"
     Expand-Archive -Path $zipOut -DestinationPath $assetsDir -Force
