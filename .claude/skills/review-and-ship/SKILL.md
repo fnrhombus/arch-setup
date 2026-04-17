@@ -38,13 +38,14 @@ Re-run the loop until one full iteration produces **zero file changes and no com
 
 Delegate review passes to an `Explore` subagent (Sonnet model) with a detailed, self-contained brief — it has to see everything without your conversation context. Ask it for a **"CLEAN — no changes needed"** verdict or a specific list of issues with file paths and line numbers.
 
-## After convergence — emit the PDF
+## After convergence — emit the PDFs
 
 Only once the loop has converged:
 
-- Render `runbook/INSTALL-RUNBOOK.md` → `runbook/INSTALL-RUNBOOK.pdf` via `pnpm pdf` (script already wired in `package.json`, uses `marked` + Edge headless).
-- Target spec: **5.5" × 8.5" pages, 0.5" max margins, 12pt body font.** If any single spec makes it drastically harder, drop that one — not all three.
-- Commit + push the PDF (and re-stage USB if the PDF belongs there — default: not staged, since the markdown is already on the USB).
+- Render **every markdown file the user might want to print at the laptop** to a sibling PDF. That means every file in `runbook/` — `INSTALL-RUNBOOK.md`, `phase-3-handoff.md`, `phase-3.5-hardware-handoff.md`, `GLOSSARY.md`, `SURVIVAL.md` — plus any future additions to that directory. Files in `docs/` are dev-machine-only and don't need PDFs.
+- Use `pnpm pdf` (script at `scripts/runbook-pdf.mjs`, uses `marked` + Edge headless). If the script still only handles a single file, extend it to iterate over `runbook/*.md` first — then run it.
+- **Target spec for every PDF: 5.5" × 8.5" pages, 0.5" max margins, 12pt body font.** If any single spec makes it drastically harder for a given file, drop that one — not all three.
+- Commit + push each `runbook/<name>.pdf`. Re-stage the USB — the PDFs belong alongside their markdown sources so the user can view them on the laptop (or on a phone) without depending on a working markdown renderer.
 
 ## What to watch for (non-exhaustive)
 
