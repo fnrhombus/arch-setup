@@ -1,8 +1,18 @@
-assets/
-*.iso
-*.iso.sig
-*.lzma
-*.lzma.sig
-MediaCreationTool.exe
-Windows11InstallationAssistant.exe
+# Files auto-populated by `pnpm restore` (scripts/fetch-assets.ps1).
+# Anything else that lands in assets/ shows up as untracked — decide
+# deliberately whether to commit, ignore, or delete.
+/assets/archlinux-x86_64.iso
+/assets/archlinux-x86_64.iso.sig
+/assets/archlinux-sha256sums.txt
+/assets/ventoy-*-windows.zip
+/assets/ventoy-*/
+
+# Manually-obtained Windows ISO, stored as a symlink → D:\Users\Tom\Downloads
+# to keep V: free. Machine-specific, never commit.
+/assets/Win11_*.iso
+
+# npm/pnpm
+/node_modules/
+
+# Temp working files
 .tmp-*

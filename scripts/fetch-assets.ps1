@@ -70,16 +70,50 @@ if ($Force -or -not (Test-Path (Join-Path $extractedDir 'Ventoy2Disk.exe') -Path
     Write-Host "[skip] $extractedName already extracted"
 }
 
-# ---------- Windows 11 ISO (manual) ----------
+# ---------- Windows 11 ISO (manual check only — no auto-download) ----------
+# Microsoft gates the Win11 ISO behind a per-session API that changes
+# without notice; auto-downloading it is inherently fragile. Instead:
+# check that a usable ISO exists in assets/ (either a real file or a
+# symlink to a real file in Downloads) and print actionable instructions
+# if not.
+$win11ok = $false
 $win11 = Get-ChildItem $assetsDir -Filter 'Win11_*x64*.iso' -ErrorAction SilentlyContinue | Select-Object -First 1
-if (-not $win11) {
-    Write-Warning @"
-No Windows 11 ISO found in assets/. Obtain one manually:
-  - Fido.ps1  (https://github.com/pbatard/Fido)  -> programmatic MS API
-  - Media Creation Tool  (microsoft.com/software-download/windows11)
-Drop Win11_*_x64*.iso into assets/ before running phase 1.
+if ($win11) {
+    # Symlink? Resolve and size-check the target so broken links get caught.
+    $actual = if ($win11.LinkType) { Get-Item $win11.Target -ErrorAction SilentlyContinue } else { $win11 }
+    if ($actual -and $actual.Length -gt 1GB) {
+        Write-Host "[ok  ] Windows 11 ISO present: $($win11.Name) ($([math]::Round($actual.Length/1GB,1)) GB)"
+        $win11ok = $true
+    }
+}
+
+if (-not $win11ok) {
+    Write-Host ""
+    Write-Host "=================================================================" -ForegroundColor Red
+    Write-Host " MANUAL STEP REQUIRED: Windows 11 ISO not found in assets/       " -ForegroundColor Red
+    Write-Host "=================================================================" -ForegroundColor Red
+    Write-Host @"
+
+Microsoft does not publish a stable direct-download URL for the Win11
+ISO, so this script cannot fetch it. Download it yourself and place
+(or symlink) it into assets/ before running phase 1.
+
+  1. Get the ISO:
+       Fido.ps1  -> https://github.com/pbatard/Fido
+       Media Creation Tool -> https://www.microsoft.com/software-download/windows11
+       UUP dump  -> https://uupdump.net/
+
+  2. Put it in assets/ (one of):
+       a) copy: copy the .iso into V:\arch-setup@fnrhombus\assets\
+       b) symlink (saves 8 GB of duplication):
+            New-Item -ItemType SymbolicLink ``
+              -Path   'V:\arch-setup@fnrhombus\assets\Win11_25H2_English_x64_v2.iso' ``
+              -Target 'D:\Users\Tom\Downloads\Win11_25H2_English_x64_v2.iso'
+         (symlinks require an admin shell on Windows, or Dev Mode)
+
+  3. Re-run `pnpm restore` to re-verify.
+
 "@
 }
 
-Write-Host ""
 Write-Host "[ok] asset sync complete."
