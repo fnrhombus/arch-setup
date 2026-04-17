@@ -121,6 +121,43 @@ if ! grep -q pam_fprintd /etc/pam.d/sudo; then
     sed -i '1i auth       sufficient   pam_fprintd.so' /etc/pam.d/sudo
 fi
 
+# ---------- pre-seed NetworkManager Wi-Fi profiles ----------
+# Mirror install.sh WIFI_PROFILES and autounattend.xml Wi-Fi block.
+log "Seeding NetworkManager Wi-Fi profiles..."
+WIFI_PROFILES=(
+    "ATTgs5BwGZ:t8ueiz43ueaf"
+    "rhombus:n3wPassword"
+    "rhombus_legacy:n3wPassword"
+)
+mkdir -p /etc/NetworkManager/system-connections
+for pair in "${WIFI_PROFILES[@]}"; do
+    s="${pair%%:*}"; p="${pair#*:}"
+    f="/etc/NetworkManager/system-connections/${s}.nmconnection"
+    cat > "$f" <<EOF
+[connection]
+id=$s
+type=wifi
+autoconnect=true
+autoconnect-priority=10
+
+[wifi]
+mode=infrastructure
+ssid=$s
+
+[wifi-security]
+key-mgmt=wpa-psk
+psk=$p
+
+[ipv4]
+method=auto
+
+[ipv6]
+method=auto
+addr-gen-mode=default
+EOF
+    chmod 600 "$f"
+done
+
 # ---------- services ----------
 log "Enabling services..."
 systemctl enable NetworkManager

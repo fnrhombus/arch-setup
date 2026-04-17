@@ -361,36 +361,9 @@ $logfile = 'C:\Windows\Setup\Scripts\RemoveFeatures.log';
 	}
 } *&gt;&amp;1 | Out-String -Width 1KB -Stream &gt;&gt; $logfile;
 		</File>
-		<File path="C:\Windows\Setup\Scripts\Wifi.xml">
-&lt;WLANProfile xmlns="http://www.microsoft.com/networking/WLAN/profile/v1"&gt;
-	&lt;name&gt;ATTgs5BwGZ&lt;/name&gt;
-	&lt;SSIDConfig&gt;
-		&lt;SSID&gt;
-			&lt;hex&gt;4154546773354277475A&lt;/hex&gt;
-			&lt;name&gt;ATTgs5BwGZ&lt;/name&gt;
-		&lt;/SSID&gt;
-	&lt;/SSIDConfig&gt;
-	&lt;connectionType&gt;ESS&lt;/connectionType&gt;
-	&lt;connectionMode&gt;auto&lt;/connectionMode&gt;
-	&lt;MSM&gt;
-		&lt;security&gt;
-			&lt;authEncryption&gt;
-				&lt;authentication&gt;WPA2PSK&lt;/authentication&gt;
-				&lt;encryption&gt;AES&lt;/encryption&gt;
-				&lt;useOneX&gt;false&lt;/useOneX&gt;
-			&lt;/authEncryption&gt;
-			&lt;sharedKey&gt;
-				&lt;keyType&gt;passPhrase&lt;/keyType&gt;
-				&lt;protected&gt;false&lt;/protected&gt;
-				&lt;keyMaterial&gt;t8ueiz43ueaf&lt;/keyMaterial&gt;
-			&lt;/sharedKey&gt;
-		&lt;/security&gt;
-	&lt;/MSM&gt;
-	&lt;MacRandomization xmlns="http://www.microsoft.com/networking/WLAN/profile/v3"&gt;
-		&lt;enableRandomization&gt;false&lt;/enableRandomization&gt;
-	&lt;/MacRandomization&gt;
-&lt;/WLANProfile&gt;
-		</File>
+		<!-- Wi-Fi profiles are added dynamically from the $wifiProfiles array
+		     in Specialize.ps1 below. To add a network, edit that array. -->
+
 		<File path="C:\Windows\Setup\Scripts\SetStartPins.ps1">
 $json = '{"pinnedList":[]}';
 if( [System.Environment]::OSVersion.Version.Build -lt 20000 ) {
@@ -441,10 +414,37 @@ $scripts = @(
 		Write-Progress @params -Completed;
 	};
 	{
-		netsh.exe wlan add profile filename="C:\Windows\Setup\Scripts\Wifi.xml" user=all;
-	};
-	{
-		netsh.exe wlan connect name="ATTgs5BwGZ" ssid="ATTgs5BwGZ";
+		# Mirror this list in phase-2-arch-install/install.sh and chroot.sh (WIFI_PROFILES).
+		$wifiProfiles = @(
+			@{ SSID = 'ATTgs5BwGZ';     PSK = 't8ueiz43ueaf' }
+			@{ SSID = 'rhombus';        PSK = 'n3wPassword'  }
+			@{ SSID = 'rhombus_legacy'; PSK = 'n3wPassword'  }
+		);
+		$template = @'
+<WLANProfile xmlns="http://www.microsoft.com/networking/WLAN/profile/v1">
+  <name>{0}</name>
+  <SSIDConfig><SSID><hex>{1}</hex><name>{0}</name></SSID></SSIDConfig>
+  <connectionType>ESS</connectionType>
+  <connectionMode>auto</connectionMode>
+  <MSM><security>
+    <authEncryption><authentication>WPA2PSK</authentication><encryption>AES</encryption><useOneX>false</useOneX></authEncryption>
+    <sharedKey><keyType>passPhrase</keyType><protected>false</protected><keyMaterial>{2}</keyMaterial></sharedKey>
+  </security></MSM>
+  <MacRandomization xmlns="http://www.microsoft.com/networking/WLAN/profile/v3"><enableRandomization>false</enableRandomization></MacRandomization>
+</WLANProfile>
+'@;
+		foreach ($p in $wifiProfiles) {
+			$hex = -join ([System.Text.Encoding]::ASCII.GetBytes($p.SSID) | ForEach-Object { '{0:X2}' -f $_ });
+			$xml = $template -f $p.SSID, $hex, $p.PSK;
+			$path = "C:\Windows\Setup\Scripts\Wifi-$($p.SSID).xml";
+			Set-Content -LiteralPath $path -Value $xml -Encoding UTF8;
+			netsh.exe wlan add profile filename=$path user=all;
+		}
+		foreach ($p in $wifiProfiles) {
+			netsh.exe wlan connect name=$p.SSID ssid=$p.SSID;
+			Start-Sleep -Seconds 4;
+			if (netsh.exe wlan show interfaces | Select-String 'State\s*:\s*connected') { break }
+		}
 	};
 	{
 		net.exe accounts /maxpwage:UNLIMITED;

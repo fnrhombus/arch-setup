@@ -41,7 +41,7 @@ What gets touched:
    - Reboots itself **twice** — leave the USB in both times; Ventoy will re-show the menu. **Don't press anything** — it'll auto-select the Win11 ISO via the `autosel` timer. If the timer expires and you're stuck, just re-pick Win11.
    - Finally lands on the `Tom` desktop. No prompts, no OOBE.
 
-4. **Wi-Fi should already be connected** — the `ATTgs5BwGZ` credentials are embedded in `autounattend.xml` (`WifiProfileXml`, `connectionMode=auto`). Confirm by glancing at the taskbar network icon. If it's NOT connected (you're somewhere else, or the password changed), click the icon → pick SSID → enter password. The winget-import scheduled task is waiting for `cdn.winget.microsoft.com` (20 min timeout) and will proceed as soon as you're online.
+4. **Wi-Fi should already be connected** — `autounattend.xml` embeds three profiles (`ATTgs5BwGZ`, `rhombus`, `rhombus_legacy`), all WPA2PSK, `connectionMode=auto`. Windows adds all three and connects to whichever is in range. Confirm via the taskbar network icon. If none are visible (different location), click the icon → pick SSID → enter password. The winget-import scheduled task waits up to 20 min for `cdn.winget.microsoft.com` and proceeds as soon as you're online.
 
 5. Watch for winget to run:
    - It's a scheduled task called **`WingetImportOnce`**, starts ~2 min after logon.
@@ -78,18 +78,21 @@ What gets touched:
 
 ### 2b. Wi-Fi
 
+`install.sh` auto-connects using the embedded profiles (`ATTgs5BwGZ`, `rhombus`, `rhombus_legacy`) — it scans, picks whichever is in range, and moves on. You do nothing.
+
+**Only if auto-connect fails** (network out of range, all creds wrong, no Wi-Fi hardware detected), fall back to manual:
+
 ```bash
 iwctl
-# in the iwctl prompt:
 device list                              # note your wifi device, probably wlan0
 station wlan0 scan
 station wlan0 get-networks
 station wlan0 connect YOUR_SSID          # prompts for passphrase
 exit
-ping -c2 archlinux.org                   # confirm
+ping -c2 archlinux.org
 ```
 
-**If `device list` is empty:** `rfkill unblock all`, try again. If still empty, your wifi driver isn't in the live ISO — plug in the USB-C dock for wired ethernet instead.
+**If `device list` is empty:** `rfkill unblock all`, try again. If still empty, plug in the USB-C dock for wired ethernet.
 
 ### 2c. Mount the Ventoy USB data partition
 

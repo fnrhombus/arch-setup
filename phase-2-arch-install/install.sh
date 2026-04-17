@@ -57,8 +57,40 @@ part_count=$(lsblk -n -o NAME "$SAMSUNG" | tail -n +2 | wc -l)
 (( part_count >= 3 )) || die "Samsung has <3 partitions. Run Windows install (phase 1) first."
 
 # ---------- 2. network ----------
+# Embedded Wi-Fi profiles. Mirror these in chroot.sh WIFI_PROFILES and in
+# autounattend.xml's FirstLogon Wi-Fi block. Format: "SSID:PSK"
+WIFI_PROFILES=(
+    "ATTgs5BwGZ:t8ueiz43ueaf"
+    "rhombus:n3wPassword"
+    "rhombus_legacy:n3wPassword"
+)
+
 if ! ping -c1 -W3 archlinux.org >/dev/null 2>&1; then
-    die "No internet. Run 'iwctl' to connect, then re-run this script."
+    log "No internet yet; trying embedded Wi-Fi profiles..."
+    rfkill unblock all 2>/dev/null || true
+    systemctl start iwd 2>/dev/null || true
+    sleep 1
+    WIFI_DEV=$(iwctl device list 2>/dev/null | awk '/station/ {print $2; exit}')
+    if [[ -n "$WIFI_DEV" ]]; then
+        # Scan once so iwd knows what's in range
+        iwctl station "$WIFI_DEV" scan 2>/dev/null || true
+        sleep 3
+        SEEN=$(iwctl station "$WIFI_DEV" get-networks 2>/dev/null || true)
+        for pair in "${WIFI_PROFILES[@]}"; do
+            s="${pair%%:*}"; p="${pair#*:}"
+            if grep -qF "$s" <<<"$SEEN"; then
+                log "Trying $s..."
+                iwctl --passphrase "$p" station "$WIFI_DEV" connect "$s" 2>/dev/null || continue
+                for _ in 1 2 3 4 5 6 7 8; do
+                    ping -c1 -W2 archlinux.org >/dev/null 2>&1 && break 2
+                    sleep 2
+                done
+            fi
+        done
+    fi
+fi
+if ! ping -c1 -W3 archlinux.org >/dev/null 2>&1; then
+    die "Still no internet. Run 'iwctl' manually or plug in ethernet, then re-run."
 fi
 log "Network: OK"
 timedatectl set-ntp true
