@@ -436,9 +436,15 @@ sudo systemctl restart bluetooth
 
 **Fix:** Reboot, hit F12 at the Dell logo, pick "Windows Boot Manager" directly from the firmware menu. From inside Windows, re-run Arch's `bootctl` from a live USB later to re-register. You are not stuck — both OSes are still bootable via F12.
 
-### H. SDDM shows but fingerprint prompt never appears at login
+### H. SDDM shows but fingerprint prompt never appears at login, or login hangs waiting for it
 
-SDDM login doesn't use fingerprint by default — it's wired for **sudo/polkit/hyprlock** only. Type your password at SDDM. Fingerprint kicks in the first time you `sudo` after login.
+SDDM **is** wired for fingerprint via `pam_fprintd sufficient` — when you get to the login screen, touch the reader and you're in; or type your password as a fallback.
+
+If the login hangs for more than ~5 seconds with no prompt, fprintd is probably stuck. Three fixes in increasing severity:
+
+1. **Just type your password.** The PAM stack is `pam_fprintd sufficient` then password — the password prompt appears as soon as pam_fprintd gives up or you hit Enter/Escape.
+2. **Restart fprintd** from a TTY: `Ctrl+Alt+F3` → log in → `sudo systemctl restart fprintd` → `Ctrl+Alt+F1` back to SDDM.
+3. **Remove fprintd from SDDM entirely** (if it's persistently broken and you want the old password-only behavior back): from a TTY, `sudo sed -i '/pam_fprintd/d' /etc/pam.d/sddm`. Leaves fingerprint working for `sudo`/`polkit`/`hyprlock`, just strips it from the login screen.
 
 ### I. `sudo` fails with "PAM module not found" — you're locked out of root
 

@@ -151,11 +151,19 @@ if ! grep -q pam_gnome_keyring /etc/pam.d/passwd; then
     echo 'password   optional   pam_gnome_keyring.so' >> /etc/pam.d/passwd
 fi
 
-# ---------- PAM: fingerprint for sudo (fprintd prompts touch-finger) ----------
-log "Wiring fprintd into sudo PAM stack..."
-if ! grep -q pam_fprintd /etc/pam.d/sudo; then
-    sed -i '1i auth       sufficient   pam_fprintd.so' /etc/pam.d/sudo
-fi
+# ---------- PAM: fingerprint for sudo + SDDM (fprintd prompts touch-finger) ----------
+# `sufficient` means: if fingerprint auth succeeds, skip the rest (password
+# not needed); if it fails/is-unavailable, fall through to pam_unix which
+# prompts for password as normal. So worst-case failure mode of fprintd
+# being sick is "login takes an extra 2-5s then asks for password." No
+# lockout scenario exists as long as pam_unix is still in the stack after
+# our insert.
+log "Wiring fprintd into sudo + SDDM PAM stacks..."
+for svc in sudo sddm; do
+    if ! grep -q pam_fprintd "/etc/pam.d/$svc"; then
+        sed -i '1i auth       sufficient   pam_fprintd.so' "/etc/pam.d/$svc"
+    fi
+done
 
 # ---------- pre-seed NetworkManager Wi-Fi profiles ----------
 # Mirror install.sh WIFI_PROFILES and autounattend.xml Wi-Fi block.

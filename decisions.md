@@ -10,6 +10,11 @@
 - **Display**: Integrated touch + external Vizio via USB DisplayLink dock
 - **Boot**: UEFI, Secure Boot ON, GPT, SATA in RAID mode
 - **Peripherals**: Touchscreen, touchpad, fingerprint reader, active pen
+- **Battery**: NONE — the internal battery is dead / removed. Laptop is always on AC power, lives stashed under a desk. Downstream consequences:
+  - Lid-close "suspend on battery" branch in `logind.conf` is dead code (systemd-logind never sees battery state). Harmless; left in for portability if a battery ever returns.
+  - Hibernation is disabled (dual-boot + BitLocker would make it risky anyway) — swap sized for pressure relief only, not hibernate-to-disk. Could shrink from 16 GB → 4 GB in a future pass if `/var` on Netac runs tight.
+  - Abrupt shutdowns (power cable kick) are the norm. btrfs COW handles this well — no `fsync` required for metadata integrity. Good argument for btrfs over ext4 on root.
+  - SDDM is the primary moment of the day where the user authenticates (no suspend/resume cycles → no lock screens) — fingerprint at SDDM is therefore load-bearing, not cosmetic.
 
 ## Requirements
 - [ ] Fingerprint scanner support (fprintd + libfprint)
