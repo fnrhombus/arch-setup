@@ -77,7 +77,9 @@
 - **powerlevel10k** prompt
 - Plugins: fast-syntax-highlighting, autosuggestions, history-substring-search, zsh-completions, fzf-zsh-plugin, fzf-tab
 - OMZ: sudo, colored-man-pages, extract, command-not-found (pkgfile on Arch), docker, docker-compose, npm, pip, dotnet
-- Tools: mise, zoxide, direnv, keychain, bat, fd, rg, eza, lsd, btop, jq, sd, yq, xh, tldr, gh
+- Tools: mise, zoxide, direnv, bat, fd, rg, eza, lsd, btop, jq, sd, yq, xh, tldr, gh
+  - `keychain` removed — Bitwarden SSH agent holds keys (surfaces at `~/.bitwarden-ssh-agent.sock` once Bitwarden desktop runs with SSH-agent toggle on).
+  - `docker`, `docker-compose`, `docker-buildx` also installed (user in `docker` group, service enabled).
 - Aliases & settings carried from fnwsl (eza cascade, navigation, mc function, history opts)
 - tmux config carried from fnwsl (Ctrl+a prefix, mouse, sensible splits)
 

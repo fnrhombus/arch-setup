@@ -46,6 +46,7 @@ sudo pacman -Syu --noconfirm --needed \
     base-devel git curl wget openssh \
     zsh tmux helix \
     bat fd ripgrep eza lsd btop jq fzf zoxide direnv \
+    sd yq xh \
     man-db man-pages pkgfile tldr \
     wl-clipboard grim slurp \
     xdg-user-dirs pipewire pipewire-pulse pipewire-jack wireplumber \
@@ -53,9 +54,21 @@ sudo pacman -Syu --noconfirm --needed \
     bitwarden bitwarden-cli \
     ghostty fuzzel cliphist swaync satty hyprshot \
     mise chezmoi github-cli \
-    snapper
+    docker docker-compose docker-buildx \
+    snapper snap-pac
 
 sudo pkgfile -u
+
+# ---------- 1a. docker: enable service, add tom to docker group ----------
+# `docker` group grants root-equivalent access to the daemon; that's fine on
+# a single-user laptop. Logging out and back in (or `newgrp docker`) is
+# required for the group to take effect in a running shell.
+log "Enabling docker service and adding tom to docker group..."
+sudo systemctl enable --now docker.service
+if ! id -nG tom | grep -qw docker; then
+    sudo usermod -aG docker tom
+    warn "Added tom to docker group — log out and back in for it to take effect."
+fi
 
 # ---------- 2. yay bootstrap ----------
 if ! command -v yay >/dev/null; then
@@ -424,6 +437,16 @@ REPORTTIME=2
 [[ -f ~/.p10k.zsh ]] && source ~/.p10k.zsh
 ZSHEOF
 
+# Pre-ship p10k config from fnwsl so the first shell doesn't drop into the
+# `p10k configure` wizard. Sidecar file lives next to this script.
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+if [[ -f "$SCRIPT_DIR/p10k.zsh" ]]; then
+    log "Installing pre-shipped ~/.p10k.zsh from fnwsl..."
+    cp "$SCRIPT_DIR/p10k.zsh" "$HOME/.p10k.zsh"
+else
+    warn "p10k.zsh sidecar not found next to postinstall.sh — first shell will prompt to configure."
+fi
+
 log "Writing ~/.zsh_aliases..."
 cat > "$HOME/.zsh_aliases" <<'ALIASEOF'
 # --- Navigation ---
@@ -440,17 +463,6 @@ alias tree='eza --tree --icons'
 
 # --- bat ---
 alias cat='bat --paging=never'
-
-# --- Git ---
-alias gs='git status'
-
-# --- cd via zoxide ---
-alias cd='z'
-
-# --- Misc ---
-alias grep='rg'
-alias wget='wget -c'
-alias myip='curl -s icanhazip.com'
 
 # --- mc: make directory and cd into it ---
 mc() { mkdir -p "$1" && cd "$1"; }
