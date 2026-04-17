@@ -68,6 +68,10 @@ EOF
 
 # ---------- mkinitcpio ----------
 log "Regenerating initramfs..."
+# Explicit btrfs in MODULES= is belt-and-suspenders: `filesystems` hook usually
+# pulls it via autodetect, but if autodetect misses it you get an unbootable
+# kernel panic ("can't find root fs"). Cheap to force.
+sed -i 's/^MODULES=.*/MODULES=(btrfs)/' /etc/mkinitcpio.conf
 sed -i 's/^HOOKS=.*/HOOKS=(base systemd autodetect modconf kms keyboard sd-vconsole block filesystems fsck)/' /etc/mkinitcpio.conf
 mkinitcpio -P
 
@@ -180,6 +184,9 @@ if [[ -f /etc/bluetooth/main.conf ]]; then
     sed -i 's/^#AutoEnable=false/AutoEnable=true/' /etc/bluetooth/main.conf
     grep -q '^AutoEnable=' /etc/bluetooth/main.conf || \
         sed -i '/^\[Policy\]/a AutoEnable=true' /etc/bluetooth/main.conf
+    # Final fallback: if both seds silently no-op'd, append a fresh [Policy] block.
+    grep -q '^AutoEnable=true' /etc/bluetooth/main.conf || \
+        printf '\n[Policy]\nAutoEnable=true\n' >> /etc/bluetooth/main.conf
 fi
 
 # ---------- services ----------

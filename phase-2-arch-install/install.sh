@@ -196,6 +196,28 @@ pacstrap -K /mnt \
 log "Generating /etc/fstab..."
 genfstab -U /mnt >> /mnt/etc/fstab
 
+# Harden the two bind mounts: systemd mounts entries in parallel unless we
+# tell it otherwise. /var/log and /var/cache need to wait for the ext4 at
+# /mnt/netac-var to be mounted first, or the binds race and either fail or
+# bind to the empty btrfs mountpoint under /var. Rewrite both entries to
+# include x-systemd.requires-mounts-for=/mnt/netac-var.
+python3 - <<'PYEOF' || warn "fstab post-process failed — check /mnt/etc/fstab by hand."
+import re
+p = "/mnt/etc/fstab"
+with open(p) as f: src = f.read()
+out = []
+DEP = "x-systemd.requires-mounts-for=/mnt/netac-var"
+for line in src.splitlines():
+    parts = line.split()
+    # fstab: <src> <target> <fstype> <options> <dump> <pass>
+    if len(parts) >= 4 and parts[1] in ("/var/log", "/var/cache") and "bind" in parts[3].split(","):
+        if DEP not in parts[3]:
+            parts[3] = parts[3] + "," + DEP
+            line = "\t".join(parts)
+    out.append(line)
+with open(p, "w") as f: f.write("\n".join(out) + "\n")
+PYEOF
+
 # ---------- 11. chroot config ----------
 log "Staging chroot script..."
 VENTOY_MNT=$(findmnt -n -o TARGET -S LABEL=Ventoy 2>/dev/null || true)

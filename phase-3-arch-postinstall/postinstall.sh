@@ -517,11 +517,26 @@ if pacman -Qi catppuccin-sddm-theme-mocha >/dev/null 2>&1; then
 fi
 
 # ---------- 16. Snapper: baseline snapshot of / ----------
+# NOTE: install.sh already created the @snapshots subvolume and mounted it at
+# /.snapshots. `snapper create-config /` would try to create ANOTHER .snapshots
+# subvolume on top of that mount and fail with "subvolume already exists" or
+# "not a valid subvolume". We write the config by hand instead (same result,
+# no filesystem tampering).
 if command -v snapper >/dev/null && [[ ! -f /etc/snapper/configs/root ]]; then
-    log "Creating snapper config for /..."
-    sudo snapper -c root create-config /
-    # Take a clean baseline now
-    sudo snapper -c root create --description "clean install postinstall baseline"
+    log "Writing snapper config for / (handmade, avoids .snapshots conflict)..."
+    sudo install -d -m 750 /etc/snapper/configs
+    sudo cp /etc/snapper/config-templates/default /etc/snapper/configs/root
+    sudo sed -i 's|^SUBVOLUME=.*|SUBVOLUME="/"|' /etc/snapper/configs/root
+    sudo sed -i 's|^ALLOW_USERS=.*|ALLOW_USERS="tom"|' /etc/snapper/configs/root
+    # Register the config name so `snapper list-configs` sees it.
+    if ! grep -q '^SNAPPER_CONFIGS=.*root' /etc/conf.d/snapper 2>/dev/null; then
+        echo 'SNAPPER_CONFIGS="root"' | sudo tee -a /etc/conf.d/snapper >/dev/null
+    fi
+    sudo chown -R :tom /.snapshots 2>/dev/null || true
+    sudo chmod 750 /.snapshots
+    # Baseline snapshot — safe now that config exists and .snapshots is writable.
+    sudo snapper -c root create --description "clean install postinstall baseline" || \
+        warn "snapper baseline failed — config is in place but no snapshot taken."
 fi
 
 # ---------- 17. USB-serial udev rules (ESP32 / Pico / FTDI / CH340) ----------

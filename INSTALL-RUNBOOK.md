@@ -15,6 +15,10 @@ What gets touched:
 - **Samsung 512 GB** → EFI + MSR + Windows 160 GB + Arch btrfs (~316 GB)
 - **Netac 128 GB** → Arch recovery ISO + 16 GB swap + ext4 for `/var/log` + `/var/cache`
 
+Two things to know before starting:
+- **Hostnames are intentionally different**: Windows = `Metis`, Arch = `inspiron`. Your router sees whichever OS is up. This is cosmetic, not a bug (see recovery §D if it bothers you).
+- **First Windows boot after Arch install will prompt for the BitLocker recovery key.** Expected — systemd-boot changes PCR values. Phase 1 step 7 stashes the key in Bitwarden.
+
 ---
 
 ## Phase 0 — BIOS prep (5 min)
@@ -277,6 +281,95 @@ ssh-add -l                     # should list keys (after Bitwarden unlocks)
 - **systemd-boot doesn't list any entries after `bootctl list`** → reinstall with `bootctl --path=/boot install` as root.
 - **SDDM loops back to login** → Hyprland is crashing. Drop to TTY, `cat ~/.local/share/hyprland/hyprland.log`. Usually a missing config include from end-4 — re-run its installer.
 - **`sudo` rejects your TPM-PIN** → TPM got reset or the PIN index was evicted. Re-run `sudo pinutil setup`. Password still works as fallback.
+
+---
+
+## First-boot failure modes (will it all actually come up?)
+
+These are the failure modes most likely to hit on the very first boot after `install.sh` reboots. Each has a recovery path that assumes you have the Ventoy USB handy.
+
+### A. Kernel panic: "Cannot open root device" / "VFS: Unable to mount root fs"
+
+**Cause:** btrfs module didn't make it into the initramfs, so the kernel boots but can't read `/`. `chroot.sh` now forces `MODULES=(btrfs)` in `/etc/mkinitcpio.conf` — but if that line got overridden or mkinitcpio threw a warning you ignored, this is what you see.
+
+**Fix:** Boot the Ventoy USB → Arch ISO → live environment. Then:
+```bash
+mount -o subvol=@ /dev/disk/by-label/ArchRoot /mnt
+mount /dev/disk/by-partlabel/EFI\ system\ partition /mnt/boot 2>/dev/null \
+  || mount "$(blkid -o device -t PARTLABEL='EFI System Partition')" /mnt/boot
+arch-chroot /mnt
+grep -q '^MODULES=(btrfs)' /etc/mkinitcpio.conf || sed -i 's/^MODULES=.*/MODULES=(btrfs)/' /etc/mkinitcpio.conf
+mkinitcpio -P
+exit
+reboot
+```
+
+### B. Emergency shell at boot: "Dependency failed for /var/log"
+
+**Cause:** The `/var/log` and `/var/cache` bind mounts race the ext4 mount at `/mnt/netac-var`. `install.sh` now writes `x-systemd.requires-mounts-for=/mnt/netac-var` into both fstab entries, but if the fstab-rewrite step silently skipped (look for `[!] fstab post-process failed` in install output), the ordering won't be there.
+
+**Fix (from the emergency shell at boot):**
+```bash
+# Log in as root (password you set in chroot).
+mount -o remount,rw /
+nano /etc/fstab
+# Find the two lines whose target is /var/log and /var/cache.
+# In their options column (4th column), append:
+#   ,x-systemd.requires-mounts-for=/mnt/netac-var
+# Save. Exit editor.
+systemctl daemon-reload
+reboot
+```
+If editing fstab from emergency mode is scary: add `systemd.unit=rescue.target` to the kernel command line in systemd-boot (press `e` on the Arch entry at boot, append to `options=`), which gives a full single-user shell with `/` writable.
+
+### C. BitLocker recovery prompt on next Windows boot
+
+**This is expected, not a failure.** systemd-boot installing itself to the shared EFI rewrites the PCR values the TPM sealed BitLocker against. First Windows boot after Arch install → blue "Enter recovery key" screen.
+
+**Fix:** Type the 48-digit key (stored in Bitwarden as "Inspiron BitLocker recovery" per Phase 1 step 7). Windows unseals, re-seals to the new PCRs. Never prompts again unless the bootloader changes.
+
+### D. Hostname shows as `Metis` on the network, not `inspiron`
+
+**Cause:** Windows unattend names the machine `Metis`, Arch's `chroot.sh` names it `inspiron`. Both are correct for their respective OS — they just don't match. Your router's DHCP lease will show whichever OS booted most recently.
+
+**This is cosmetic.** If you care: edit `/etc/hostname` in Arch to `Metis` (and the `127.0.1.1` line in `/etc/hosts`), or change Windows via `Rename-Computer -NewName inspiron -Restart` from an elevated PowerShell. Neither change is required for anything to work.
+
+### E. Snapper complains `config "root" does not exist` or `.snapshots not found`
+
+**Cause:** `postinstall.sh` skips `snapper -c root create-config /` (which would try to re-create an already-mounted `/.snapshots` subvolume) and writes the config by hand. If that hand-write was skipped — e.g., `postinstall.sh` was re-run after partial state — you're missing the config.
+
+**Fix:**
+```bash
+sudo install -d -m 750 /etc/snapper/configs
+sudo cp /etc/snapper/config-templates/default /etc/snapper/configs/root
+sudo sed -i 's|^SUBVOLUME=.*|SUBVOLUME="/"|;s|^ALLOW_USERS=.*|ALLOW_USERS="tom"|' /etc/snapper/configs/root
+echo 'SNAPPER_CONFIGS="root"' | sudo tee -a /etc/conf.d/snapper
+sudo snapper -c root create --description "manual baseline"
+```
+
+### F. Bluetooth doesn't auto-enable after reboot
+
+**Cause:** The AutoEnable sed rewriters in `chroot.sh` all silently no-op'd (a distro change in `/etc/bluetooth/main.conf` defaults would do it). There's now a final `>>` append fallback, but if the config file didn't exist at all when chroot.sh ran, the whole `if` block was skipped.
+
+**Fix:**
+```bash
+sudo tee -a /etc/bluetooth/main.conf >/dev/null <<EOF
+
+[Policy]
+AutoEnable=true
+EOF
+sudo systemctl restart bluetooth
+```
+
+### G. Can't get back into Windows from the Arch systemd-boot menu
+
+**Cause:** Windows Boot Manager didn't auto-register with systemd-boot. Check `bootctl list` — if you don't see `title: Windows Boot Manager`, the `\EFI\Microsoft\Boot\bootmgfw.efi` file is missing or wasn't detected.
+
+**Fix:** Reboot, hit F12 at the Dell logo, pick "Windows Boot Manager" directly from the firmware menu. From inside Windows, re-run Arch's `bootctl` from a live USB later to re-register. You are not stuck — both OSes are still bootable via F12.
+
+### H. SDDM shows but fingerprint prompt never appears at login
+
+SDDM login doesn't use fingerprint by default — it's wired for **sudo/polkit/hyprlock** only. Type your password at SDDM. Fingerprint kicks in the first time you `sudo` after login.
 
 ---
 
