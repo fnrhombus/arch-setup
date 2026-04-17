@@ -22,3 +22,6 @@
 
 # Edge headless crash/debug logs from `pnpm pdf`
 /debug.log
+
+# Generated PDFs — `pnpm pdf` re-renders from runbook/*.md.
+/runbook/*.pdf
