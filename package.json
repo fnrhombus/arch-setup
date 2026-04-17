@@ -1,0 +1,16 @@
+{
+  "name": "arch-setup",
+  "private": true,
+  "version": "0.0.0",
+  "description": "Dual-boot Windows 11 + Arch Linux bootstrap for Dell Inspiron 7786. Planning docs, Windows unattend, Arch install/post-install scripts, and Ventoy USB artifacts.",
+  "scripts": {
+    "restore": "pwsh -NoProfile -ExecutionPolicy Bypass -File scripts/fetch-assets.ps1",
+    "restore:force": "pwsh -NoProfile -ExecutionPolicy Bypass -File scripts/fetch-assets.ps1 -Force"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git@github.com:fnrhombus/arch-setup.git"
+  },
+  "author": "fnrhombus",
+  "license": "MIT"
+}
