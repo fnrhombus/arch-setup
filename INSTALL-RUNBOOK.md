@@ -436,15 +436,9 @@ sudo systemctl restart bluetooth
 
 **Fix:** Reboot, hit F12 at the Dell logo, pick "Windows Boot Manager" directly from the firmware menu. From inside Windows, re-run Arch's `bootctl` from a live USB later to re-register. You are not stuck — both OSes are still bootable via F12.
 
-### H. SDDM shows but fingerprint prompt never appears at login, or login hangs waiting for it
+### H. SDDM shows but fingerprint prompt never appears at login
 
-SDDM **is** wired for fingerprint via `pam_fprintd sufficient` — when you get to the login screen, touch the reader and you're in; or type your password as a fallback.
-
-If the login hangs for more than ~5 seconds with no prompt, fprintd is probably stuck. Three fixes in increasing severity:
-
-1. **Just type your password.** The PAM stack is `pam_fprintd sufficient` then password — the password prompt appears as soon as pam_fprintd gives up or you hit Enter/Escape.
-2. **Restart fprintd** from a TTY: `Ctrl+Alt+F3` → log in → `sudo systemctl restart fprintd` → `Ctrl+Alt+F1` back to SDDM.
-3. **Remove fprintd from SDDM entirely** (if it's persistently broken and you want the old password-only behavior back): from a TTY, `sudo sed -i '/pam_fprintd/d' /etc/pam.d/sddm`. Leaves fingerprint working for `sudo`/`polkit`/`hyprlock`, just strips it from the login screen.
+SDDM login doesn't use fingerprint by default — it's wired for **sudo/polkit/hyprlock** only. Type your password at SDDM. Fingerprint kicks in the first time you `sudo` after login.
 
 ### I. `sudo` fails with "PAM module not found" — you're locked out of root
 
@@ -576,6 +570,42 @@ For AUR packages (VSCode, Edge, pinpam-git), use `yay` with the same flags.
 The 2-in-1 specific bits (Wacom pen, auto-rotation in tablet mode, 3-finger touchpad gestures, tablet-mode keyboard-disable) are **not** configured by `postinstall.sh`. They have enough tuning surface that doing them blind would produce fragile config.
 
 When you're ready (recommend: after living with the base system for a week so you know what actually bothers you), feed **`phase-3.5-hardware-handoff.md`** to a new Claude session. That doc is a brief for wiring the remaining hardware one subsystem at a time.
+
+### Growing Windows into Linux space (if/when C: fills up)
+
+Windows got 160 GB in the initial layout (decisions.md §Q9). If that starts to feel tight later, you can hand some of Linux's 316 GB over to Windows using [phase-6-grow-windows.sh](phase-6-grow-windows.sh).
+
+**Use it when:** Windows C: is running low *and* Linux has breathing room (your btrfs usage is under ~150 GB).
+
+**Don't use it for:** "I want a bit more Linux space" (Linux is the larger partition already; just use it), or small (<10 GB) Windows adjustments (the ceremony isn't worth it).
+
+Procedure:
+
+1. Boot the **Arch live USB** (Ventoy → Arch ISO), not booted Arch. Log in as root.
+2. `mount /dev/sdb3 /mnt/ventoy` (or wherever your Ventoy data partition is — same trick as Phase 2d). Copy the script over:
+   ```bash
+   cp /mnt/ventoy/arch-setup/phase-6-grow-windows.sh /root/
+   chmod +x /root/phase-6-grow-windows.sh
+   ```
+3. Dry-run first to confirm the math:
+   ```bash
+   /root/phase-6-grow-windows.sh --dry-run 50   # give Windows 50 GB
+   ```
+   It prints the feasibility window `[lower, upper]` based on current btrfs usage. If your target falls in range, proceed. If not, the message tells you what to fix (delete files first, or pick a different target).
+4. Real run:
+   ```bash
+   /root/phase-6-grow-windows.sh 50
+   ```
+   Takes minutes per 10 GB of **used** btrfs data (the bottleneck is copying data, not the number you pass). Grab coffee.
+5. When the script prints "DONE", reboot into Windows (pick "Windows Boot Manager" in systemd-boot). First boot prompts for the BitLocker recovery key — same as the initial install, key is in Bitwarden.
+6. In Windows: Disk Management → right-click C: → **Extend Volume** → accept defaults. C: grows into the new free space.
+7. Reboot back into Arch to confirm everything still boots. Filesystem UUID is preserved, so `/etc/fstab` and systemd-boot entries don't need editing.
+
+Why the script is 300 lines instead of 3: you can't just delete the Linux partition and recreate it with a later start. btrfs's superblock lives at offset 64 KiB of the partition start — shifting the start puts the superblock in the wrong place and the filesystem becomes unmountable. The script uses `btrfs device add` + `btrfs device remove` to *physically migrate* the data onto a new partition at the end of the disk, then deletes the original. The freed space lands right next to Windows. Read the header comment in the script if you want the full rationale.
+
+**If the script's feasibility check refuses to run:** your Linux usage is too high (≥ ~half the 316 GB partition). Either free space first, or use GParted Live (bootable from Ventoy) — GParted can move the partition in-place with no size constraint, but it's a GUI operation and slower.
+
+---
 
 ### Re-enabling Secure Boot (when you care)
 
