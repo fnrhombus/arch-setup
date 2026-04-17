@@ -154,8 +154,8 @@ This document is meant to be fed to Claude Code once you're inside Arch Linux. I
 - Windows partition mounted read-only at /mnt/windows for media access
 
 ### Browsers
-- Edge (default) — sync with Windows side
-- Firefox — backup, best Wayland-native experience
+- Edge (default) — sync with Windows side. Installed from AUR (`microsoft-edge-stable-bin`).
+- Firefox — **not installed by default**. Add with `sudo pacman -S firefox` if you want a Wayland-native fallback.
 
 ### Audio
 - PipeWire + WirePlumber

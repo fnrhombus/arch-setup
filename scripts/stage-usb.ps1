@@ -6,6 +6,7 @@
 #   - ventoy/ventoy.json (auto-install plugin config)
 #   - phase-2-arch-install/ + phase-3-arch-postinstall/
 #   - phase-6-grow-windows.sh
+#   - phase-1-windows/winget-import.json (apps autounattend installs at first logon)
 #   - docs/ (planning/rationale — decisions.md, autounattend-oobe-patch.md, wsl-setup-lessons.md)
 #   - runbook/ (read at the laptop — INSTALL-RUNBOOK.md, phase-3-handoff.md,
 #     phase-3.5-hardware-handoff.md, GLOSSARY.md, SURVIVAL.md)
@@ -94,7 +95,7 @@ $rootFiles = @(
 # USB mirrors the repo layout: docs/ (planning/rationale) + runbook/
 # (what the user reads at the laptop). Keeps `runbook/INSTALL-RUNBOOK.md`
 # referenceable by the same relative path inside the repo and on the stick.
-$dirs = @('ventoy', 'phase-2-arch-install', 'phase-3-arch-postinstall', 'docs', 'runbook')
+$dirs = @('ventoy', 'phase-1-windows', 'phase-2-arch-install', 'phase-3-arch-postinstall', 'docs', 'runbook')
 
 foreach ($src in $rootFiles) {
     $leaf = Split-Path -Leaf $src

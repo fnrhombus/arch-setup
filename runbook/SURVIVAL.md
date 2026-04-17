@@ -27,28 +27,32 @@ archlinux login: tom
 Password: <the password you set during phase 2>
 ```
 
-If the password doesn't work, the `tom` account got scrambled. Boot the recovery partition (Netac), `arch-chroot /mnt/samsung-root` (adjust path to match your actual mount), `passwd tom`, reboot.
+If the password doesn't work, the `tom` account got scrambled. Boot the Netac recovery entry (Arch live ISO), then:
+
+```bash
+mount -o subvol=@ /dev/disk/by-label/ArchRoot /mnt
+arch-chroot /mnt
+passwd tom
+exit
+umount -R /mnt
+reboot
+```
 
 ## 3. Get on the network
 
-### Wi-Fi (iwd / iwctl)
+The booted system uses **NetworkManager** (with `iwd` as its Wi-Fi backend). Use `nmtui` from a TTY — it's the text UI that comes with NetworkManager.
 
-The install uses `iwd`, not `NetworkManager` or `wpa_supplicant`. Commands:
+### Wi-Fi
 
 ```bash
-# Interactive shell
-iwctl
-
-# Inside iwctl:
-device list                          # find your adapter (usually wlan0)
-station wlan0 scan
-station wlan0 get-networks           # shows SSIDs
-station wlan0 connect <YourSSID>     # prompts for password
-exit
+nmtui                                # full-screen TUI; pick "Activate a connection"
+# or one-liner:
+nmcli device wifi connect <YourSSID> password <YourPSK>
 ```
 
 Sanity-check:
 ```bash
+nmcli device status                  # devices + which are connected
 ip -brief address                    # should show an IP on wlan0
 ping -c 2 1.1.1.1                    # network works
 ping -c 2 archlinux.org              # DNS works
@@ -56,7 +60,28 @@ ping -c 2 archlinux.org              # DNS works
 
 ### Ethernet (via DisplayLink dock)
 
-Plug the dock in. It "just works" on Linux — the network adapter is a standard USB NIC, no DisplayLink driver needed. Check with `ip -brief address`.
+Plug the dock in. It "just works" — the NIC is a generic USB Ethernet, no DisplayLink driver needed. NetworkManager picks it up automatically. Verify with `ip -brief address`.
+
+### If NetworkManager itself is dead
+
+Only as a last resort — stop NM and drive `iwd` directly:
+```bash
+sudo systemctl stop NetworkManager
+sudo systemctl start iwd
+iwctl                                # see §"Wi-Fi (iwctl fallback)" below
+```
+
+### Wi-Fi (iwctl fallback — only from the live ISO, or after stopping NM)
+
+```bash
+iwctl
+# inside:
+device list
+station wlan0 scan
+station wlan0 get-networks
+station wlan0 connect <YourSSID>
+exit
+```
 
 ## 4. Start Claude
 
@@ -111,8 +136,11 @@ cat ~/.local/share/hyprland/hyprland.log | tail -100
 2. If systemd-boot itself is gone, boot the **Ventoy USB** → Arch live ISO.
 3. From the live environment:
    ```bash
-   mount /dev/disk/by-label/archroot /mnt
-   mount /dev/disk/by-partlabel/EFI /mnt/efi
+   mount -o subvol=@ /dev/disk/by-label/ArchRoot /mnt
+   # Find the EFI partition — Windows diskpart doesn't set a PARTLABEL, so
+   # grep by the GPT EFI type GUID instead:
+   EFI=$(lsblk -rno NAME,PARTTYPE | awk '$2=="c12a7328-f81f-11d2-ba4b-00a0c93ec93b"{print "/dev/"$1; exit}')
+   mount "$EFI" /mnt/efi
    arch-chroot /mnt
    bootctl install                  # reinstalls systemd-boot to the ESP
    ```
@@ -136,8 +164,8 @@ You'll have these even from a naked TTY:
 
 | Tool       | What it does |
 |------------|--------------|
-| `iwctl`    | Wi-Fi control |
-| `nmtui`    | *Not installed* — uses `iwd` only, no NetworkManager |
+| `nmcli` / `nmtui` | NetworkManager CLI + TUI — the primary way to manage Wi-Fi and Ethernet |
+| `iwctl`    | `iwd` client — fallback if NetworkManager is broken (stop NM first) |
 | `journalctl` | Read systemd logs |
 | `systemctl` | Start/stop/restart services (SDDM, NetworkManager-less) |
 | `claude`   | Claude Code |

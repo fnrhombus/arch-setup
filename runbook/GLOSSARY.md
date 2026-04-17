@@ -26,7 +26,7 @@ Organized by category so you can skim. Nothing here is install instructions — 
 - **satty** (Screenshot Annotation Tool) — Post-capture annotation: arrows, boxes, blur, text. You care: `hyprshot | satty` gives you Snipping-Tool-level UX.
 - **wl-clipboard** — `wl-copy` / `wl-paste` command-line clipboard utilities. You care: scripts and Claude Code use these to read/write the clipboard.
 - **cliphist** — Clipboard history daemon. Stores text + image clips, picker via fuzzel.
-- **wlogout** — Graphical logout/shutdown/reboot menu. You care: shows up when you hit the power-key binding.
+- **wlogout** — Graphical logout/shutdown/reboot menu. Not installed by default — end-4/dots-hyprland ships its own power menu; install `wlogout` only if you want a swap-in replacement.
 
 ## Audio
 
@@ -69,11 +69,11 @@ Organized by category so you can skim. Nothing here is install instructions — 
 
 ## Networking
 
-- **iwd** (iNet Wireless Daemon) — Intel's modern Wi-Fi daemon. Replaces `wpa_supplicant`. You care: simpler, faster, handles WPA3.
-- **iwctl** — Interactive CLI for `iwd`. You care: this is how you connect to Wi-Fi from a TTY.
-- **NetworkManager** (nmcli, nmtui) — Full-featured network stack (Wi-Fi + Ethernet + VPN + cellular). We're *not* using it — `iwd` + systemd-networkd is enough and lighter.
-- **systemd-networkd** — systemd's Ethernet/DHCP management.
-- **systemd-resolved** — systemd's DNS resolver/cache.
+- **NetworkManager** (nmcli, nmtui) — Full-featured network stack (Wi-Fi + Ethernet + VPN). You care: this is the primary way you'll manage connections. `nmtui` from a TTY, `nmcli` for scripting; Waybar/GUI applets talk to the same daemon.
+- **iwd** (iNet Wireless Daemon) — Intel's modern Wi-Fi daemon. We use it as NetworkManager's Wi-Fi backend (configured via `wifi.backend=iwd`), not standalone. Handles WPA3, faster than wpa_supplicant.
+- **iwctl** — Interactive CLI for `iwd`. Fallback only — if NetworkManager is broken, stop it (`systemctl stop NetworkManager`), start `iwd`, use `iwctl`. See [SURVIVAL.md](SURVIVAL.md).
+- **wpa_supplicant** — The old Wi-Fi auth daemon `iwd` replaces. Not installed.
+- **systemd-resolved** — systemd's DNS resolver/cache. NetworkManager hands DNS to it.
 
 ## Boot / UEFI / disk
 

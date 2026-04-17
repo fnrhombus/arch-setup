@@ -306,7 +306,10 @@ dd if="$ARCH_ISO" of="$NETAC_RECOVERY" bs=4M status=progress conv=fsync
 # Stage phase-3 script where the user can run it after first login.
 mkdir -p /mnt/home/tom
 cp "$VENTOY_MNT/phase-3-arch-postinstall/postinstall.sh" /mnt/home/tom/postinstall.sh 2>/dev/null || warn "phase-3 script missing — you can copy it later."
-cp -r "$VENTOY_MNT/phase-3-arch-postinstall/dotfiles" /mnt/home/tom/ 2>/dev/null || true
+# p10k.zsh sidecar — postinstall.sh's SCRIPT_DIR lookup expects it next to itself.
+cp "$VENTOY_MNT/phase-3-arch-postinstall/p10k.zsh" /mnt/home/tom/p10k.zsh 2>/dev/null || true
+# Dotfiles (end-4/dots-hyprland) are cloned from GitHub by postinstall.sh at
+# first boot — keeps the USB lean and the dots current. Network required.
 arch-chroot /mnt chown -R tom:tom /home/tom
 
 # ---------- 14. cleanup ----------

@@ -1,0 +1,25 @@
+{
+  "$schema": "https://aka.ms/winget-packages.schema.2.0.json",
+  "CreationDate": "2026-04-17",
+  "Sources": [
+    {
+      "Packages": [
+        { "PackageIdentifier": "Microsoft.PowerShell" },
+        { "PackageIdentifier": "gerardog.gsudo" },
+        { "PackageIdentifier": "7zip.7zip" },
+        { "PackageIdentifier": "Git.Git" },
+        { "PackageIdentifier": "GitHub.cli" },
+        { "PackageIdentifier": "Microsoft.VisualStudioCode" },
+        { "PackageIdentifier": "voidtools.Everything" },
+        { "PackageIdentifier": "Notepad++.Notepad++" }
+      ],
+      "SourceDetails": {
+        "Argument": "https://cdn.winget.microsoft.com/cache",
+        "Identifier": "Microsoft.Winget.Source_8wekyb3d8bbwe",
+        "Name": "winget",
+        "Type": "Microsoft.PreIndexed.Package"
+      }
+    }
+  ],
+  "WinGetVersion": "1.8.1911"
+}

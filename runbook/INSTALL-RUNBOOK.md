@@ -15,6 +15,8 @@ What gets touched:
 - **Samsung 512 GB** → EFI + MSR + Windows 160 GB + Arch btrfs (~316 GB)
 - **Netac 128 GB** → Arch recovery ISO + 16 GB swap + ext4 for `/var/log` + `/var/cache`
 
+**Both drives are required.** `install.sh` size-detects both and aborts if either is missing. If you've repurposed the Netac for something else, swap it back in before starting — the layout is not optional (swap, recovery partition, and the `/var/log`+`/var/cache` ext4 all depend on it per [docs/decisions.md](../docs/decisions.md) §Q9).
+
 Two things to know before starting:
 - **Hostnames are intentionally different**: Windows = `Metis`, Arch = `inspiron`. Your router sees whichever OS is up. This is cosmetic, not a bug (see recovery §D if it bothers you).
 - **First Windows boot after Arch install will prompt for the BitLocker recovery key.** Expected — systemd-boot changes PCR values. Phase 1 step 7 stashes the key in Bitwarden.
@@ -29,6 +31,7 @@ Two things to know before starting:
    - **Secure Boot**: **Disabled** for the install (systemd-boot isn't signed out of the box). `decisions.md` wants Secure Boot ON long-term; that's a separate later step using `sbctl` to enroll your own keys. Don't block on it now — get the install running first, then re-enable with signed kernel/bootloader after Phase 3 stabilizes.
    - **SATA Operation**: AHCI (should already be; RAID/Intel RST will hide disks from Arch)
    - **Fast Boot**: Disabled (stops it skipping the boot menu)
+   - **Fingerprint Reader**: **Enabled** (Dell BIOS hides this under Security → Fingerprint Reader on some firmware revisions). If it's disabled, Linux won't see the sensor at all and Phase 3 fingerprint enrollment will fail with "no devices".
 3. Save & exit. Hammer **F12** at the Dell logo → boot menu → pick the USB (something like "UEFI: SanDisk …" or the WD label).
 
 **If the USB isn't in F12:** go back to BIOS → Boot Sequence → Add Boot Option, or make sure USB Boot is enabled. Secure Boot being on will also hide it.
@@ -143,7 +146,17 @@ It will:
 **If install.sh dies:**
 - **"No 500–600 GB disk detected"** → phase-1 Windows install didn't run. Boot back into Windows first.
 - **"Samsung has <3 partitions"** → same — Windows didn't lay out the disk.
-- **pacstrap fails** → network dropped. Reconnect wifi (`iwctl`), re-run the script; it's **not idempotent**, so first: `umount -R /mnt; swapoff -a; wipefs -a /dev/SAMSUNG_new_partition` and start over. (Recovery path is ugly because it's a fresh install — if you're uncertain, just start from scratch, it's fast.)
+- **pacstrap fails** → network dropped. Reconnect (`iwctl` for Wi-Fi, or replug the dock for ethernet), then re-run. The script is **not idempotent**, so clear the partial state first:
+  ```bash
+  umount -R /mnt
+  swapoff -a
+  # Wipe every partition that install.sh created on Samsung + Netac.
+  # (lsblk shows them; the Samsung btrfs is the biggest partition on the 500–600 GB disk.)
+  lsblk -o NAME,SIZE,TYPE,MOUNTPOINT /dev/sda /dev/sdb 2>/dev/null
+  # For each Arch-owned partition (btrfs on Samsung, swap + ext4 + ISO on Netac), wipefs:
+  # e.g. wipefs -a /dev/sda4 /dev/sdb1 /dev/sdb2 /dev/sdb3
+  ```
+  Then re-run `install.sh`. Recovery is ugly because it's a fresh install — if uncertain, just start over, it's fast.
 - **"Could not find EFI System partition"** → Windows install put the EFI somewhere weird. Use `gdisk -l /dev/sda` to confirm GUID `c12a7328…`.
 - **chroot script fails mid-way** → you can `arch-chroot /mnt` manually and finish the remaining steps from `chroot.sh` by hand.
 
@@ -151,7 +164,12 @@ It will:
 
 ### 2e. First boot into Arch
 
-- systemd-boot menu appears with **Arch Linux** + **Arch Linux (fallback)** + auto-discovered **Windows Boot Manager**. 3-sec timeout; Arch is default.
+- systemd-boot menu appears with:
+  - **Arch Linux** (linux kernel) + **Arch Linux (fallback)**
+  - **Arch Linux LTS** (linux-lts kernel) + **Arch Linux LTS (fallback)** — the safety net if a linux upgrade breaks something
+  - Auto-discovered **Windows Boot Manager**
+
+  3-sec timeout; Arch Linux (the non-LTS) is default.
 - It boots to a black screen, then to **SDDM** (graphical login).
 
 **If the systemd-boot menu doesn't show Windows:** boot into Arch anyway, then as root: `bootctl list` should show Windows. If not: `ls /boot/EFI/Microsoft/Boot/bootmgfw.efi` — missing file means Windows install didn't write it (rare). Fix later; don't block on this.
@@ -171,7 +189,7 @@ Do this before starting Phase 3 — you want the BitLocker key mess handled whil
 1. Reboot. At the systemd-boot menu, pick **Windows Boot Manager**.
 2. BitLocker prompts for the recovery key. Type the 48-digit key from Bitwarden ("Inspiron BitLocker recovery").
 3. Windows boots. Log in as `Tom`. Let it sit for 30 seconds so BitLocker re-seals against the new PCR values.
-4. Shut down (don't just log out — Fast Startup is off, but a clean shutdown is still cleaner). Start → Power → Shut down, or from an **elevated** PowerShell (right-click → Run as administrator) run `shutdown /s /t 0`. A non-elevated `shutdown` call fails silently with "Access is denied" on stock Windows 11 unless the `Tom` account is in the local Administrators group (it is, per autounattend — so a normal PowerShell works too; the elevation path is the belt-and-suspenders option).
+4. Shut down: **Start → Power → Shut down**. (Fast Startup is off, so this is a clean shutdown, not a hybrid-hibernate.)
 5. Power on → systemd-boot → pick **Arch Linux** → back into Arch. No more BitLocker prompts from here.
 
 If the BitLocker key doesn't work: you have the phone photo from Phase 1 step 7 as a last-ditch copy. If even that doesn't work, Windows is gone and you need to reinstall — Arch is unaffected.
@@ -233,7 +251,7 @@ sudo reboot
 
 - SDDM again. Log in as tom.
 - Hyprland comes up with end-4 config: waybar at top, wallpaper, keybindings live.
-- Default terminal: `Super + Return` opens Ghostty (check end-4 keybind cheatsheet — it's `Super+T` in some variants).
+- Default terminal: `Super + Return` opens Ghostty. (If end-4 has re-mapped it, the keybind cheatsheet is bound to `Super + /`.)
 - App launcher: `Super + Space` (fuzzel).
 
 **Escape hatch if NO keybinding opens a terminal** (keybind variant mismatch, Hyprland config didn't install, wayland handshake fail): `Ctrl + Alt + F3` drops to TTY3 where you can log in as `tom` and debug. `Ctrl + Alt + F1` jumps back to the SDDM/Hyprland session. Worst case: from TTY3, `journalctl --user -u hyprland -b` tells you why Hyprland dropped you to a featureless compositor.
@@ -305,12 +323,14 @@ ssh-add -l                     # should list keys once Bitwarden desktop is unlo
    # Copy every repo file that IS on the USB; missing ones silently skip
    # thanks to 2>/dev/null. Falls through to a whole-USB snapshot only if
    # the targeted copy produced no files at all.
-   cp -r /mnt/ventoy/phase-2-arch-install \
+   cp -r /mnt/ventoy/phase-1-windows \
+         /mnt/ventoy/phase-2-arch-install \
          /mnt/ventoy/phase-3-arch-postinstall \
          /mnt/ventoy/runbook \
          /mnt/ventoy/docs \
          /mnt/ventoy/autounattend.xml \
          /mnt/ventoy/CLAUDE.md \
+         /mnt/ventoy/phase-6-grow-windows.sh \
          ~/src/arch-setup@fnrhombus/ 2>/dev/null
    if [[ -z "$(ls -A ~/src/arch-setup@fnrhombus 2>/dev/null)" ]]; then
        warn "Targeted copy got nothing — falling back to a whole-USB snapshot."
@@ -469,6 +489,21 @@ After reboot, `sudo` takes your **password** (TPM-PIN + fingerprint are gone unt
 
 **Prevention:** after `postinstall.sh` finishes, always test sudo from a **second** terminal before closing the one you ran the script in. If sudo fails, you can fix PAM from the still-privileged parent session without rebooting.
 
+**Sibling issue — locked out of SDDM login:** the same kind of break can hit `/etc/pam.d/sddm` (if postinstall added a `pam_fprintd.so` line and fprintd is missing). Symptom: SDDM rejects every password. Recovery is identical to the sudo case — boot the Ventoy USB → Arch live → chroot → restore the file:
+```bash
+mount -o subvol=@ /dev/disk/by-label/ArchRoot /mnt
+arch-chroot /mnt
+cat > /etc/pam.d/sddm <<'EOF'
+#%PAM-1.0
+auth       include      system-login
+account    include      system-login
+password   include      system-login
+session    include      system-login
+EOF
+exit; reboot
+```
+Password login returns; re-wire fingerprint after you've reinstalled fprintd.
+
 ### J. `ssh-add -l` returns "error fetching identities" in every new shell
 
 **Cause:** Bitwarden desktop isn't running, OR Bitwarden's SSH-agent toggle is off, OR the socket moved. `~/.zshrc.d/bitwarden-ssh-agent.zsh` only exports `SSH_AUTH_SOCK` if the socket file exists, so if the socket is gone, `ssh-add` talks to no agent and errors.
@@ -478,6 +513,34 @@ After reboot, `sudo` takes your **password** (TPM-PIN + fingerprint are gone unt
 2. If missing: launch Bitwarden desktop, unlock, Settings → SSH agent → toggle on. Quit and reopen a terminal.
 3. If present but `ssh-add -l` still errors: `SSH_AUTH_SOCK=~/.bitwarden-ssh-agent.sock ssh-add -l` to rule out an env issue.
 4. If the SSH-signing planter at `~/.zshrc.d/arch-ssh-signing.zsh` was never deleted, it will try again on each login — once Bitwarden is back online with at least one "SSH key" vault item, the planter fires and self-deletes.
+
+### K-pre. end-4 dots-hyprland clone failed in postinstall
+
+**Cause:** `postinstall.sh` clones `https://github.com/end-4/dots-hyprland.git` at step 13. If network dropped or GitHub rate-limited you, the clone fails and postinstall prints a retry hint. Everything else in postinstall already succeeded — you just don't have dotfiles yet.
+
+**Fix:**
+```bash
+GIT_TEMPLATE_DIR="" git clone --depth 1 https://github.com/end-4/dots-hyprland.git ~/dotfiles/dots-hyprland
+cd ~/dotfiles/dots-hyprland
+./install.sh                          # interactive; accept defaults
+```
+Re-login (or `Super+Shift+R` to reload Hyprland) once the installer finishes.
+
+### L-nvidia. NVIDIA modules load despite the blacklist (screen tearing, GBM errors)
+
+**Cause:** `/etc/modprobe.d/blacklist-nvidia.conf` is written but the modules are already baked into the initramfs, OR a kernel upgrade pulled them back in.
+
+**Fix:**
+```bash
+# Verify the blacklist file exists and has the expected lines:
+cat /etc/modprobe.d/blacklist-nvidia.conf
+# Expected: blacklist nouveau / blacklist nvidia / blacklist nvidia_drm / etc.
+# Rebuild the initramfs for all kernels so the blacklist takes effect at boot:
+sudo mkinitcpio -P
+# Confirm no NVIDIA modules are loaded after reboot:
+lsmod | grep -iE 'nvidia|nouveau'     # expect empty output
+```
+If modules still load: check `/etc/mkinitcpio.conf` — `MODULES=(btrfs)` should NOT contain `nvidia` or `nouveau`. Check `/etc/modules-load.d/` for any file forcing them.
 
 ### K. "Login incorrect" at SDDM / first TTY — you fat-fingered `tom`'s password during chroot
 

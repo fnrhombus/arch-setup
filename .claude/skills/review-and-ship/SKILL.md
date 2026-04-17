@@ -45,7 +45,7 @@ Only once the loop has converged:
 - Render **every markdown file the user might want to print at the laptop** to a sibling PDF. That means every file in `runbook/` — `INSTALL-RUNBOOK.md`, `phase-3-handoff.md`, `phase-3.5-hardware-handoff.md`, `GLOSSARY.md`, `SURVIVAL.md` — plus any future additions to that directory. Files in `docs/` are dev-machine-only and don't need PDFs.
 - Use `pnpm pdf` (script at `scripts/runbook-pdf.mjs`, uses `marked` + Edge headless). If the script still only handles a single file, extend it to iterate over `runbook/*.md` first — then run it.
 - **Target spec for every PDF: 5.5" × 8.5" pages, 0.5" max margins, 12pt body font.** If any single spec makes it drastically harder for a given file, drop that one — not all three.
-- Commit + push each `runbook/<name>.pdf`. Re-stage the USB — the PDFs belong alongside their markdown sources so the user can view them on the laptop (or on a phone) without depending on a working markdown renderer.
+- **Do NOT commit or push the PDFs.** They are gitignored (`runbook/*.pdf`) — re-rendered from the markdown whenever needed. Re-stage the USB so the PDFs land alongside their markdown sources on the stick (readable on the laptop or a phone without a markdown renderer).
 
 ## What to watch for (non-exhaustive)
 

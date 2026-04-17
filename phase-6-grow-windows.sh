@@ -54,11 +54,20 @@
 #
 # If U > (O - 2M) / 2 (roughly half the partition is used — ~156 GB on
 # this layout), there's no valid S. You have two options:
-#   (a) Delete files from Linux first (`ncdu`, clear ~/.cache, dropdown
-#       snapshots) until U drops below 156 GB, then re-run this script.
-#   (b) Use GParted Live (boot from Ventoy) to do an in-place partition
-#       move. GParted handles the data migration directly; it's slower
-#       but has no size constraint. See recovery §G in INSTALL-RUNBOOK.md.
+#   (a) Delete files from Linux first. Biggest wins in order:
+#       - Prune snapper snapshots: `snapper -c root list` then
+#         `snapper -c root delete <N>` for old numbered snapshots. These
+#         hold COW-pinned data that `du` won't show. Baseline from
+#         postinstall is worth keeping; pre/post-pacman snapshots from
+#         months ago aren't.
+#       - Clear caches: `sudo pacman -Scc` (pacman package cache),
+#         `rm -rf ~/.cache/*`, `yay -Scc` (AUR build cache).
+#       - `ncdu /` interactively to find the rest.
+#       Re-run this script once U drops below 156 GB.
+#   (b) Boot GParted Live from a second USB stick (the Ventoy stick
+#       doesn't ship with GParted Live out of the box — add the ISO to
+#       Ventoy's data partition if you want it). GParted does an in-place
+#       partition move; slower but no size constraint.
 #
 # -----------------------------------------------------------------------
 # What runs
@@ -204,6 +213,10 @@ echo
 echo "This is destructive and takes a long time (minutes per 10 GB of USED data)."
 echo "If it fails mid-migration, recovery requires a working Arch live USB + btrfs knowledge."
 echo "You MUST have a current backup of anything irreplaceable in the Linux partition."
+echo
+echo "Did you prune snapper snapshots? COW-pinned data from old /pre/post snapshots"
+echo "inflates btrfs usage without being visible to 'du'. If U looks surprisingly high,"
+echo "bail now, run 'snapper -c root list', delete old snapshots, and re-run."
 echo
 ask "Proceed? (yes/no)" || { skip "Aborted by user."; exit 0; }
 

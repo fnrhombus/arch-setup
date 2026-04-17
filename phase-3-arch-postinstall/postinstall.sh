@@ -528,6 +528,18 @@ render = true
 HXEOF
 
 # ---------- 13. Hyprland dotfiles (end-4/illogical-impulse) ----------
+# Clone fresh at run time — we get the latest dots, the repo stays lean, and
+# phase 2 doesn't have to carry a snapshot on the USB. GIT_TEMPLATE_DIR="" is
+# the wsl-setup-lessons.md mitigation for stale user-dir template hooks.
+if [[ ! -d "$HOME/dotfiles/dots-hyprland" ]]; then
+    log "Cloning end-4/dots-hyprland..."
+    mkdir -p "$HOME/dotfiles"
+    GIT_TEMPLATE_DIR="" git clone --depth 1 https://github.com/end-4/dots-hyprland.git \
+        "$HOME/dotfiles/dots-hyprland" \
+        || warn "dots-hyprland clone failed — network? Retry manually later: \
+GIT_TEMPLATE_DIR=\"\" git clone --depth 1 https://github.com/end-4/dots-hyprland.git ~/dotfiles/dots-hyprland"
+fi
+
 if [[ -d "$HOME/dotfiles/dots-hyprland" ]]; then
     log "Installing end-4/dots-hyprland..."
     pushd "$HOME/dotfiles/dots-hyprland" >/dev/null
@@ -540,7 +552,9 @@ if [[ -d "$HOME/dotfiles/dots-hyprland" ]]; then
     fi
     popd >/dev/null
 else
-    warn "Dotfiles not staged at ~/dotfiles/dots-hyprland — skipping Hyprland config."
+    warn "Dotfiles not available at ~/dotfiles/dots-hyprland — Hyprland config skipped."
+    warn "  Fix: GIT_TEMPLATE_DIR=\"\" git clone --depth 1 https://github.com/end-4/dots-hyprland.git ~/dotfiles/dots-hyprland"
+    warn "       then re-run this script."
 fi
 
 # ---------- 14. Ghostty Catppuccin ----------

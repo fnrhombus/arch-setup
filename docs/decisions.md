@@ -163,3 +163,7 @@
 - Full-featured GUI, connection manager, Wayland-native
 - For accessing Windows 10 machine
 - **Not installed by default** (deferred to phase-3.5 — no RDP target to validate against during a fresh install). Add with `sudo pacman -S remmina freerdp` when needed.
+
+#### P) Installer password handoff: pre-hashed via mode-600 file
+- `phase-2-arch-install/install.sh` reads the root + `tom` passwords once at the top of the run, hashes them immediately with `openssl passwd -6` (SHA-512), and hands the hashes to `chroot.sh` via a mode-600 file under `/mnt/tmp/`. The plaintext values never touch disk.
+- **Caveat**: while the installer is still running, the `openssl passwd` invocation does briefly appear in `ps` (as the process argument) on the live ISO. The live environment is single-user and ephemeral, so this is acceptable — but don't run the installer on a shared/networked machine. After chroot finishes, the hash file is deleted and only the hashed values remain in `/etc/shadow`.

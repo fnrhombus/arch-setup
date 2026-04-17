@@ -1,28 +1,24 @@
 // scripts/runbook-pdf.mjs
 //
-// Renders INSTALL-RUNBOOK.md to a 5.5" x 8.5" PDF with 0.5" margins
-// and a 12pt body font. Uses `marked` for MD→HTML and Edge headless
-// (--print-to-pdf) so there's no Puppeteer install.
+// Renders every runbook/*.md to a 5.5" x 8.5" PDF with 0.5" margins and a
+// 12pt body font. Uses `marked` for MD→HTML and Edge headless (--print-to-pdf)
+// so there's no Puppeteer install. PDFs land next to their markdown sources
+// as runbook/<name>.pdf (gitignored).
 //
-// Run once: `pnpm dlx marked@latest --version >/dev/null` to warm cache, then
-// `node scripts/runbook-pdf.mjs`. Or invoke via `pnpm pdf` if wired up.
+// Run: `node scripts/runbook-pdf.mjs` or `pnpm pdf`.
 
-import { readFileSync, writeFileSync, mkdtempSync, rmSync } from 'node:fs';
+import { readFileSync, writeFileSync, mkdtempSync, rmSync, readdirSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join, dirname, resolve } from 'node:path';
+import { join, dirname, resolve, basename, extname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { spawnSync } from 'node:child_process';
 import { marked } from 'marked';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const repoRoot = resolve(__dirname, '..');
-
-const mdPath = join(repoRoot, 'runbook', 'INSTALL-RUNBOOK.md');
-const pdfPath = join(repoRoot, 'runbook', 'INSTALL-RUNBOOK.pdf');
-const md = readFileSync(mdPath, 'utf8');
+const runbookDir = join(repoRoot, 'runbook');
 
 marked.setOptions({ gfm: true, breaks: false, headerIds: false, mangle: false });
-const body = marked.parse(md);
 
 const css = `
 @page {
@@ -83,11 +79,46 @@ img { max-width: 100%; }
 strong { font-weight: 600; }
 `;
 
-const html = `<!DOCTYPE html>
+// Locate Edge: honor EDGE env var first, then fall back to common install paths.
+// Any of these can be overridden without editing the script.
+function locateEdge() {
+    if (process.env.EDGE && existsSync(process.env.EDGE)) return process.env.EDGE;
+    const candidates = [
+        'C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe',
+        'C:\\Program Files\\Microsoft\\Edge\\Application\\msedge.exe',
+        `${process.env.LOCALAPPDATA ?? ''}\\Microsoft\\Edge\\Application\\msedge.exe`,
+    ];
+    return candidates.find(p => p && existsSync(p));
+}
+
+const edge = locateEdge();
+if (!edge) {
+    console.error('Microsoft Edge not found. Set EDGE=<path-to-msedge.exe> or install Edge.');
+    process.exit(1);
+}
+
+const mdFiles = readdirSync(runbookDir)
+    .filter(f => f.toLowerCase().endsWith('.md'))
+    .sort();
+
+if (mdFiles.length === 0) {
+    console.error(`No .md files found in ${runbookDir}`);
+    process.exit(1);
+}
+
+const tmp = mkdtempSync(join(tmpdir(), 'runbook-pdf-'));
+let failures = 0;
+
+for (const file of mdFiles) {
+    const mdPath = join(runbookDir, file);
+    const pdfPath = join(runbookDir, `${basename(file, extname(file))}.pdf`);
+    const md = readFileSync(mdPath, 'utf8');
+    const body = marked.parse(md);
+    const html = `<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<title>INSTALL-RUNBOOK</title>
+<title>${basename(file, extname(file))}</title>
 <style>${css}</style>
 </head>
 <body>
@@ -95,26 +126,30 @@ ${body}
 </body>
 </html>
 `;
+    const htmlPath = join(tmp, `${basename(file, extname(file))}.html`);
+    writeFileSync(htmlPath, html, 'utf8');
 
-const tmp = mkdtempSync(join(tmpdir(), 'runbook-pdf-'));
-const htmlPath = join(tmp, 'runbook.html');
-writeFileSync(htmlPath, html, 'utf8');
+    const args = [
+        '--headless=new',
+        '--disable-gpu',
+        '--no-pdf-header-footer',
+        `--print-to-pdf=${pdfPath}`,
+        `file:///${htmlPath.replace(/\\/g, '/')}`,
+    ];
 
-// Launch Edge headless; --print-to-pdf honors @page size/margins from CSS.
-const edge = 'C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe';
-const args = [
-    '--headless=new',
-    '--disable-gpu',
-    '--no-pdf-header-footer',
-    `--print-to-pdf=${pdfPath}`,
-    `file:///${htmlPath.replace(/\\/g, '/')}`,
-];
-
-const res = spawnSync(edge, args, { stdio: 'inherit' });
-if (res.status !== 0) {
-    console.error(`Edge headless exited with status ${res.status}`);
-    process.exit(res.status ?? 1);
+    const res = spawnSync(edge, args, { stdio: 'inherit' });
+    if (res.status !== 0) {
+        console.error(`  FAIL ${file} (Edge exit ${res.status})`);
+        failures++;
+        continue;
+    }
+    console.log(`  wrote ${pdfPath}`);
 }
 
 rmSync(tmp, { recursive: true, force: true });
-console.log(`wrote ${pdfPath}`);
+
+if (failures > 0) {
+    console.error(`${failures} file(s) failed.`);
+    process.exit(1);
+}
+console.log(`${mdFiles.length} PDF(s) rendered.`);
