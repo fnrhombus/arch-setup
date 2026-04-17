@@ -8,12 +8,16 @@
     "restore": "pwsh -NoProfile -ExecutionPolicy Bypass -File scripts/fetch-assets.ps1",
     "restore:force": "pwsh -NoProfile -ExecutionPolicy Bypass -File scripts/fetch-assets.ps1 -Force",
     "stage": "pwsh -NoProfile -ExecutionPolicy Bypass -File scripts/stage-usb.ps1",
-    "stage:force": "pwsh -NoProfile -ExecutionPolicy Bypass -File scripts/stage-usb.ps1 -Force"
+    "stage:force": "pwsh -NoProfile -ExecutionPolicy Bypass -File scripts/stage-usb.ps1 -Force",
+    "pdf": "node scripts/runbook-pdf.mjs"
   },
   "repository": {
     "type": "git",
     "url": "git@github.com:fnrhombus/arch-setup.git"
   },
   "author": "fnrhombus",
-  "license": "MIT"
+  "license": "MIT",
+  "devDependencies": {
+    "marked": "^18.0.1"
+  }
 }

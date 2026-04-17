@@ -19,3 +19,6 @@
 
 # Temp working files
 .tmp-*
+
+# Edge headless crash/debug logs from `pnpm pdf`
+/debug.log
