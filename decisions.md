@@ -3,12 +3,12 @@
 ## System
 - **Laptop**: Dell Inspiron 7786 (17" 2-in-1 convertible)
 - **CPU**: Intel i7-8565U (4c/8t, Whiskey Lake)
-- **RAM**: 16GB DDR4 2667MHz
+- **RAM**: 16GB DDR4-2400 (Dell spec; i7-8565U's official DDR4 ceiling is 2400 anyway)
 - **GPU**: NVIDIA GeForce MX250 (2GB) + Intel UHD 620 (Optimus)
 - **Target Drive**: Samsung SSD 840 PRO 512GB (currently D: + V:)
 - **WiFi**: Dell Wireless 1801 (Qualcomm Atheros) + BT 4.0
 - **Display**: Integrated touch + external Vizio via USB DisplayLink dock
-- **Boot**: UEFI, Secure Boot ON, GPT, SATA in RAID mode
+- **Boot**: UEFI, GPT. *Current BIOS state*: Secure Boot ON, SATA in RAID mode. *Before phase 1 runs*: flip SATA → **AHCI** (RAID hides the NVMe from every Linux installer + the Windows setup USB), disable **Secure Boot** (systemd-boot + unsigned initramfs = easier path; can re-enable later with `sbctl` signing if wanted).
 - **Peripherals**: Touchscreen, touchpad, fingerprint reader, active pen
 - **Battery**: NONE — the internal battery is dead / removed. Laptop is always on AC power, lives stashed under a desk. Downstream consequences:
   - Lid-close "suspend on battery" branch in `logind.conf` is dead code (systemd-logind never sees battery state). Harmless; left in for portability if a battery ever returns.
@@ -57,10 +57,10 @@
 - DisplayLink video issues are display-only; hub/ethernet work natively on Linux
 
 ### Q5: NVIDIA
-- **Intel UHD 620 only** — blacklist NVIDIA modules, disable MX250
-- MX250 requires nvidia-470xx driver which lacks GBM (no Wayland support at all)
-- HDMI port is wired to Intel iGPU — external monitor works without NVIDIA
-- Saves battery, eliminates driver maintenance
+- **Intel UHD 620 only** — blacklist NVIDIA + nouveau modules, effectively disabling the MX250.
+- **Why not use the MX250?** It only works with the legacy `nvidia-470xx` driver branch. That branch never gained GBM support, so no Wayland compositor (Hyprland included) can run on it; the newer `nvidia` branch dropped MX250 support entirely. Choosing Wayland ≡ choosing Intel-only.
+- **External monitor still works**: the laptop's HDMI port is wired to the Intel iGPU, not the NVIDIA chip — no Optimus render-bridge needed.
+- **Side benefits**: longer runtime (the MX250 idles at ~0.5 W but its driver keeps the chip awake), no DKMS / signed-module churn on kernel upgrades.
 
 ### Q6: Editor & IDE
 - **VSCode** (`visual-studio-code-bin` from AUR) — primary IDE, familiar, productive day one
@@ -70,7 +70,7 @@
 ### Q7: Terminal Multiplexer
 - **tmux** — required for Claude Code worktree support (Zellij not yet supported)
 - Worktree workflow: one session per worktree, fuzzy-switch via sesh/fzf
-- Plugins: tpm (plugin manager), sesh (session manager), tmux-worktree
+- Plugins (managed by tpm): tmux-sensible, catppuccin/tmux. Session switching lives in `sesh` (installed via pacman), not a plugin. Worktree-per-session is a workflow, not a plugin — one sesh entry per worktree.
 
 ### Q8: Shell
 - **zsh** with zgenom plugin manager (same setup as fnwsl, adapted for Arch)
@@ -98,19 +98,18 @@
 - Replaces need for live USB after initial install
 
 - **btrfs subvolumes**: @, @home, @snapshots
-- **Mount options**: compress=zstd,noatime
-- /var/log and /var/cache on Netac — keeps them off btrfs snapshots and off NVMe
-- Windows partition mounted read-only at /mnt/windows for media access
-- Resize strategy: shrink Linux left → grow Windows right (no swap in the way)
-- Disable Windows Fast Startup + hibernation for clean dual-boot
-- Switch SATA from RAID to AHCI before install
+- **Mount options**: `noatime,compress=zstd:3,space_cache=v2,ssd` (level-3 zstd is the Arch-wiki default — good ratio, negligible CPU cost; `space_cache=v2` + `ssd` are the modern defaults for SATA SSDs).
+- /var/log and /var/cache on Netac — keeps them off btrfs snapshots and off the main SSD's endurance budget.
+- Windows partition mounted read-only at `/mnt/windows` for media access (read-only avoids the NTFS-fuse write-corruption risk).
+- **Resize strategy (Linux → Windows)**: `phase-6-grow-windows.sh` adds a new btrfs device at the tail of the Samsung, runs `btrfs device add`+`remove` to migrate data, then deletes the original partition — free space ends up **directly adjacent to Windows** so Disk Management's Extend Volume works. Swap lives on the *Netac*, so nothing sits between Windows and the new free space.
+- Disable Windows Fast Startup + hibernation for clean dual-boot (baked into `autounattend.xml` via `Specialize.ps1`).
 
 ### Q10: Other Needs
 
 #### A) Bootloader: systemd-boot
 - Simplest, fastest, already part of systemd
-- Arch recovery ISO on Netac partition (bootable via systemd-boot entry)
-- USB still needed for initial install only
+- Arch recovery ISO written to a dedicated 1.5 GB partition on the Netac; systemd-boot entry points at it, so it boots straight from the menu without hunting for a USB stick.
+- USB is only needed for the *initial* Windows + Arch install. All later rescue work (including `phase-6-grow-windows.sh`, which must run from a live environment with the btrfs unmounted) can boot the recovery entry instead.
 
 #### B) AUR helper: yay
 - Less strict about PKGBUILD review prompts, better fit for user who won't read them
@@ -130,8 +129,8 @@
 - Also used as the picker for clipboard history (cliphist)
 - **Upgrade path**: rofi-wayland if you want scripting, custom modes (calculator, emoji, SSH picker, window switcher)
 
-#### G) Screenshots: grimblast + satty
-- grimblast: capture region/window/screen to file or clipboard
+#### G) Screenshots: hyprshot + satty
+- hyprshot: Hyprland-native region/window/screen capture (same role grimblast plays on sway — in `extra` repo, no AUR build)
 - satty: annotate (arrows, boxes, blur, text) after capture
 
 #### H) Clipboard: wl-clipboard + cliphist
@@ -158,8 +157,9 @@
 
 #### N) Browser: Edge (default) + Firefox
 - Edge (`microsoft-edge-stable-bin` AUR) as default for sync continuity with Windows
-- Firefox installed as backup / best native Wayland experience
+- Firefox **not installed by default** — Edge covers the daily driver need; add with `sudo pacman -S firefox` when a Wayland-native backup is useful.
 
 #### O) RDP client: Remmina
 - Full-featured GUI, connection manager, Wayland-native
 - For accessing Windows 10 machine
+- **Not installed by default** (deferred to phase-3.5 — no RDP target to validate against during a fresh install). Add with `sudo pacman -S remmina freerdp` when needed.

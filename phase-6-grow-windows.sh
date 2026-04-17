@@ -140,6 +140,7 @@ done < <(lsblk -bnd -o NAME,SIZE)
 log "Locating ArchRoot partition by PARTLABEL..."
 ARCH_DEV=""
 ARCH_PARTNUM=""
+# -l (list, no tree) keeps NAME free of tree-drawing glyphs like "└─sda4".
 while read -r name partlabel; do
     if [[ "$partlabel" == "ArchRoot" ]]; then
         ARCH_DEV="/dev/$name"
@@ -147,7 +148,7 @@ while read -r name partlabel; do
         ok "ArchRoot: $ARCH_DEV (partition #$ARCH_PARTNUM)"
         break
     fi
-done < <(lsblk -n -o NAME,PARTLABEL "$SAMSUNG")
+done < <(lsblk -ln -o NAME,PARTLABEL "$SAMSUNG")
 [[ -n "$ARCH_DEV" ]] || fail "No partition with PARTLABEL=ArchRoot on $SAMSUNG."
 
 # ---------- check it's really unmounted ----------
@@ -227,7 +228,7 @@ sgdisk -n "${ARCH_PARTNUM}:${OLD_START}:+${S}G" \
        -t "${ARCH_PARTNUM}:8300" \
        -c "${ARCH_PARTNUM}:ArchRoot" "$SAMSUNG"
 partprobe "$SAMSUNG"
-sleep 1
+udevadm settle
 
 # ---------- step 3: create new partition in the freed tail ----------
 log "Step 3/6: creating new partition in freed space at end of disk..."
@@ -235,17 +236,67 @@ log "Step 3/6: creating new partition in freed space at end of disk..."
 NEW_PARTNUM=$(sgdisk -n 0:0:0 -t 0:8300 -c 0:ArchRootNew "$SAMSUNG" \
               | awk '/created/ {print $NF}' | tr -d ',.')
 partprobe "$SAMSUNG"
-sleep 1
-# Fallback lookup if sgdisk didn't tell us the number
+udevadm settle
+# Fallback lookup if sgdisk didn't tell us the number. -l is essential —
+# without it NAME includes tree glyphs and the trailing sed below gives
+# the wrong answer (or nothing at all).
 if ! [[ "$NEW_PARTNUM" =~ ^[0-9]+$ ]]; then
-    NEW_PARTNUM=$(lsblk -n -o NAME,PARTLABEL "$SAMSUNG" | awk '$2 == "ArchRootNew" {print $1; exit}' | sed 's/^.*[^0-9]//')
+    NEW_PARTNUM=$(lsblk -ln -o NAME,PARTLABEL "$SAMSUNG" | awk '$2 == "ArchRootNew" {print $1; exit}' | sed 's/^.*[^0-9]//')
 fi
 [[ "$NEW_PARTNUM" =~ ^[0-9]+$ ]] || fail "Could not determine new partition number."
-NEW_DEV=$(lsblk -n -o NAME,PARTLABEL "$SAMSUNG" | awk '$2 == "ArchRootNew" {print "/dev/"$1; exit}')
+NEW_DEV=$(lsblk -ln -o NAME,PARTLABEL "$SAMSUNG" | awk '$2 == "ArchRootNew" {print "/dev/"$1; exit}')
 [[ -n "$NEW_DEV" ]] || fail "Could not find new partition device node."
 ok "New partition: $NEW_DEV (#$NEW_PARTNUM)"
 
 # ---------- step 4: btrfs add + remove (the long step) ----------
+# Wrap the pool-edit steps in a trap: mid-migration failure leaves the
+# pool in a recoverable-but-confusing state (both devices present, data
+# partially copied). Printing explicit recovery instructions beats making
+# the user figure it out from a bare "btrfs: error, aborting" line.
+on_btrfs_fail() {
+    local rc=$?
+    (( rc == 0 )) && return
+    local bar
+    bar=$(printf '\033[1;31m%s\033[0m\n' '============================================================')
+    cat >&2 <<RECOVERY
+
+$bar
+  btrfs device migration failed (exit $rc).
+  Pool state may be partially-migrated. Do NOT touch Windows yet —
+  Linux itself should still boot (filesystem UUID is preserved).
+
+  Inspect first:
+      btrfs filesystem show /mnt/grow   # or /, if you've rebooted
+      btrfs device usage   /mnt/grow
+
+  Likely recoveries (pick the one that matches what 'show' reports):
+
+    A) Migration aborted mid-copy — retry it:
+         mount $ARCH_DEV /mnt/grow   # if not already mounted
+         btrfs device remove $ARCH_DEV /mnt/grow
+
+    B) device add succeeded but remove never ran — you're safe to retry
+       as in (A), or roll back:
+         btrfs device remove $NEW_DEV /mnt/grow
+         umount /mnt/grow
+         sgdisk -d $NEW_PARTNUM $SAMSUNG
+         partprobe $SAMSUNG && udevadm settle
+       Re-run this script after rollback.
+
+    C) Both devices healthy, but remove is returning ENOSPC — the new
+       partition is too small. Grow it (sgdisk -d $NEW_PARTNUM +
+       sgdisk -n "${NEW_PARTNUM}:0:0") then 'btrfs filesystem resize max
+       /mnt/grow' and retry 'btrfs device remove'.
+
+  If all three fail, stop. Open an issue with the output of
+  'btrfs filesystem show' and 'sgdisk -p $SAMSUNG'. Do not run
+  sgdisk -d against the original partition while data still lives
+  on it — that is the one unrecoverable move.
+$bar
+RECOVERY
+}
+trap on_btrfs_fail EXIT
+
 log "Step 4/6: adding $NEW_DEV to btrfs pool..."
 mount "$ARCH_DEV" /mnt/grow
 btrfs device add -f "$NEW_DEV" /mnt/grow
@@ -256,17 +307,21 @@ ok "Migration complete."
 
 umount /mnt/grow
 
+# Migration survived — disarm the recovery trap so later sgdisk work
+# doesn't trigger the btrfs-flavored banner on some unrelated failure.
+trap - EXIT
+
 # ---------- step 5: delete the now-empty original partition ----------
 log "Step 6/6: deleting empty original partition #$ARCH_PARTNUM..."
 sgdisk -d "$ARCH_PARTNUM" "$SAMSUNG"
 partprobe "$SAMSUNG"
-sleep 1
+udevadm settle
 
 # ---------- step 6: rename new partition to ArchRoot ----------
 log "Renaming $NEW_DEV PARTLABEL to ArchRoot..."
 sgdisk -c "${NEW_PARTNUM}:ArchRoot" "$SAMSUNG"
 partprobe "$SAMSUNG"
-sleep 1
+udevadm settle
 
 # ---------- summary ----------
 echo

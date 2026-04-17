@@ -13,6 +13,16 @@ set -euo pipefail
 log()  { printf '\033[1;32m[chroot]\033[0m %s\n' "$*"; }
 die()  { printf '\033[1;31m[chroot ✗]\033[0m %s\n' "$*" >&2; exit 1; }
 
+# ---------- password hashes from install.sh ----------
+# install.sh prompted the user for root+tom passwords up-front and wrote
+# SHA-512 crypt hashes to /root/.pw (line 1 = root, line 2 = tom). Apply
+# via `chpasswd -e` (-e = encrypted, consumes pre-hashed input). Shred
+# the file on exit so no hash lingers on the installed filesystem.
+[[ -s /root/.pw ]] || die "/root/.pw missing — install.sh should have pre-hashed both passwords."
+{ read -r ROOT_PW_HASH; read -r TOM_PW_HASH; } < /root/.pw
+[[ -n "$ROOT_PW_HASH" && -n "$TOM_PW_HASH" ]] || die "/root/.pw is missing one or both hashes."
+trap 'shred -u /root/.pw 2>/dev/null || rm -f /root/.pw' EXIT
+
 # ---------- timezone + clock ----------
 log "Timezone → America/New_York (adjust in /etc/localtime if wrong)..."
 ln -sf /usr/share/zoneinfo/America/New_York /etc/localtime
@@ -53,14 +63,14 @@ cat > /etc/hosts <<EOF
 EOF
 
 # ---------- root password ----------
-log "Set root password:"
-until passwd; do :; done
+log "Applying root password (pre-hashed by install.sh)..."
+echo "root:$ROOT_PW_HASH" | chpasswd -e
 
 # ---------- user tom ----------
 log "Creating user tom..."
 useradd -m -G wheel,video,audio,input,storage -s /bin/zsh tom
-log "Set password for tom:"
-until passwd tom; do :; done
+log "Applying tom password (pre-hashed by install.sh)..."
+echo "tom:$TOM_PW_HASH" | chpasswd -e
 sed -i 's/^# %wheel ALL=(ALL:ALL) ALL/%wheel ALL=(ALL:ALL) ALL/' /etc/sudoers
 
 # ---------- NVIDIA blacklist (decisions.md §Q5) ----------

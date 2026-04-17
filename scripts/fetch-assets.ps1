@@ -117,3 +117,20 @@ ISO, so this script cannot fetch it. Download it yourself and place
 }
 
 Write-Host "[ok] asset sync complete."
+
+# ---------- Stage onto Ventoy USB (if plugged in) ----------
+# Chain into stage-usb.ps1: copy all ISOs + scripts + docs to the Ventoy
+# data partition. The stage script soft-exits (code 2) when no Ventoy USB
+# is found, so `pnpm i` never fails just because the stick isn't plugged in.
+$stageScript = Join-Path $PSScriptRoot 'stage-usb.ps1'
+if (Test-Path $stageScript) {
+    Write-Host ""
+    Write-Host "[info] running stage-usb.ps1 (copies artifacts to Ventoy USB if present)..."
+    & pwsh -NoProfile -ExecutionPolicy Bypass -File $stageScript
+    $stageExit = $LASTEXITCODE
+    if ($stageExit -eq 2) {
+        Write-Host "[info] no Ventoy USB detected — skipped USB staging. Run `pnpm stage` later." -ForegroundColor Cyan
+    } elseif ($stageExit -ne 0) {
+        throw "stage-usb.ps1 failed with exit $stageExit"
+    }
+}

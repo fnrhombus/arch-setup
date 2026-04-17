@@ -14,5 +14,8 @@
 # npm/pnpm
 /node_modules/
 
+# Editor/IDE — machine-specific paths leak in here (mise shims, etc.)
+/.vscode/
+
 # Temp working files
 .tmp-*

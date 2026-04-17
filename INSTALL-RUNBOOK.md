@@ -5,7 +5,7 @@ Print this. Keep it next to the laptop.
 Total wall-clock: ~90 min active, ~2 h with waits.
 
 You'll need:
-- Ventoy USB (already built on `E:`)
+- Ventoy USB (already built + staged via `pnpm i` on the dev machine — whatever drive letter Windows mounts it at, e.g. `E:` or `F:`)
 - Wi-Fi SSID + password
 - The Bitwarden master password (for later — Bitwarden desktop in Arch)
 - A second device (phone) to read this if you can't print
@@ -45,6 +45,12 @@ Two things to know before starting:
    - Reboots itself **twice** — leave the USB in both times; Ventoy will re-show the menu. **Don't press anything** — it'll auto-select the Win11 ISO via the `autosel` timer. If the timer expires and you're stuck, just re-pick Win11.
    - Finally lands on the `Tom` desktop. No prompts, no OOBE.
 
+**If you see** `No unique 500-600 GB disk found - refusing to proceed`:
+The inline PowerShell safety check in `autounattend.xml` aborted because either zero or multiple disks fell in the 500–600 GB window. Likely causes and fixes, in order of likelihood:
+- **An external drive is plugged in that's also 500–600 GB** → unplug it, press any key to dismiss the pause, power-cycle (hold power), retry F12 → USB.
+- **The Samsung is missing from BIOS** → reboot into BIOS (F2). Confirm the Samsung SSD 840 PRO appears under Storage. If it doesn't: reseat the drive, or the SATA controller is still in RAID mode (flip to AHCI — Phase 0 step 2).
+- **The Samsung's size is outside the window** → If you're running on different hardware than decisions.md §Q9 describes, the hardcoded 500–600 GB bounds are wrong. Fix: edit `autounattend.xml` — search for `500GB` and `600GB`, widen the window, re-stage the USB with `pnpm stage`.
+
 4. **Wi-Fi should already be connected** — `autounattend.xml` embeds three profiles (`ATTgs5BwGZ`, `rhombus`, `rhombus_legacy`), all WPA2PSK, `connectionMode=auto`. Windows adds all three and connects to whichever is in range. Confirm via the taskbar network icon. If none are visible (different location), click the icon → pick SSID → enter password. The winget-import scheduled task waits up to 20 min for `cdn.winget.microsoft.com` and proceeds as soon as you're online.
 
 5. Watch for winget to run:
@@ -65,7 +71,7 @@ Two things to know before starting:
    - Open it. Copy the 48-digit key.
    - Paste into Bitwarden as a **Secure Note** titled "Inspiron BitLocker recovery". Save.
    - Also take a phone photo of it as a belt-and-suspenders backup.
-   - Once you've confirmed the key is safely in Bitwarden, delete both files: `Remove-Item C:\Windows\Setup\Scripts\BitLocker-Recovery.txt, E:\bitlocker-recovery.txt -Force`
+   - Once you've confirmed the key is safely in Bitwarden, delete both files: `Remove-Item C:\Windows\Setup\Scripts\BitLocker-Recovery.txt, <USB_LETTER>:\bitlocker-recovery.txt -Force` (substitute whatever drive letter Windows assigned the Ventoy stick — check **This PC**)
    - **Do not skip this.** You'll need this key in Phase 2e — the first Windows boot after Arch install will almost certainly prompt for it.
 
 8. Once winget is done (or even while it's running — Arch install doesn't care about Windows state), shut down. Leave the USB in.
@@ -77,7 +83,7 @@ Two things to know before starting:
 ### 2a. Boot the Arch live environment
 
 1. Power on, F12, pick USB again.
-2. Ventoy menu → pick **`archlinux-2026.04.01-x86_64.iso`** → "Boot in normal mode".
+2. Ventoy menu → pick **`archlinux-x86_64.iso`** → "Boot in normal mode". (The filename is always the undated symlink — `fetch-assets.ps1` mirrors that, not a dated release.)
 3. At the Arch ISO menu, pick **"Arch Linux install medium (x86_64, UEFI)"**. You land at a root shell.
 
 ### 2b. Network
@@ -127,9 +133,9 @@ bash /mnt/ventoy/phase-2-arch-install/install.sh
 It will:
 1. Size-detect the Samsung (500–600 GB) and Netac (100–150 GB). **Aborts loudly if either is missing** — don't blindly retry, fix it.
 2. Show the plan and ask `[yes/NO]`. Type **`yes`** exactly.
-3. Partition, mkfs, pacstrap (~15 min — biggest wait).
-4. Enter chroot, prompt for **root password** (set something), **tom's password** (this is your daily login — make it strong; you'll bypass it with TPM-PIN and fingerprint later).
-5. Install systemd-boot, wire services, write PAM for fingerprint-sudo + gnome-keyring.
+3. **Prompt once up-front for root password + tom's password** (both confirmed twice; SHA-512-hashed via `openssl passwd -6` before pacstrap starts). Tom's is your daily login — make it strong; you'll bypass it with TPM-PIN and fingerprint later. Nothing else will ask you for input until it's done.
+4. Partition, mkfs, pacstrap (~15 min — biggest wait, fully unattended).
+5. Enter chroot (passwords handed in via a mode-600 file), install systemd-boot, wire services, write PAM for fingerprint-sudo + gnome-keyring.
 6. `dd` the Arch ISO onto the Netac recovery partition (~1 min).
 7. Copy `postinstall.sh` + dotfiles into `/home/tom/`.
 8. Unmount and print "Done."
@@ -506,202 +512,6 @@ If any `yay -S` call in `postinstall.sh` fails with "package not found", the AUR
 - `bitwarden-cli` (stable)
 - `pinpam-git` (could be `pinpam` if it ever reaches stable)
 - `catppuccin-sddm-theme-mocha` (rename-prone)
-- `hyprshot` (could be replaced by `grimblast-git`)
+- `hyprshot` (check `hyprshot-git` from AUR if the stable name disappears)
 
 Re-run `postinstall.sh` after fixing — it's idempotent.
-
----
-
-## Things you should know (after the install is up)
-
-### Kernel fallback — if the laptop won't boot after a `pacman -Syu`
-
-The install ships **two** kernels: `linux` (current mainline, the default) and `linux-lts` (long-term support, frozen-ish). If a Linux update one day panics on boot or regresses a driver:
-
-1. Reboot. At the systemd-boot menu (3-second timeout), press any arrow key to pause it.
-2. Use ↓ to pick **Arch Linux (LTS)**. Press Enter.
-3. You boot into the LTS kernel with everything else unchanged. Fix the mainline breakage from a working system (usually `sudo pacman -Syu` again a day later after upstream fixes it, or wait for the next kernel point release).
-
-This is your "Windows won't start, boot Safe Mode" equivalent. Never run an update blind into a meeting you can't be late for.
-
-### Rolling back a bad update — `snapper`
-
-`postinstall.sh` takes a baseline snapshot of `/`. If a future `pacman -Syu` bricks something non-kernel (e.g., a display driver breaks, an app refuses to launch):
-
-```bash
-snapper -c root list                 # shows snapshots with IDs
-sudo snapper -c root undochange N..0 # rolls back changes from snapshot N (the bricked state) to snapshot 0 (baseline)
-# OR, for a full rollback to the snapshot state:
-sudo snapper -c root rollback N
-```
-
-Snapshots are cheap (copy-on-write) — hundreds can coexist.
-
-### pacman cheat sheet
-
-- `sudo pacman -Syu` — update everything (run weekly-ish)
-- `pacman -Ss KEYWORD` — search for a package
-- `sudo pacman -S PKG` — install
-- `sudo pacman -Rns PKG` — remove (and its unused deps + configs)
-- `pacman -Qi PKG` — show installed package info
-- `pacman -Qo /path/to/file` — which package owns this file
-- `sudo pacman -Fy && pacman -F COMMAND` — which package provides a command you don't have yet
-
-For AUR packages (VSCode, Edge, pinpam-git), use `yay` with the same flags.
-
-### Where logs live — `journalctl`
-
-- `journalctl -b` — every log from this boot
-- `journalctl -b -p err` — only errors from this boot
-- `journalctl -u SERVICE` — logs for one service (e.g., `sddm`, `NetworkManager`)
-- `journalctl --user -u hyprland` — Hyprland's logs (user-scope service)
-
-`journalctl.conf` is capped at 200MB (configured in `chroot.sh`), so logs self-trim.
-
-### Services — `systemctl`
-
-- `systemctl status SERVICE` — is it running, last 10 log lines
-- `sudo systemctl start/stop/restart SERVICE`
-- `sudo systemctl enable/disable SERVICE` — auto-start at boot or not
-- `systemctl list-unit-files --state=enabled` — what starts automatically
-
-### Coming later — hardware that this install didn't wire yet
-
-The 2-in-1 specific bits (Wacom pen, auto-rotation in tablet mode, 3-finger touchpad gestures, tablet-mode keyboard-disable) are **not** configured by `postinstall.sh`. They have enough tuning surface that doing them blind would produce fragile config.
-
-When you're ready (recommend: after living with the base system for a week so you know what actually bothers you), feed **`phase-3.5-hardware-handoff.md`** to a new Claude session. That doc is a brief for wiring the remaining hardware one subsystem at a time.
-
-### Growing Windows into Linux space (if/when C: fills up)
-
-Windows got 160 GB in the initial layout (decisions.md §Q9). If that starts to feel tight later, you can hand some of Linux's 316 GB over to Windows using [phase-6-grow-windows.sh](phase-6-grow-windows.sh).
-
-**Use it when:** Windows C: is running low *and* Linux has breathing room (your btrfs usage is under ~150 GB).
-
-**Don't use it for:** "I want a bit more Linux space" (Linux is the larger partition already; just use it), or small (<10 GB) Windows adjustments (the ceremony isn't worth it).
-
-Procedure:
-
-1. Boot the **Arch live USB** (Ventoy → Arch ISO), not booted Arch. Log in as root.
-2. `mount /dev/sdb3 /mnt/ventoy` (or wherever your Ventoy data partition is — same trick as Phase 2d). Copy the script over:
-   ```bash
-   cp /mnt/ventoy/arch-setup/phase-6-grow-windows.sh /root/
-   chmod +x /root/phase-6-grow-windows.sh
-   ```
-3. Dry-run first to confirm the math:
-   ```bash
-   /root/phase-6-grow-windows.sh --dry-run 50   # give Windows 50 GB
-   ```
-   It prints the feasibility window `[lower, upper]` based on current btrfs usage. If your target falls in range, proceed. If not, the message tells you what to fix (delete files first, or pick a different target).
-4. Real run:
-   ```bash
-   /root/phase-6-grow-windows.sh 50
-   ```
-   Takes minutes per 10 GB of **used** btrfs data (the bottleneck is copying data, not the number you pass). Grab coffee.
-5. When the script prints "DONE", reboot into Windows (pick "Windows Boot Manager" in systemd-boot). First boot prompts for the BitLocker recovery key — same as the initial install, key is in Bitwarden.
-6. In Windows: Disk Management → right-click C: → **Extend Volume** → accept defaults. C: grows into the new free space.
-7. Reboot back into Arch to confirm everything still boots. Filesystem UUID is preserved, so `/etc/fstab` and systemd-boot entries don't need editing.
-
-Why the script is 300 lines instead of 3: you can't just delete the Linux partition and recreate it with a later start. btrfs's superblock lives at offset 64 KiB of the partition start — shifting the start puts the superblock in the wrong place and the filesystem becomes unmountable. The script uses `btrfs device add` + `btrfs device remove` to *physically migrate* the data onto a new partition at the end of the disk, then deletes the original. The freed space lands right next to Windows. Read the header comment in the script if you want the full rationale.
-
-**If the script's feasibility check refuses to run:** your Linux usage is too high (≥ ~half the 316 GB partition). Either free space first, or use GParted Live (bootable from Ventoy) — GParted can move the partition in-place with no size constraint, but it's a GUI operation and slower.
-
----
-
-### Re-enabling Secure Boot (when you care)
-
-The install runs with Secure Boot **off** because systemd-boot isn't Microsoft-signed. To turn it back on properly:
-
-```bash
-sudo pacman -S sbctl
-sudo sbctl create-keys
-sudo sbctl enroll-keys --microsoft     # keep MS keys so Windows still boots
-sudo sbctl sign -s /boot/EFI/systemd/systemd-bootx64.efi
-sudo sbctl sign -s /boot/EFI/BOOT/BOOTX64.EFI
-sudo sbctl sign -s /boot/vmlinuz-linux
-sudo sbctl sign -s /boot/vmlinuz-linux-lts
-```
-
-Reboot into BIOS, turn Secure Boot on, save. `sbctl` installs a pacman hook that re-signs kernels on every update. You do this once; it stays.
-
-Skip this step until you're sure everything else is stable — it's pure hardening, zero user-visible benefit.
-
----
-
-## Glossary
-
-Jargon used in this runbook, `postinstall.sh`, and decisions.md.
-
-### Filesystem + boot
-
-- **btrfs** — "butter FS." The filesystem Arch is installed on. Native snapshots, subvolumes, compression, checksumming. Modern replacement for ext4 when you want rollback.
-- **subvolume** — a named slice of a btrfs filesystem that can be mounted as if it were a separate filesystem. We use `@` (root), `@home` (user files), `@snapshots` (snapper's storage).
-- **snapshot** — a frozen copy of a subvolume. Copy-on-write, so it's cheap — takes near-zero space until files diverge.
-- **snapper** — the tool that manages btrfs snapshots. Creates them on a timeline, on pacman events, or on demand. Can roll back to any of them.
-- **ext4** — older, simpler filesystem. We use it on the Netac for `/var/log` + `/var/cache` because those don't benefit from snapshots and we want them off btrfs.
-- **EFI System Partition (ESP)** — the small FAT32 partition at the start of the drive where bootloader files live. Shared between Windows and Arch in this install.
-- **UEFI** — modern firmware (replaces legacy BIOS). Required for Secure Boot, GPT, and systemd-boot.
-- **GPT** — GUID Partition Table. Modern partition scheme. Required for disks larger than 2TB, and for UEFI boot.
-- **NVRAM** — non-volatile memory inside your laptop's firmware. Stores the UEFI boot order.
-- **systemd-boot** — the bootloader Arch is using. Tiny, simple, comes with systemd. Replaces GRUB. Config at `/boot/loader/`.
-- **initramfs** — a tiny Linux filesystem loaded into RAM before the real root. Gives the kernel enough tools to mount `/`. Regenerated by `mkinitcpio`.
-- **mkinitcpio** — Arch's initramfs builder. Runs automatically on every kernel update.
-- **GRUB** / **Limine** — alternative bootloaders. GRUB is older and heavier; Limine is newer and natively supports btrfs snapshot boot entries. We use neither — systemd-boot is simpler for our needs.
-- **Ventoy** — the tool that built your install USB. Lets one USB carry many ISOs.
-
-### Packaging
-
-- **pacman** — Arch's package manager. Equivalent to `apt` on Debian or `winget` on Windows. Signed, fast, no bullshit.
-- **AUR** — Arch User Repository. Community-contributed PKGBUILDs for packages not in the official repos (e.g., VSCode, Edge, Bitwarden desktop as of when decisions.md was written).
-- **yay** — our AUR helper. Wraps `pacman` but also handles AUR builds. Use exactly the same flags (`yay -S pkg`, `yay -Syu`, etc.).
-- **PKGBUILD** — a bash script in the AUR that tells `makepkg` how to build a package from source.
-- **pacstrap** — bootstraps a base Arch system into a mounted root. Used once, by `install.sh`, from the live ISO.
-- **arch-chroot** — `chroot` with extras (binds `/dev`, `/proc`, `/sys`, etc.). Used to run commands "inside" a not-yet-booted Arch install.
-- **mise** — multi-tool version manager. Installs specific versions of `node`, `python`, `go`, etc. per-project. We use it to get `node` for Claude Code.
-- **npm** — JavaScript package manager. Ships with node. Claude Code installs through it.
-
-### Display + desktop
-
-- **Wayland** — modern display protocol. Replaces X11. Hyprland is Wayland-only.
-- **X11** — legacy display protocol. Still used by some older apps via XWayland compatibility.
-- **compositor** — the program that draws all the windows on your screen. Also handles input, animations, multi-monitor. On Arch/Hyprland, Hyprland is both the window manager and the compositor.
-- **Hyprland** — our tiling Wayland compositor. Animated, GPU-accelerated.
-- **SDDM** — Simple Desktop Display Manager. The graphical login screen that appears after boot. Hands off to Hyprland after you log in.
-- **Ghostty** — our terminal emulator. Like PowerShell/Terminal.app — the program that draws a black rectangle you type commands into.
-- **tmux** — terminal multiplexer. Lets you split one terminal into panes and keep sessions alive when you close the window. Prefix is `Ctrl+a` in our config.
-- **Waybar** — the status bar at the top of the screen in the end-4 Hyprland config.
-- **fuzzel** — our app launcher. `Super+Space` → type to filter apps → Enter.
-- **cliphist** — clipboard history.
-
-### Auth + security
-
-- **PAM** — Pluggable Authentication Modules. The Linux framework for "prove you're you." Every auth prompt (SDDM, sudo, polkit, screen lock) goes through a stack of PAM modules.
-- **polkit** — PolicyKit. The thing that pops up "Authentication required" dialogs when a GUI app wants admin privileges.
-- **hyprlock** — Hyprland's screen lock (`Super+L`).
-- **fprintd** / **libfprint** — the daemon + library that talks to fingerprint readers.
-- **pinpam** — PAM module that checks a TPM-sealed PIN. Our daily `sudo` auth.
-- **TPM** — Trusted Platform Module. A tiny crypto chip in the laptop. Stores secrets (your PIN, BitLocker key) sealed to the current hardware/boot state — moves them to another machine and they're unreadable.
-- **gnome-keyring** — a password store. Unlocks automatically when you log in to SDDM and hands credentials to apps that ask (Bitwarden desktop uses it to remember its master password).
-- **Bitwarden** — our password manager. Self-hosted at `hass4150.duckdns.org:7277`. Desktop app + CLI + browser extension all talk to the same vault. Also holds SSH keys and exposes them via `~/.bitwarden-ssh-agent.sock`.
-- **Secure Boot** — UEFI feature that refuses to run unsigned bootloaders/kernels. Defense against rootkits that survive reboot. Currently off on this install; `sbctl` would turn it on.
-- **sbctl** — the Arch tool that sets up Secure Boot with your own keys. See "Re-enabling Secure Boot" above.
-- **BitLocker** — Windows's disk encryption. Uses the TPM to auto-unlock at boot. Prompts for a recovery key when the TPM sees changes (e.g., us installing systemd-boot).
-
-### Hardware
-
-- **Optimus** — NVIDIA's dual-GPU laptop tech (iGPU for normal work, dGPU for graphics-heavy tasks). Flaky under Wayland; we bypass by blacklisting the MX250.
-- **iGPU** / **dGPU** — integrated / discrete GPU. Intel UHD 620 is integrated; NVIDIA MX250 is discrete.
-- **Wacom** — the dominant maker of pen tablets. Also used as a generic term for pen/stylus input. The 7786's built-in active pen talks through the Wacom driver.
-- **iio-sensor-proxy** — daemon that reads the laptop's accelerometer. Needed for auto-rotate when you flip the screen into tablet mode.
-- **iptsd** — Intel Precise Touch Stylus Daemon. The driver that makes the 7786's touchscreen work under Linux.
-
-### CLI tools we install
-
-- **fzf** — fuzzy finder. `Ctrl+R` for fuzzy history search.
-- **ripgrep** (`rg`) — faster `grep`.
-- **bat** — `cat` with syntax highlighting + line numbers.
-- **eza** — `ls` replacement with icons and git status.
-- **fd** — faster `find`.
-- **zoxide** (`z`) — `cd` replacement that learns your most-visited dirs.
-- **direnv** — per-directory environment variables (auto-loads when you `cd` in).
-- **chezmoi** — dotfile manager. Keeps `~/.zshrc`, `~/.tmux.conf`, etc. in a git repo.
-- **zgenom** — zsh plugin manager. Caches your plugin set so shell startup stays fast.

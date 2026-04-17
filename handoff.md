@@ -147,7 +147,8 @@ This document is meant to be fed to Claude Code once you're inside Arch Linux. I
 ### Dual Boot
 - Windows and Arch share the EFI partition on Samsung 512GB SSD
 - Bootloader: systemd-boot
-- Partition layout: [EFI 512MB] [MSR 16MB] [Windows 160GB] [Linux 300GB btrfs] [swap 16GB]
+- Samsung layout: [EFI 512MB] [MSR 16MB] [Windows 160GiB] [Linux ~316GiB btrfs with @, @home, @snapshots]
+- Netac 128GB: [Arch recovery ISO] [swap 16GB] [/var/log + /var/cache ext4]
 - SATA mode: switched from RAID to AHCI
 - Windows Fast Startup and hibernation disabled
 - Windows partition mounted read-only at /mnt/windows for media access
@@ -168,45 +169,58 @@ This document is meant to be fed to Claude Code once you're inside Arch Linux. I
 
 ---
 
-## Software to Install
+## Software Inventory
 
-### From official repos (pacman)
-- zsh, tmux, helix, git, fzf, bat, fd, ripgrep, eza, lsd, btop, jq, curl, wget, tldr
-- docker, docker-compose
-- python, python-pip, jupyterlab
-- pipewire, pipewire-pulse, pipewire-alsa, wireplumber
-- bluez, bluez-utils (Bluetooth)
-- fprintd, libfprint (fingerprint)
-- libwacom, xf86-input-wacom (Wacom tablet)
-- iio-sensor-proxy (auto-rotation)
-- sddm
-- firefox
-- wl-clipboard, grim, slurp, grimblast, satty
-- nerd-fonts (or individual ttf-* packages)
+Everything listed below is installed automatically by the phase-2 + phase-3 scripts. This section is a reference for what's on the machine when `postinstall.sh` finishes; don't re-run these by hand.
 
-### From AUR (yay)
+### Base (pacstrap, phase-2-arch-install/install.sh)
+- base, base-devel, linux, linux-firmware, linux-headers, linux-lts, linux-lts-headers, intel-ucode
+- btrfs-progs, e2fsprogs, dosfstools
+- networkmanager, iwd, wpa_supplicant, openssh
+- sudo, git, vim, helix, zsh, tmux, efibootmgr
+- man-db, man-pages, texinfo
+- pipewire, pipewire-pulse, pipewire-jack, wireplumber
+- sddm, hyprland, xdg-desktop-portal-hyprland, polkit
+- noto-fonts, noto-fonts-emoji, ttf-jetbrains-mono-nerd
+- mesa, intel-media-driver, vulkan-intel, libva-intel-driver
+- bluez, bluez-utils, fprintd
+- snapper
+
+### From official repos (pacman, phase-3 postinstall.sh)
+- Core CLI: bat, fd, ripgrep, eza, lsd, btop, jq, fzf, zoxide, direnv, sd, yq, xh, pkgfile, tldr, github-cli
+- Screenshots/clipboard: wl-clipboard, grim, slurp, cliphist, satty, hyprshot
+- Desktop extras: ghostty, fuzzel, swaync
+- Password/vault: bitwarden, bitwarden-cli
+- Version manager: mise
+- Dotfile manager: chezmoi
+- Virtualization: docker, docker-compose, docker-buildx
+- Snapshots: snap-pac
+- Session manager: sesh (tmux session picker)
+- Fonts: ttf-firacode-nerd
+- Misc: xdg-user-dirs
+
+### From AUR (yay, phase-3 postinstall.sh)
 - visual-studio-code-bin
 - microsoft-edge-stable-bin
-- bitwarden
-- ghostty
-- swaync
-- cliphist
-- fuzzel
+- catppuccin-sddm-theme-mocha
+- pinpam-git (PAM module used by fprintd login stack)
 
-### Via mise (tool version manager)
-- node, python (managed versions)
-- dotnet-sdk
-- gh (GitHub CLI)
-- zoxide, sd, yq, xh
-- claude-code
+### Via mise (tool version manager, phase-3 postinstall.sh)
+- `node@lts` — installed globally (`mise use -g node@lts`). Other runtimes (python, pnpm, dotnet, etc.) are installed per-project via `.mise.toml`, not globally.
 
-### Other
-- zgenom (zsh plugin manager — git clone)
-- chezmoi (dotfile management)
-- sesh (tmux session manager)
-- keychain (SSH agent)
-- direnv (per-directory env vars)
-- pkgfile (command-not-found for Arch)
+### Via npm global (installed through mise-managed node)
+- `@anthropic-ai/claude-code` — installed by postinstall.sh via `mise exec -- npm install -g`; NOT a mise plugin
+
+### Other (git clones, phase-3 postinstall.sh)
+- zgenom (zsh plugin manager — `~/.zgenom`)
+- tpm (tmux plugin manager — `~/.tmux/plugins/tpm`)
+
+### Known deferred (phase-3.5 hardware handoff)
+- Wacom pen/tablet stack: `libwacom`, `xf86-input-wacom` — only installed if the pen stylus enumerates on real hardware.
+- Auto-rotation: `iio-sensor-proxy` — deferred for the same reason.
+- Jupyter, extra Python scientific libs: install on demand once the machine is in use.
+- Firefox: deliberately not installed — Edge is the default browser. Add with `sudo pacman -S firefox` if you want it.
+- dotnet SDK: not installed by default. Add per-project via `mise use dotnet@lts` when needed.
 
 ---
 
@@ -223,7 +237,7 @@ This document is meant to be fed to Claude Code once you're inside Arch Linux. I
 10. Audio (PipeWire + Bluetooth)
 11. Auto-rotation for tablet mode
 12. Clipboard history (cliphist + fuzzel keybind)
-13. Screenshots (grimblast + satty keybinds)
+13. Screenshots (hyprshot + satty keybinds)
 14. chezmoi — import configs into managed dotfiles
 15. Edge + Firefox browser setup + Bitwarden extension
 

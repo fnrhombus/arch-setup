@@ -53,7 +53,7 @@ sudo pacman -Syu --noconfirm --needed \
     noto-fonts noto-fonts-emoji ttf-jetbrains-mono-nerd ttf-firacode-nerd \
     bitwarden bitwarden-cli \
     ghostty fuzzel cliphist swaync satty hyprshot \
-    mise chezmoi github-cli \
+    mise chezmoi github-cli sesh \
     docker docker-compose docker-buildx \
     snapper snap-pac
 

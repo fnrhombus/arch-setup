@@ -1,0 +1,20 @@
+{
+    "_comment": "Ventoy plugin config. Lives at <Ventoy-data-partition>/ventoy/ventoy.json on the USB. Mirror this whole ventoy/ dir onto F:/ventoy/ when staging the stick. Plugin reference: https://www.ventoy.net/en/plugin.html",
+
+    "control": [
+        { "VTOY_DEFAULT_MENU_MODE": "0" },
+        { "VTOY_MENU_TIMEOUT":      "15" },
+        { "VTOY_SECONDARY_MENU":    "0" }
+    ],
+
+    "auto_install": [
+        {
+            "image": "/Win11_25H2_English_x64_v2.iso",
+            "template": [
+                "/autounattend.xml"
+            ],
+            "autosel": 1,
+            "timeout": 5
+        }
+    ]
+}
