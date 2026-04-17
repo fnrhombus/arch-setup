@@ -200,7 +200,7 @@ It will:
 10. Builds zgenom plugins (warms cache so first login is fast), writes tmux/helix/ghostty configs.
 11. Takes a **snapper baseline snapshot** of `/` — you can roll back later via `snapper -c root list`.
 12. Installs USB-serial udev rules (ESP32/Pico/FTDI/CH340) and adds you to `uucp`.
-13. Runs the **end-4/dots-hyprland installer interactively** — it'll ask questions. Accept defaults unless you know better.
+13. Runs the **end-4/dots-hyprland installer interactively** — it'll ask questions. Accept defaults unless you know better. If it asks whether to **overwrite existing config files**, say **yes** — your `~/.config` is fresh and there is nothing here worth keeping. If it asks about a user-level systemd service restart, say yes too.
 14. Prints a verify table — scan for **FAIL** rows.
 
 **If fingerprint enroll fails:** postinstall already handles the Goodix fallback interactively. If you declined or it still fails:
@@ -239,8 +239,9 @@ sudo reboot
 3. **Settings → Security → enable "Unlock with system keyring"**. You'll be asked for the master password once more — after that, gnome-keyring holds it and Bitwarden auto-unlocks at login.
 4. **Settings → SSH agent → Enable**. The socket appears at `~/.bitwarden-ssh-agent.sock` (already wired into `~/.ssh/config`).
 5. Add any SSH keys you want as **"SSH key"** vault items.
+6. **You MUST log out and back in now** (or at least close + reopen every terminal). `SSH_AUTH_SOCK` is set by `~/.zshrc.d/bitwarden-ssh-agent.zsh` at shell start — it only notices the new socket in a fresh shell. Skip this and the 3f sanity check `ssh-add -l` will fail even though the agent is actually working.
 
-Test: close Bitwarden. Log out. Log back in. Bitwarden should auto-unlock and `ssh-add -l` should list your keys with no prompt.
+After the re-login: Bitwarden auto-unlocks (via gnome-keyring), and `ssh-add -l` lists your keys with no prompt.
 
 ### 3f. Sanity checks
 
