@@ -76,11 +76,12 @@ What gets touched:
 2. Ventoy menu → pick **`archlinux-2026.04.01-x86_64.iso`** → "Boot in normal mode".
 3. At the Arch ISO menu, pick **"Arch Linux install medium (x86_64, UEFI)"**. You land at a root shell.
 
-### 2b. Wi-Fi
+### 2b. Network
 
-`install.sh` auto-connects using the embedded profiles (`ATTgs5BwGZ`, `rhombus`, `rhombus_legacy`) — it scans, picks whichever is in range, and moves on. You do nothing.
+- **Ethernet via USB-C dock is the primary path** — plug it in before booting. `install.sh` pings `archlinux.org`; if ethernet is up, it skips Wi-Fi entirely.
+- **Wi-Fi fallback**: if no ethernet, `install.sh` auto-connects using the embedded profiles (`ATTgs5BwGZ`, `rhombus`, `rhombus_legacy`). You do nothing.
 
-**Only if auto-connect fails** (network out of range, all creds wrong, no Wi-Fi hardware detected), fall back to manual:
+**If BOTH fail** (dock ethernet driver missing from live ISO, all Wi-Fi networks out of range), fall back to manual iwctl:
 
 ```bash
 iwctl
