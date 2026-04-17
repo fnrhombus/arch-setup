@@ -168,16 +168,17 @@ It will:
 1. `sudo` prompt for your password — type it. (No fingerprint/PIN yet.)
 2. **pacman** — all CLI tooling, Bitwarden (desktop + CLI), Ghostty, fuzzel, cliphist, swaync, satty, hyprshot, mise, chezmoi, gh, snapper. Signed binaries from `extra`, ~5 min.
 3. **yay** — only the 4 AUR-exclusive packages: `visual-studio-code-bin`, `microsoft-edge-stable-bin`, `catppuccin-sddm-theme-mocha`, `pinpam-git`. ~5 min build time.
-4. Generates an SSH ed25519 key (empty passphrase) if one doesn't exist.
-5. Installs Claude Code CLI via `mise use -g claude-code` and grabs its bash completion.
-6. **Prompt you to enroll your fingerprint** — touch the sensor 5 times, slight re-position each touch. Goodix is auto-detected; if enrollment fails and a Goodix reader is present, the script offers to install `libfprint-git` from AUR and retry.
+4. Installs Claude Code CLI via `mise use -g claude-code` and grabs its bash completion. **No local SSH keys are generated** — keys live in your Bitwarden vault as "SSH key" items and surface via `~/.bitwarden-ssh-agent.sock` once Bitwarden desktop is running with the SSH-agent toggle on (Phase 3e). A planter in `~/.zshrc.d/arch-ssh-signing.zsh` waits until `ssh-add -L` returns a pubkey, then wires git commit signing + registers the key with GitHub automatically.
+5. **Points Bitwarden at your self-hosted server** `https://hass4150.duckdns.org:7277` — CLI via `bw config server`, desktop via pre-seeded `~/.config/Bitwarden/data.json`. If the desktop login screen still shows "bitwarden.com" in the "Logging in on:" dropdown, pick **Self-hosted** and paste that URL manually.
+6. **Prompt you to enroll your fingerprint** — touch the sensor 5 times, slight re-position each touch. Reader is auto-detected; if enrollment fails the script prints a diagnostic (full `lsusb`, `fprintd-list`, last 20 log lines) and offers to install `libfprint-git` from AUR and retry.
 7. **Prompt you to set a TPM-PIN** (`pinutil setup`) — 6+ chars. This is what you'll type for sudo from now on.
-8. Wires `~/.ssh/config` for Bitwarden SSH agent + plants a self-deleting first-login script that does `bw login` + `gh auth login` + git identity config on your first interactive zsh session.
-9. Builds zgenom plugins (warms cache so first login is fast), writes tmux/helix/ghostty configs.
-10. Takes a **snapper baseline snapshot** of `/` — you can roll back later via `snapper -c root list`.
-11. Installs USB-serial udev rules (ESP32/Pico/FTDI/CH340) and adds you to `uucp`.
-12. Runs the **end-4/dots-hyprland installer interactively** — it'll ask questions. Accept defaults unless you know better.
-13. Prints a verify table — scan for **FAIL** rows.
+8. Wires `~/.ssh/config` for Bitwarden SSH agent.
+9. Plants `~/.zshrc.d/arch-first-login.zsh` (one-shot: `bw login` + `gh auth login` + git name/email) and `~/.zshrc.d/arch-ssh-signing.zsh` (every-login, self-deletes once SSH signing is wired).
+10. Builds zgenom plugins (warms cache so first login is fast), writes tmux/helix/ghostty configs.
+11. Takes a **snapper baseline snapshot** of `/` — you can roll back later via `snapper -c root list`.
+12. Installs USB-serial udev rules (ESP32/Pico/FTDI/CH340) and adds you to `uucp`.
+13. Runs the **end-4/dots-hyprland installer interactively** — it'll ask questions. Accept defaults unless you know better.
+14. Prints a verify table — scan for **FAIL** rows.
 
 **If fingerprint enroll fails:** postinstall already handles the Goodix fallback interactively. If you declined or it still fails:
 ```bash

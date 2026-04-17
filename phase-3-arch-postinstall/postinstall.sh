@@ -76,12 +76,11 @@ yay -S --noconfirm --needed \
     catppuccin-sddm-theme-mocha \
     pinpam-git
 
-# ---------- 4. SSH key (ed25519) ----------
-if [[ ! -f "$HOME/.ssh/id_ed25519" ]]; then
-    mkdir -p "$HOME/.ssh"; chmod 700 "$HOME/.ssh"
-    log "Generating SSH ed25519 key (empty passphrase — set later via Bitwarden if desired)..."
-    ssh-keygen -t ed25519 -C "$(hostname)" -f "$HOME/.ssh/id_ed25519" -N "${SSH_PASSPHRASE:-}"
-fi
+# ---------- 4. (no local SSH keygen — Bitwarden SSH agent holds keys) ----------
+# Keys live in the Bitwarden vault as "SSH key" items and surface via
+# ~/.bitwarden-ssh-agent.sock once Bitwarden desktop is running with the
+# SSH-agent toggle enabled. Public keys are readable via `ssh-add -L`.
+mkdir -p "$HOME/.ssh"; chmod 700 "$HOME/.ssh"
 
 # ---------- 5. Claude Code CLI + bash completion ----------
 if command -v mise >/dev/null && ! command -v claude >/dev/null; then
@@ -157,7 +156,36 @@ else
     warn "pinutil not found; skipping TPM-PIN setup."
 fi
 
-# ---------- 8. Bitwarden SSH agent: ssh config ----------
+# ---------- 8. Bitwarden: self-hosted server + SSH agent wiring ----------
+BW_SERVER="${BW_SERVER:-https://hass4150.duckdns.org:7277}"
+
+if command -v bw >/dev/null; then
+    CURRENT=$(bw config server 2>/dev/null | tr -d '[:space:]' || true)
+    if [[ "$CURRENT" != "$BW_SERVER" ]]; then
+        log "Pointing Bitwarden CLI at self-hosted server: $BW_SERVER"
+        bw config server "$BW_SERVER" >/dev/null || \
+            warn "bw config server failed — set manually: bw config server $BW_SERVER"
+    fi
+fi
+
+# Pre-seed the Bitwarden desktop app's environmentUrls so the first launch
+# lands on your self-hosted server (no need to pick "Self-hosted" from the
+# dropdown). Structure is documented-minimal: if Bitwarden desktop rejects
+# it, just pick "Self-hosted" at the login screen and enter the URL there.
+BW_DESKTOP_DIR="$HOME/.config/Bitwarden"
+if [[ ! -f "$BW_DESKTOP_DIR/data.json" ]]; then
+    mkdir -p "$BW_DESKTOP_DIR"
+    cat > "$BW_DESKTOP_DIR/data.json" <<EOF
+{
+  "global": {
+    "environmentUrls": {
+      "base": "$BW_SERVER"
+    }
+  }
+}
+EOF
+fi
+
 log "Wiring Bitwarden SSH agent into ~/.ssh/config..."
 mkdir -p "$HOME/.ssh"; chmod 700 "$HOME/.ssh"
 if ! grep -q bitwarden-ssh-agent.sock "$HOME/.ssh/config" 2>/dev/null; then
@@ -169,87 +197,107 @@ EOF
     chmod 600 "$HOME/.ssh/config"
 fi
 
-# ---------- 9. GitHub identity (deferred if not logged in yet) ----------
-_configure_gh_identity() {
-    local gh_user gh_id gh_email
-    gh_user=$(gh api user --jq '.login' 2>/dev/null) || return 1
-    gh_id=$(gh api user --jq '.id' 2>/dev/null) || return 1
-    gh_email="${gh_id}+${gh_user}@users.noreply.github.com"
-    cat > "$HOME/.gitconfig.local" <<GITEOF
-[user]
-    name = ${gh_user}
-    email = ${gh_email}
+# ---------- 9. GitHub identity + SSH-signing planter ----------
+# Two-phase planter:
+#   Phase A (auth):    bw login -> gh auth login -> write name/email in ~/.gitconfig.local.
+#                      Self-deletes planter A once gh auth status is OK.
+#   Phase B (signing): plants ~/.zshrc.d/arch-ssh-signing.zsh which checks
+#                      `ssh-add -L` every shell until it returns a pubkey from
+#                      the Bitwarden SSH agent. When it does, writes the
+#                      allowedSignersFile + signingkey stanza and registers
+#                      the pubkey with GitHub via `gh ssh-key add`. Self-deletes
+#                      once allowed_signers is populated and gh accepts the key.
+#
+# This decouples identity setup (needs gh only) from SSH signing (needs the
+# Bitwarden desktop app to be running with the SSH-agent toggle enabled and
+# at least one "SSH key" vault item loaded).
+
+mkdir -p "$HOME/.zshrc.d"
+
+# Phase B planter — always written; it's idempotent and self-deletes on success.
+cat > "$HOME/.zshrc.d/arch-ssh-signing.zsh" <<'SIGEOF'
+# arch: wait for Bitwarden SSH agent to expose a key, then wire git signing (self-deleting)
+if [[ -t 0 ]] && command -v gh &>/dev/null && gh auth status &>/dev/null; then
+  _pubkey=$(ssh-add -L 2>/dev/null | head -1)
+  if [[ "$_pubkey" == ssh-* ]]; then
+    _gh_user=$(gh api user --jq '.login' 2>/dev/null) || _gh_user=""
+    _gh_id=$(gh api user --jq '.id' 2>/dev/null) || _gh_id=""
+    if [[ -n "$_gh_user" && -n "$_gh_id" ]]; then
+      _gh_email="${_gh_id}+${_gh_user}@users.noreply.github.com"
+      echo "${_gh_email} ${_pubkey}" > ~/.ssh/allowed_signers
+      # Append signing stanza if not already present
+      if ! grep -q 'gpgsign = true' ~/.gitconfig.local 2>/dev/null; then
+        cat >> ~/.gitconfig.local <<GITEOF
 [gpg]
     format = ssh
 [gpg "ssh"]
     allowedSignersFile = ~/.ssh/allowed_signers
+    defaultKeyCommand = ssh-add -L
 [commit]
     gpgsign = true
 [tag]
     gpgsign = true
-[user]
-    signingkey = ~/.ssh/id_ed25519.pub
 GITEOF
-    if [[ -f "$HOME/.ssh/id_ed25519.pub" ]]; then
-        echo "${gh_email} $(cat "$HOME/.ssh/id_ed25519.pub")" > "$HOME/.ssh/allowed_signers"
+      fi
+      _tmp=$(mktemp); printf '%s\n' "$_pubkey" > "$_tmp"
+      gh ssh-key add "$_tmp" --title "$(hostname) - arch" --type authentication 2>/dev/null || true
+      gh ssh-key add "$_tmp" --type signing 2>/dev/null || true
+      rm -f "$_tmp"
+      echo "arch: wired SSH signing with pubkey from Bitwarden SSH agent."
+      rm -f ~/.zshrc.d/arch-ssh-signing.zsh
     fi
-    gh ssh-key add "$HOME/.ssh/id_ed25519.pub" --title "$(hostname) - arch" --type authentication 2>/dev/null || true
-    gh ssh-key add "$HOME/.ssh/id_ed25519.pub" --type signing 2>/dev/null || true
-    echo "  Git identity: ${gh_user} <${gh_email}>"
-}
+    unset _gh_user _gh_id _gh_email _tmp
+  fi
+  unset _pubkey
+fi
+SIGEOF
 
-mkdir -p "$HOME/.zshrc.d"
+# Phase A planter — only if gh isn't already authed
 if gh auth status &>/dev/null; then
-    log "Configuring GitHub identity + SSH signing..."
-    _configure_gh_identity
+    log "Configuring GitHub identity (gh already authed)..."
+    gh_user=$(gh api user --jq '.login' 2>/dev/null) || gh_user=""
+    gh_id=$(gh api user --jq '.id' 2>/dev/null) || gh_id=""
+    if [[ -n "$gh_user" && -n "$gh_id" ]]; then
+        gh_email="${gh_id}+${gh_user}@users.noreply.github.com"
+        cat > "$HOME/.gitconfig.local" <<GITEOF
+[user]
+    name = ${gh_user}
+    email = ${gh_email}
+GITEOF
+        echo "  Git identity: ${gh_user} <${gh_email}>"
+    fi
 else
-    log "gh not logged in — planting first-login setup script."
-    cat > "$HOME/.zshrc.d/arch-first-login.zsh" <<'GHEOF'
-# arch: one-time first-login setup (self-deleting)
+    log "gh not authed yet — planting first-login auth script."
+    cat > "$HOME/.zshrc.d/arch-first-login.zsh" <<'AUTHEOF'
+# arch: one-time bw+gh login (self-deleting)
 if [[ -t 0 ]]; then
   if command -v bw &>/dev/null && ! bw login --check &>/dev/null; then
     echo ""
-    echo "=== arch: Bitwarden login ==="
-    bw login && BW_SESSION=$(bw unlock 2>&1 | grep -oP 'export BW_SESSION="\K[^"]+')
-    [[ -n "$BW_SESSION" ]] && export BW_SESSION
+    echo "=== arch: Bitwarden CLI login (for secrets scripting) ==="
+    bw login || true
   fi
-  if command -v gh &>/dev/null; then
-    if ! gh auth status &>/dev/null; then
-      echo ""
-      echo "=== arch: GitHub auth ==="
-      gh auth login || true
-    fi
-    if gh auth status &>/dev/null; then
-      gh_user=$(gh api user --jq '.login' 2>/dev/null) || gh_user=""
-      gh_id=$(gh api user --jq '.id' 2>/dev/null) || gh_id=""
-      if [[ -n "$gh_user" && -n "$gh_id" ]]; then
-        gh_email="${gh_id}+${gh_user}@users.noreply.github.com"
-        cat > ~/.gitconfig.local <<GITEOF
+  if command -v gh &>/dev/null && ! gh auth status &>/dev/null; then
+    echo ""
+    echo "=== arch: GitHub auth ==="
+    gh auth login || true
+  fi
+  if command -v gh &>/dev/null && gh auth status &>/dev/null; then
+    _gh_user=$(gh api user --jq '.login' 2>/dev/null) || _gh_user=""
+    _gh_id=$(gh api user --jq '.id' 2>/dev/null) || _gh_id=""
+    if [[ -n "$_gh_user" && -n "$_gh_id" ]]; then
+      _gh_email="${_gh_id}+${_gh_user}@users.noreply.github.com"
+      cat > ~/.gitconfig.local <<GITEOF
 [user]
-    name = ${gh_user}
-    email = ${gh_email}
-    signingkey = ~/.ssh/id_ed25519.pub
-[gpg]
-    format = ssh
-[gpg "ssh"]
-    allowedSignersFile = ~/.ssh/allowed_signers
-[commit]
-    gpgsign = true
-[tag]
-    gpgsign = true
+    name = ${_gh_user}
+    email = ${_gh_email}
 GITEOF
-        if [[ -f ~/.ssh/id_ed25519.pub ]]; then
-          echo "${gh_email} $(cat ~/.ssh/id_ed25519.pub)" > ~/.ssh/allowed_signers
-        fi
-        gh ssh-key add ~/.ssh/id_ed25519.pub --title "$(hostname) - arch" --type authentication 2>/dev/null || true
-        gh ssh-key add ~/.ssh/id_ed25519.pub --type signing 2>/dev/null || true
-        echo "arch: git identity = ${gh_user} <${gh_email}>, SSH key registered."
-      fi
+      echo "arch: git identity = ${_gh_user} <${_gh_email}>"
     fi
+    unset _gh_user _gh_id _gh_email
+    rm -f ~/.zshrc.d/arch-first-login.zsh
   fi
-  rm -f ~/.zshrc.d/arch-first-login.zsh
 fi
-GHEOF
+AUTHEOF
 fi
 
 # ---------- 10. zgenom + zsh config (enriched from fnwsl) ----------
@@ -545,10 +593,10 @@ check "bitwarden-cli"       "command -v bw"
 check "pinutil (TPM PIN)"   "command -v pinutil"
 check "pinpam in sudo"      "grep -q pam_pinpam /etc/pam.d/sudo"
 check "fprintd enrolled"    "fprintd-list tom 2>/dev/null | grep -q 'Fingerprints for user tom'"
-check "ssh key"             "test -f $HOME/.ssh/id_ed25519"
 check "ssh agent wired"     "grep -q bitwarden-ssh-agent.sock $HOME/.ssh/config"
 check "udev usb-serial"     "test -f /etc/udev/rules.d/99-usb-serial.rules"
-check "first-login planted or gh done" "test -f $HOME/.zshrc.d/arch-first-login.zsh || test -f $HOME/.gitconfig.local"
+check "gh-auth planter or done" "test -f $HOME/.zshrc.d/arch-first-login.zsh || test -f $HOME/.gitconfig.local"
+check "ssh-signing planter" "test -f $HOME/.zshrc.d/arch-ssh-signing.zsh || grep -q allowedSignersFile $HOME/.gitconfig.local 2>/dev/null"
 
 echo
 echo "Log out and back in (or reboot) to start Hyprland via SDDM."
