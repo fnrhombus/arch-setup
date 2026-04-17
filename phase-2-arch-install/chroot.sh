@@ -158,12 +158,37 @@ EOF
     chmod 600 "$f"
 done
 
+# ---------- pacman: color, parallel downloads, verbose ----------
+log "Tuning pacman.conf (Color, ParallelDownloads=10, ILoveCandy)..."
+sed -i 's/^#Color$/Color/'                       /etc/pacman.conf
+sed -i 's/^#VerbosePkgLists$/VerbosePkgLists/'   /etc/pacman.conf
+sed -i 's/^#ParallelDownloads.*$/ParallelDownloads = 10/' /etc/pacman.conf
+grep -q '^ILoveCandy' /etc/pacman.conf || sed -i '/^ParallelDownloads/a ILoveCandy' /etc/pacman.conf
+
+# ---------- journald: cap size (Netac /var is ~110 GB but log bloat is free to avoid) ----------
+log "Capping journald to 200M..."
+mkdir -p /etc/systemd/journald.conf.d
+cat > /etc/systemd/journald.conf.d/10-size.conf <<EOF
+[Journal]
+SystemMaxUse=200M
+SystemMaxFileSize=50M
+EOF
+
+# ---------- bluetooth: auto-enable on boot ----------
+log "Bluetooth AutoEnable=true..."
+if [[ -f /etc/bluetooth/main.conf ]]; then
+    sed -i 's/^#AutoEnable=false/AutoEnable=true/' /etc/bluetooth/main.conf
+    grep -q '^AutoEnable=' /etc/bluetooth/main.conf || \
+        sed -i '/^\[Policy\]/a AutoEnable=true' /etc/bluetooth/main.conf
+fi
+
 # ---------- services ----------
 log "Enabling services..."
 systemctl enable NetworkManager
 systemctl enable sddm
 systemctl enable bluetooth
 systemctl enable fprintd
+systemctl enable fstrim.timer
 
 log "Chroot config done. Exiting chroot."
 log "NEXT: boot into Arch, log in as tom, then run ~/postinstall.sh"

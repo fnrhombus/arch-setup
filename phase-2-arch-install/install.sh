@@ -189,7 +189,8 @@ pacstrap -K /mnt \
     noto-fonts noto-fonts-emoji ttf-jetbrains-mono-nerd \
     mesa intel-media-driver vulkan-intel libva-intel-driver \
     bluez bluez-utils \
-    fprintd
+    fprintd \
+    snapper
 
 # ---------- 10. fstab ----------
 log "Generating /etc/fstab..."
