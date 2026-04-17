@@ -25,3 +25,6 @@
 
 # Generated PDFs — `pnpm pdf` re-renders from runbook/*.md.
 /runbook/*.pdf
+
+# Vendored Fido.ps1 — fetched on demand by scripts/fetch-assets.ps1.
+/scripts/vendor/
