@@ -699,6 +699,74 @@ $scripts = @(
 	{
 		cmd.exe /c "rmdir C:\Windows.old";
 	};
+	{
+		try {
+			Start-Transcript -Path 'C:\Windows\Setup\Scripts\BitLocker.log' -Append;
+			if ((Get-BitLockerVolume -MountPoint 'C:' -ErrorAction SilentlyContinue).ProtectionStatus -eq 'On') {
+				'BitLocker already on; skipping.';
+				return;
+			}
+			Enable-BitLocker -MountPoint 'C:' -EncryptionMethod XtsAes256 -UsedSpaceOnly -TpmProtector -SkipHardwareTest -ErrorAction Stop | Out-Null;
+			Add-BitLockerKeyProtector -MountPoint 'C:' -RecoveryPasswordProtector -ErrorAction Stop | Out-Null;
+			$rp = (Get-BitLockerVolume -MountPoint 'C:').KeyProtector | Where-Object { $_.KeyProtectorType -eq 'RecoveryPassword' } | Select-Object -First 1;
+			$line = "=== BitLocker Recovery Key ===`nHost:  $(hostname)`nWhen:  $(Get-Date -Format 'o')`nID:    $($rp.KeyProtectorId)`nKey:   $($rp.RecoveryPassword)`n================================";
+			$line | Out-File -FilePath 'C:\Windows\Setup\Scripts\BitLocker-Recovery.txt' -Encoding UTF8;
+			$ventoy = Get-Volume | Where-Object { $_.FileSystemLabel -eq 'Ventoy' -and $_.DriveLetter } | Select-Object -First 1;
+			if ($ventoy) {
+				$dest = "$($ventoy.DriveLetter):\bitlocker-recovery.txt";
+				$line | Out-File -FilePath $dest -Encoding UTF8;
+				"Recovery key saved to $dest and C:\Windows\Setup\Scripts\BitLocker-Recovery.txt";
+			} else {
+				'Ventoy USB not found; recovery key only at C:\Windows\Setup\Scripts\BitLocker-Recovery.txt';
+			}
+		} catch {
+			"BitLocker setup failed: $_";
+		} finally { Stop-Transcript }
+	};
+	{
+		$ventoy = Get-Volume | Where-Object { $_.FileSystemLabel -eq 'Ventoy' -and $_.DriveLetter } | Select-Object -First 1;
+		if ($ventoy) {
+			$src = "$($ventoy.DriveLetter):\phase-1-windows\winget-import.json";
+			if (Test-Path -LiteralPath $src) {
+				New-Item -ItemType Directory -Force -Path 'C:\Windows\Setup\Scripts' | Out-Null;
+				Copy-Item -LiteralPath $src -Destination 'C:\Windows\Setup\Scripts\winget-import.json' -Force;
+				'Staged winget-import.json from Ventoy USB.';
+			}
+		}
+	};
+	{
+		$importPath = 'C:\Windows\Setup\Scripts\winget-import.json';
+		$runnerPath = 'C:\Windows\Setup\Scripts\WingetImport.ps1';
+		if (-not (Test-Path -LiteralPath $importPath)) {
+			'No winget-import.json staged; skipping scheduled-task registration.';
+			return;
+		}
+		$runner = @'
+$ErrorActionPreference = "Continue";
+$log = "C:\Windows\Setup\Scripts\WingetImport.log";
+Start-Transcript -Path $log -Append;
+try {
+	$deadline = (Get-Date).AddMinutes(20);
+	do {
+		try { $online = Test-Connection -ComputerName "cdn.winget.microsoft.com" -Count 1 -Quiet -ErrorAction SilentlyContinue } catch { $online = $false }
+		if (-not $online) { Start-Sleep -Seconds 15 }
+	} while (-not $online -and (Get-Date) -lt $deadline);
+	if (-not $online) { "No network after 20 min; aborting. Task remains scheduled for next logon."; return }
+	winget.exe import --import-file "C:\Windows\Setup\Scripts\winget-import.json" --accept-package-agreements --accept-source-agreements --ignore-versions;
+	if ($LASTEXITCODE -eq 0) {
+		schtasks.exe /Delete /TN "WingetImportOnce" /F;
+		Remove-Item "C:\Windows\Setup\Scripts\winget-import.json" -Force -ErrorAction SilentlyContinue;
+		"Winget import succeeded; task self-deleted.";
+	} else {
+		"winget import exited $LASTEXITCODE. Task remains scheduled for retry.";
+	}
+} finally { Stop-Transcript }
+'@;
+		Set-Content -LiteralPath $runnerPath -Value $runner -Encoding UTF8;
+		$action = "powershell.exe -NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File `"$runnerPath`"";
+		schtasks.exe /Create /TN 'WingetImportOnce' /SC ONLOGON /RU 'Tom' /DELAY 0002:00 /RL HIGHEST /TR $action /F;
+		'Registered WingetImportOnce scheduled task (fires 2 min after Tom logon).';
+	};
 );
 
 &amp; {

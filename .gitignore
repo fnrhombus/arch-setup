@@ -1,0 +1,8 @@
+assets/
+*.iso
+*.iso.sig
+*.lzma
+*.lzma.sig
+MediaCreationTool.exe
+Windows11InstallationAssistant.exe
+.tmp-*
