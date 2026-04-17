@@ -108,23 +108,31 @@ if [[ -z "${SKIP_FPRINT:-}" ]]; then
     log "Enrolling fingerprint (you'll be prompted to touch the reader ~5x)..."
     if ! fprintd-enroll 2>&1 | tee /tmp/fprint-enroll.log; then
         warn "fprintd-enroll failed. Diagnostic:"
-        echo "----- lsusb (27c6 only) -----"
-        lsusb | grep -i '27c6:' || echo "  (no Goodix device visible — reader may be disabled in BIOS)"
+        echo "----- lsusb (full) -----"
+        lsusb 2>&1 || true
+        echo "----- fingerprint candidates (Goodix/Validity/Synaptics/Elan/AuthenTec) -----"
+        lsusb | grep -iE '27c6:|138a:|06cb:|04f3:|08ff:' || \
+            echo "  (no known fingerprint-vendor device visible — reader may be disabled in BIOS, or on a bus we don't recognize)"
         echo "----- fprintd-list tom -----"
         fprintd-list tom 2>&1 || true
         echo "----- last 20 lines of /tmp/fprint-enroll.log -----"
         tail -n 20 /tmp/fprint-enroll.log 2>/dev/null || true
         echo "-----"
         if (( GOODIX_PRESENT )); then
-            echo "Goodix detected but enrollment failed. Stock libfprint may be stale."
-            echo "Fallback: install libfprint-git from AUR, then re-enroll."
-            read -rp "Install libfprint-git now and retry? [y/N] " ans
-            if [[ "$ans" == "y" || "$ans" == "Y" ]]; then
-                yay -S --noconfirm --needed libfprint-git && \
-                    sudo systemctl restart fprintd && \
-                    fprintd-enroll || warn "libfprint-git retry also failed — see upstream supported-device list:"
-                echo "  https://fprint.freedesktop.org/supported-devices.html"
+            echo "Goodix detected (VID 27C6) but enrollment failed. Stock libfprint may lag your PID."
+        else
+            echo "Reader vendor unknown/unrecognized — stock libfprint may still work with a retry,"
+            echo "or your reader may be newer than the packaged libfprint."
+        fi
+        echo "Fallback: install libfprint-git from AUR and retry. Covers newer PIDs for all vendors."
+        read -rp "Install libfprint-git now and retry fprintd-enroll? [y/N] " ans
+        if [[ "$ans" == "y" || "$ans" == "Y" ]]; then
+            if yay -S --noconfirm --needed libfprint-git && sudo systemctl restart fprintd; then
+                fprintd-enroll || warn "libfprint-git retry also failed."
+            else
+                warn "libfprint-git install failed."
             fi
+            echo "Supported-device reference: https://fprint.freedesktop.org/supported-devices.html"
         fi
     fi
 fi

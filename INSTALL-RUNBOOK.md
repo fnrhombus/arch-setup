@@ -166,19 +166,24 @@ chmod +x ~/postinstall.sh
 
 It will:
 1. `sudo` prompt for your password — type it. (No fingerprint/PIN yet.)
-2. pacman sync + install CLI tooling (~5 min).
-3. Bootstrap yay, install AUR apps including Bitwarden + pinpam (~10 min).
-4. **Prompt you to enroll your fingerprint** — touch the sensor 5 times, slight re-position each touch.
-5. **Prompt you to set a TPM-PIN** (`pinutil setup`) — 6+ chars. This is what you'll type for sudo from now on.
-6. Build zgenom plugins, write tmux/helix/ghostty configs.
-7. Run the **end-4/dots-hyprland installer interactively** — it'll ask questions. Accept defaults unless you know better.
-8. Print a verify table — scan for **FAIL** rows.
+2. **pacman** — all CLI tooling, Bitwarden (desktop + CLI), Ghostty, fuzzel, cliphist, swaync, satty, hyprshot, mise, chezmoi, gh, snapper. Signed binaries from `extra`, ~5 min.
+3. **yay** — only the 4 AUR-exclusive packages: `visual-studio-code-bin`, `microsoft-edge-stable-bin`, `catppuccin-sddm-theme-mocha`, `pinpam-git`. ~5 min build time.
+4. Generates an SSH ed25519 key (empty passphrase) if one doesn't exist.
+5. Installs Claude Code CLI via `mise use -g claude-code` and grabs its bash completion.
+6. **Prompt you to enroll your fingerprint** — touch the sensor 5 times, slight re-position each touch. Goodix is auto-detected; if enrollment fails and a Goodix reader is present, the script offers to install `libfprint-git` from AUR and retry.
+7. **Prompt you to set a TPM-PIN** (`pinutil setup`) — 6+ chars. This is what you'll type for sudo from now on.
+8. Wires `~/.ssh/config` for Bitwarden SSH agent + plants a self-deleting first-login script that does `bw login` + `gh auth login` + git identity config on your first interactive zsh session.
+9. Builds zgenom plugins (warms cache so first login is fast), writes tmux/helix/ghostty configs.
+10. Takes a **snapper baseline snapshot** of `/` — you can roll back later via `snapper -c root list`.
+11. Installs USB-serial udev rules (ESP32/Pico/FTDI/CH340) and adds you to `uucp`.
+12. Runs the **end-4/dots-hyprland installer interactively** — it'll ask questions. Accept defaults unless you know better.
+13. Prints a verify table — scan for **FAIL** rows.
 
-**If fingerprint enroll fails** (reader not recognized):
+**If fingerprint enroll fails:** postinstall already handles the Goodix fallback interactively. If you declined or it still fails:
 ```bash
 SKIP_FPRINT=1 ~/postinstall.sh    # re-run skipping finger step
 ```
-Check later: `lsusb | grep -iE 'goodix|validity|synaptics'` and `fprintd-list-devices`. Driver may need `libfprint-git` from AUR.
+Then manually: `lsusb | grep -iE 'goodix|validity|synaptics'`, `fprintd-list-devices`. Check https://fprint.freedesktop.org/supported-devices.html for your VID:PID.
 
 **If `pinutil` is missing** after AUR install:
 ```bash
@@ -190,19 +195,7 @@ sudo pinutil setup
 
 **If something else fails mid-run:** re-run `~/postinstall.sh`. It's idempotent.
 
-### 3c. Install Claude Code
-
-Not in postinstall (it moves fast — version-pinning the installer would rot). Preferred path via `mise` (already installed):
-
-```bash
-mise use -g node@lts
-npm install -g @anthropic-ai/claude-code
-claude --version
-```
-
-Fallback if you'd rather AUR: `yay -Ss claude-code` first — the package name drifts (`claude-code`, `claude-code-bin`, etc.). Install whichever the search returns.
-
-### 3d. Reboot into Hyprland
+### 3c. Reboot into Hyprland
 
 ```bash
 sudo reboot
