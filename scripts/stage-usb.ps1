@@ -6,7 +6,9 @@
 #   - ventoy/ventoy.json (auto-install plugin config)
 #   - phase-2-arch-install/ + phase-3-arch-postinstall/
 #   - phase-6-grow-windows.sh
-#   - Reference docs (decisions.md, handoff.md, INSTALL-RUNBOOK.md, etc.)
+#   - docs/ (planning/rationale — decisions.md, autounattend-oobe-patch.md, wsl-setup-lessons.md)
+#   - runbook/ (read at the laptop — INSTALL-RUNBOOK.md, phase-3-handoff.md,
+#     phase-3.5-hardware-handoff.md, GLOSSARY.md, SURVIVAL.md)
 #
 # Idempotent: re-running is cheap (robocopy skips unchanged files). -Force
 # re-copies everything regardless of size match.
@@ -85,16 +87,14 @@ $rootFiles = @(
     (Join-Path $assets 'archlinux-sha256sums.txt'),
     (Join-Path $assets 'Win11_25H2_English_x64_v2.iso'),
     (Join-Path $repoRoot 'autounattend.xml'),
-    (Join-Path $repoRoot 'autounattend-oobe-patch.md'),
-    (Join-Path $repoRoot 'INSTALL-RUNBOOK.md'),
     (Join-Path $repoRoot 'CLAUDE.md'),
-    (Join-Path $repoRoot 'decisions.md'),
-    (Join-Path $repoRoot 'handoff.md'),
-    (Join-Path $repoRoot 'phase-3.5-hardware-handoff.md'),
     (Join-Path $repoRoot 'phase-6-grow-windows.sh')
 )
 
-$dirs = @('ventoy', 'phase-2-arch-install', 'phase-3-arch-postinstall')
+# USB mirrors the repo layout: docs/ (planning/rationale) + runbook/
+# (what the user reads at the laptop). Keeps `runbook/INSTALL-RUNBOOK.md`
+# referenceable by the same relative path inside the repo and on the stick.
+$dirs = @('ventoy', 'phase-2-arch-install', 'phase-3-arch-postinstall', 'docs', 'runbook')
 
 foreach ($src in $rootFiles) {
     $leaf = Split-Path -Leaf $src

@@ -10,7 +10,7 @@ Git remote: `git@github.com:fnrhombus/arch-setup.git`. Owner: `fnrhombus`.
 
 ## Bootstrap phases
 
-This repo's deliverables map to these phases. `decisions.md` is the single source of truth — if any artifact disagrees with it, the artifact is wrong.
+This repo's deliverables map to these phases. [docs/decisions.md](docs/decisions.md) is the single source of truth — if any artifact disagrees with it, the artifact is wrong.
 
 | # | Phase | Environment | Entry point(s) |
 |---|---|---|---|
@@ -18,10 +18,11 @@ This repo's deliverables map to these phases. `decisions.md` is the single sourc
 | 0.5 | CLI-stack shakedown (optional) | `archlinux` WSL distro on the user's current machine | [wsl-setup.sh](wsl-setup.sh) → [wsl-cli-test.sh](wsl-cli-test.sh) |
 | 1 | Windows install | Ventoy USB → Windows Setup | [autounattend.xml](autounattend.xml) + [ventoy/ventoy.json](ventoy/ventoy.json) |
 | 2 | Arch bare-metal install | Ventoy USB → Arch live ISO | [phase-2-arch-install/install.sh](phase-2-arch-install/install.sh) → [phase-2-arch-install/chroot.sh](phase-2-arch-install/chroot.sh) |
-| 3 | Arch post-install / teaching | Booted Arch, logged in as `tom` | [phase-3-arch-postinstall/postinstall.sh](phase-3-arch-postinstall/postinstall.sh) (+ `p10k.zsh` sidecar). [handoff.md](handoff.md) briefs the next Claude session. |
+| 3 | Arch post-install / teaching | Booted Arch, logged in as `tom` | [phase-3-arch-postinstall/postinstall.sh](phase-3-arch-postinstall/postinstall.sh) (+ `p10k.zsh` sidecar). [runbook/phase-3-handoff.md](runbook/phase-3-handoff.md) briefs the next Claude session. |
+| 3.5 | 2-in-1 hardware wiring (deferred) | Booted Arch | [runbook/phase-3.5-hardware-handoff.md](runbook/phase-3.5-hardware-handoff.md) |
 | 6 | Reclaim space for Windows (future) | Arch live USB or recovery partition | [phase-6-grow-windows.sh](phase-6-grow-windows.sh) |
 
-Phase 1 only touches the Samsung SSD 840 PRO 512GB. The Netac 128GB is reserved entirely for Linux (recovery ISO + swap + `/var/log`+`/var/cache`, per decisions.md §Q9) and stays untouched until phase 2.
+Phase 1 only touches the Samsung SSD 840 PRO 512GB. The Netac 128GB is reserved entirely for Linux (recovery ISO + swap + `/var/log`+`/var/cache`, per [docs/decisions.md](docs/decisions.md) §Q9) and stays untouched until phase 2.
 
 The whole end-to-end flow from a bare dev machine is:
 1. Clone this repo, `pnpm i` — fetches ISOs, detects the Ventoy USB, mirrors everything onto it.
@@ -29,23 +30,38 @@ The whole end-to-end flow from a bare dev machine is:
 3. Reboot, pick the Arch entry from Ventoy, run `./install.sh` from the mounted Ventoy data partition. Password prompt is one-shot at the top; pacstrap + chroot run unattended.
 4. First boot into Arch, log in as `tom`, run `~/postinstall.sh`.
 
+## Repo layout
+
+Markdown files split into two groups by audience:
+
+- **[docs/](docs/)** — Planning and rationale. Read on the dev machine when editing the project. Not strictly needed at the laptop (but staged anyway, since phase-3.5 references `docs/decisions.md`).
+- **[runbook/](runbook/)** — What the user reads *at the laptop* during the install. The PDF (`pnpm pdf`) is generated from `runbook/INSTALL-RUNBOOK.md`.
+
+Everything else at the repo root is a deliverable the install itself consumes (scripts, XML, Ventoy config, phase dirs) or dev-machine plumbing (`package.json`, `.mise.toml`, `scripts/`).
+
 ## File roles
 
-### Planning / decision docs
-- [decisions.md](decisions.md) — Locked-in decisions with rationale: hardware spec, partition plan, Hyprland, systemd-boot, yay, Ghostty, SDDM, PipeWire, Catppuccin, chezmoi, etc. **Edit this when a decision changes** — don't let it drift from the other docs.
-- [handoff.md](handoff.md) — The document fed to the next Claude session *inside Arch after install*. Describes the user, hardware, installed stack, and what Claude is expected to teach (Hyprland, Helix, tmux). Keep in sync with decisions.md.
-- [phase-3.5-hardware-handoff.md](phase-3.5-hardware-handoff.md) — Handoff between phases 3 and 4 — tracks which requirements in decisions.md still need fingerprint/pen/tablet/RDP validation on real hardware.
-- [INSTALL-RUNBOOK.md](INSTALL-RUNBOOK.md) — Step-by-step script the user reads at the physical laptop, phase by phase. Duplicate of some decisions.md content by design, but biased toward *actions* vs. *rationale*.
+### docs/ — planning / rationale (dev machine)
+- [docs/decisions.md](docs/decisions.md) — Locked-in decisions with rationale: hardware spec, partition plan, Hyprland, systemd-boot, yay, Ghostty, SDDM, PipeWire, Catppuccin, chezmoi, etc. **Edit this when a decision changes** — don't let it drift from the other docs.
+- [docs/autounattend-oobe-patch.md](docs/autounattend-oobe-patch.md) — Record of patches already applied to the Schneegans-generated `autounattend.xml` (Samsung-by-size detection, 512 MB EFI, 160 GiB Windows, silent OOBE, disable hibernation/Fast Startup). **Always cross-check against docs/decisions.md §Q9 when editing.**
+- [docs/wsl-setup-lessons.md](docs/wsl-setup-lessons.md) — Hard-won WSL pitfalls harvested from a prior `fnwsl` repo (MTU 1350 before any network op, `GIT_TEMPLATE_DIR=""` on every clone, `ZGEN_DIR` must be set before sourcing zgenom, never use raw.githubusercontent.com, etc.). **Consult before touching any setup script** — these gotchas are silent and expensive.
+
+### runbook/ — read at the laptop
+- [runbook/INSTALL-RUNBOOK.md](runbook/INSTALL-RUNBOOK.md) — Step-by-step script the user reads at the physical laptop, phase by phase. Duplicate of some decisions.md content by design, but biased toward *actions* vs. *rationale*. PDF output lives at `runbook/INSTALL-RUNBOOK.pdf`.
+- [runbook/phase-3-handoff.md](runbook/phase-3-handoff.md) — The document fed to the next Claude session *inside Arch after install*. Describes the user, hardware, installed stack, and what Claude is expected to teach (Hyprland, Helix, tmux). Keep in sync with `docs/decisions.md`.
+- [runbook/phase-3.5-hardware-handoff.md](runbook/phase-3.5-hardware-handoff.md) — Handoff between phases 3 and 4 — tracks which requirements in `docs/decisions.md` still need fingerprint/pen/tablet/RDP validation on real hardware.
+- [runbook/GLOSSARY.md](runbook/GLOSSARY.md) — Every non-obvious tool/utility/package that shows up in decisions.md + postinstall.sh, with a brief full-name / what-it-does / when-you-care blurb.
+- [runbook/SURVIVAL.md](runbook/SURVIVAL.md) — Minimum-viable rescue card. What to do if the desktop is broken or Claude isn't running: TTY login, Wi-Fi from `iwctl`, launch a terminal/browser, start Claude.
 
 ### Phase 0 — dev-machine USB prep
-- [package.json](package.json) — Entry points for the dev-machine prep flow. `pnpm i` chains `fetch-assets.ps1` → `stage-usb.ps1` (postinstall hook). `pnpm stage` re-runs the USB staging only; `pnpm restore:force` re-downloads ISOs.
+- [package.json](package.json) — Entry points for the dev-machine prep flow. `pnpm i` chains `fetch-assets.ps1` → `stage-usb.ps1` (postinstall hook). `pnpm stage` re-runs the USB staging only; `pnpm restore:force` re-downloads ISOs. `pnpm pdf` renders `runbook/INSTALL-RUNBOOK.md` → `runbook/INSTALL-RUNBOOK.pdf`.
 - [scripts/fetch-assets.ps1](scripts/fetch-assets.ps1) — Downloads the Arch ISO (latest from Rackspace mirror) + Ventoy Windows release (latest from GitHub API) into `assets/`. Idempotent (`-Force` to override). Warns loudly if `assets/Win11_*x64*.iso` is missing — Microsoft gates the Win11 ISO behind a per-session API so it stays manual.
-- [scripts/stage-usb.ps1](scripts/stage-usb.ps1) — Auto-finds the Ventoy data partition by its `Ventoy` filesystem label, sanity-checks with the ~32 MB VTOYEFI companion, then mirrors ISOs + configs + phase scripts onto it via robocopy. Soft-exits (code 2) if no USB is present, so `pnpm i` never fails just because the stick is unplugged.
+- [scripts/stage-usb.ps1](scripts/stage-usb.ps1) — Auto-finds the Ventoy data partition by its `Ventoy` filesystem label, sanity-checks with the ~32 MB VTOYEFI companion, then mirrors ISOs + configs + phase scripts + `docs/` + `runbook/` onto it via robocopy. Soft-exits (code 2) if no USB is present, so `pnpm i` never fails just because the stick is unplugged.
+- [scripts/runbook-pdf.mjs](scripts/runbook-pdf.mjs) — `pnpm pdf` entry point. Renders `runbook/INSTALL-RUNBOOK.md` → `runbook/INSTALL-RUNBOOK.pdf` via `marked` + Edge headless (`--print-to-pdf`). 5.5"×8.5" pages, 0.5" margins, 12pt body.
 - [assets/](assets/) — Directory where ISOs land. `.gitignore` covers all auto-populated entries; the Win11 ISO is also gitignored by pattern. Everything else you drop in shows up as untracked so you can decide deliberately.
 
 ### Phase 1 — Windows install
 - [autounattend.xml](autounattend.xml) — Schneegans-generated Windows unattend file, hand-patched per the OOBE checklist. Orders 6-9 of the windowsPE pass emit `X:\pe.cmd`, which at runtime: (a) runs inline PowerShell to find the unique disk in the 500-600 GB window (the Samsung per decisions.md §Q9) and writes its number to `X:\target-disk.txt`, aborting if zero or multiple matches; (b) `set /p`'s that number into `%TARGET_DISK%` and builds `X:\diskpart.txt` against it; (c) runs diskpart to lay out EFI 512 MB / MSR 16 MB / Windows 160 GiB / trailing ~316 GiB unallocated.
-- [autounattend-oobe-patch.md](autounattend-oobe-patch.md) — Hand-patch checklist: XML fragments to swap, full-silent `<OOBE>` replacement, `Specialize.ps1` additions (disable hibernation + Fast Startup). **Always cross-check against decisions.md §Q9 when editing.**
 - [ventoy/ventoy.json](ventoy/ventoy.json) — Ventoy plugin config. Makes Ventoy inject `autounattend.xml` when the Win11 ISO is selected from the menu (otherwise Ventoy's Windows-installer emulation ignores the sibling XML). Mirrored to `<Ventoy-data>/ventoy/ventoy.json` by `stage-usb.ps1`.
 
 ### Phase 2 — Arch bare-metal install
@@ -62,7 +78,6 @@ The whole end-to-end flow from a bare dev machine is:
 ### CLI-stack shakedown (phase 0.5, optional)
 - [wsl-cli-test.sh](wsl-cli-test.sh) — Idempotent setup script for an Arch WSL distro used to validate the CLI stack (zsh + zgenom plugins, tmux, helix, mise tools, chezmoi). Ends with a `verify` block that lists FAIL/OK per tool — always preserve that verification section when editing.
 - [wsl-setup.sh](wsl-setup.sh) — Minimal `/etc/wsl.conf` writer; runs once as root inside the Arch WSL distro (sets default user `tom`, enables systemd, disables Windows PATH interop).
-- [wsl-setup-lessons.md](wsl-setup-lessons.md) — Hard-won WSL pitfalls harvested from a prior `fnwsl` repo (MTU 1350 before any network op, `GIT_TEMPLATE_DIR=""` on every clone, `ZGEN_DIR` must be set before sourcing zgenom, never use raw.githubusercontent.com, etc.). **Consult before touching any setup script** — these gotchas are silent and expensive.
 
 ## Working on this repo
 
@@ -82,5 +97,5 @@ There is no build, lint, or test target. Work is almost entirely **editing markd
 
 ## Conventions
 
-- Markdown checkboxes (`- [ ]`) in `decisions.md` track unmet requirements — tick them as work completes, don't delete them.
+- Markdown checkboxes (`- [ ]`) in `docs/decisions.md` track unmet requirements — tick them as work completes, don't delete them.
 - Platform-specific notes in prose should stay plain; the `[Windows]`/`[WSL]` annotation convention is for the user's global `~/.claude/CLAUDE.md`, not for this repo's content.

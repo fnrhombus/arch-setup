@@ -307,10 +307,9 @@ ssh-add -l                     # should list keys once Bitwarden desktop is unlo
    # the targeted copy produced no files at all.
    cp -r /mnt/ventoy/phase-2-arch-install \
          /mnt/ventoy/phase-3-arch-postinstall \
-         /mnt/ventoy/INSTALL-RUNBOOK.md \
+         /mnt/ventoy/runbook \
+         /mnt/ventoy/docs \
          /mnt/ventoy/autounattend.xml \
-         /mnt/ventoy/decisions.md \
-         /mnt/ventoy/handoff.md \
          /mnt/ventoy/CLAUDE.md \
          ~/src/arch-setup@fnrhombus/ 2>/dev/null
    if [[ -z "$(ls -A ~/src/arch-setup@fnrhombus 2>/dev/null)" ]]; then
@@ -329,13 +328,13 @@ ssh-add -l                     # should list keys once Bitwarden desktop is unlo
 
 4. Feed it the handoff as the first message:
    ```
-   Read handoff.md. That's the brief. Start by walking me through the
-   Hyprland keybindings — I'm looking at a fresh Hyprland session with
-   the end-4/illogical-impulse dotfiles and I don't know how to do
-   anything yet.
+   Read runbook/phase-3-handoff.md. That's the brief. Start by walking
+   me through the Hyprland keybindings — I'm looking at a fresh
+   Hyprland session with the end-4/illogical-impulse dotfiles and I
+   don't know how to do anything yet.
    ```
 
-   Claude will read `handoff.md`, `decisions.md`, and `CLAUDE.md` on its own and have the full context.
+   Claude will read `runbook/phase-3-handoff.md`, `docs/decisions.md`, and `CLAUDE.md` on its own and have the full context.
 
 ---
 

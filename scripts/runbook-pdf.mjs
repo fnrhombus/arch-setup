@@ -17,8 +17,8 @@ import { marked } from 'marked';
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const repoRoot = resolve(__dirname, '..');
 
-const mdPath = join(repoRoot, 'INSTALL-RUNBOOK.md');
-const pdfPath = join(repoRoot, 'INSTALL-RUNBOOK.pdf');
+const mdPath = join(repoRoot, 'runbook', 'INSTALL-RUNBOOK.md');
+const pdfPath = join(repoRoot, 'runbook', 'INSTALL-RUNBOOK.pdf');
 const md = readFileSync(mdPath, 'utf8');
 
 marked.setOptions({ gfm: true, breaks: false, headerIds: false, mangle: false });

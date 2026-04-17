@@ -2,7 +2,7 @@
 
 **You are Claude Code, invoked inside a booted Arch system sometime after the user finished the base install (phases 1–3 of `INSTALL-RUNBOOK.md`). They have been using the laptop for a while and are now ready to wire the 2-in-1 specific hardware that the base install deliberately skipped.**
 
-Read this doc fully before touching anything. Then read `decisions.md` (for hardware + system context) and `handoff.md` (for user preferences and overall stack). Both should be in the same directory as this file.
+Read this doc fully before touching anything. Then read `../docs/decisions.md` (for hardware + system context) and `phase-3-handoff.md` (for user preferences and overall stack — in the same directory as this file).
 
 ---
 
