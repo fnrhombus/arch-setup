@@ -193,7 +193,7 @@ swapon "$NETAC_SWAP"
 # ---------- 9. pacstrap ----------
 log "Running pacstrap (this pulls ~1-2 GB over the network)..."
 pacstrap -K /mnt \
-    base base-devel linux linux-firmware linux-headers intel-ucode \
+    base base-devel linux linux-firmware linux-headers linux-lts linux-lts-headers intel-ucode \
     btrfs-progs e2fsprogs dosfstools \
     networkmanager iwd wpa_supplicant openssh \
     sudo git vim helix \

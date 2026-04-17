@@ -117,6 +117,17 @@ initrd  /intel-ucode.img
 initrd  /initramfs-linux-fallback.img
 options root=UUID=$ROOT_UUID rootflags=subvol=@ rw
 EOF
+# LTS kernel entry — insurance against a mainline-kernel regression that
+# prevents boot. Pick "Arch Linux (LTS)" from the systemd-boot menu if the
+# default entry panics/hangs. linux-lts is pacstrapped alongside linux in
+# install.sh so the kernel + initramfs files are already at /boot.
+cat > /boot/loader/entries/arch-lts.conf <<EOF
+title   Arch Linux (LTS)
+linux   /vmlinuz-linux-lts
+initrd  /intel-ucode.img
+initrd  /initramfs-linux-lts.img
+options root=UUID=$ROOT_UUID rootflags=subvol=@ rw quiet
+EOF
 # Note: Windows Boot Manager auto-discovered by systemd-boot if present at
 # \EFI\Microsoft\Boot\bootmgfw.efi (Windows install writes it there).
 

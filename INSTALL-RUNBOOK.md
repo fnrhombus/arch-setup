@@ -509,3 +509,163 @@ If any `yay -S` call in `postinstall.sh` fails with "package not found", the AUR
 - `hyprshot` (could be replaced by `grimblast-git`)
 
 Re-run `postinstall.sh` after fixing — it's idempotent.
+
+---
+
+## Things you should know (after the install is up)
+
+### Kernel fallback — if the laptop won't boot after a `pacman -Syu`
+
+The install ships **two** kernels: `linux` (current mainline, the default) and `linux-lts` (long-term support, frozen-ish). If a Linux update one day panics on boot or regresses a driver:
+
+1. Reboot. At the systemd-boot menu (3-second timeout), press any arrow key to pause it.
+2. Use ↓ to pick **Arch Linux (LTS)**. Press Enter.
+3. You boot into the LTS kernel with everything else unchanged. Fix the mainline breakage from a working system (usually `sudo pacman -Syu` again a day later after upstream fixes it, or wait for the next kernel point release).
+
+This is your "Windows won't start, boot Safe Mode" equivalent. Never run an update blind into a meeting you can't be late for.
+
+### Rolling back a bad update — `snapper`
+
+`postinstall.sh` takes a baseline snapshot of `/`. If a future `pacman -Syu` bricks something non-kernel (e.g., a display driver breaks, an app refuses to launch):
+
+```bash
+snapper -c root list                 # shows snapshots with IDs
+sudo snapper -c root undochange N..0 # rolls back changes from snapshot N (the bricked state) to snapshot 0 (baseline)
+# OR, for a full rollback to the snapshot state:
+sudo snapper -c root rollback N
+```
+
+Snapshots are cheap (copy-on-write) — hundreds can coexist.
+
+### pacman cheat sheet
+
+- `sudo pacman -Syu` — update everything (run weekly-ish)
+- `pacman -Ss KEYWORD` — search for a package
+- `sudo pacman -S PKG` — install
+- `sudo pacman -Rns PKG` — remove (and its unused deps + configs)
+- `pacman -Qi PKG` — show installed package info
+- `pacman -Qo /path/to/file` — which package owns this file
+- `sudo pacman -Fy && pacman -F COMMAND` — which package provides a command you don't have yet
+
+For AUR packages (VSCode, Edge, pinpam-git), use `yay` with the same flags.
+
+### Where logs live — `journalctl`
+
+- `journalctl -b` — every log from this boot
+- `journalctl -b -p err` — only errors from this boot
+- `journalctl -u SERVICE` — logs for one service (e.g., `sddm`, `NetworkManager`)
+- `journalctl --user -u hyprland` — Hyprland's logs (user-scope service)
+
+`journalctl.conf` is capped at 200MB (configured in `chroot.sh`), so logs self-trim.
+
+### Services — `systemctl`
+
+- `systemctl status SERVICE` — is it running, last 10 log lines
+- `sudo systemctl start/stop/restart SERVICE`
+- `sudo systemctl enable/disable SERVICE` — auto-start at boot or not
+- `systemctl list-unit-files --state=enabled` — what starts automatically
+
+### Coming later — hardware that this install didn't wire yet
+
+The 2-in-1 specific bits (Wacom pen, auto-rotation in tablet mode, 3-finger touchpad gestures, tablet-mode keyboard-disable) are **not** configured by `postinstall.sh`. They have enough tuning surface that doing them blind would produce fragile config.
+
+When you're ready (recommend: after living with the base system for a week so you know what actually bothers you), feed **`phase-3.5-hardware-handoff.md`** to a new Claude session. That doc is a brief for wiring the remaining hardware one subsystem at a time.
+
+### Re-enabling Secure Boot (when you care)
+
+The install runs with Secure Boot **off** because systemd-boot isn't Microsoft-signed. To turn it back on properly:
+
+```bash
+sudo pacman -S sbctl
+sudo sbctl create-keys
+sudo sbctl enroll-keys --microsoft     # keep MS keys so Windows still boots
+sudo sbctl sign -s /boot/EFI/systemd/systemd-bootx64.efi
+sudo sbctl sign -s /boot/EFI/BOOT/BOOTX64.EFI
+sudo sbctl sign -s /boot/vmlinuz-linux
+sudo sbctl sign -s /boot/vmlinuz-linux-lts
+```
+
+Reboot into BIOS, turn Secure Boot on, save. `sbctl` installs a pacman hook that re-signs kernels on every update. You do this once; it stays.
+
+Skip this step until you're sure everything else is stable — it's pure hardening, zero user-visible benefit.
+
+---
+
+## Glossary
+
+Jargon used in this runbook, `postinstall.sh`, and decisions.md.
+
+### Filesystem + boot
+
+- **btrfs** — "butter FS." The filesystem Arch is installed on. Native snapshots, subvolumes, compression, checksumming. Modern replacement for ext4 when you want rollback.
+- **subvolume** — a named slice of a btrfs filesystem that can be mounted as if it were a separate filesystem. We use `@` (root), `@home` (user files), `@snapshots` (snapper's storage).
+- **snapshot** — a frozen copy of a subvolume. Copy-on-write, so it's cheap — takes near-zero space until files diverge.
+- **snapper** — the tool that manages btrfs snapshots. Creates them on a timeline, on pacman events, or on demand. Can roll back to any of them.
+- **ext4** — older, simpler filesystem. We use it on the Netac for `/var/log` + `/var/cache` because those don't benefit from snapshots and we want them off btrfs.
+- **EFI System Partition (ESP)** — the small FAT32 partition at the start of the drive where bootloader files live. Shared between Windows and Arch in this install.
+- **UEFI** — modern firmware (replaces legacy BIOS). Required for Secure Boot, GPT, and systemd-boot.
+- **GPT** — GUID Partition Table. Modern partition scheme. Required for disks larger than 2TB, and for UEFI boot.
+- **NVRAM** — non-volatile memory inside your laptop's firmware. Stores the UEFI boot order.
+- **systemd-boot** — the bootloader Arch is using. Tiny, simple, comes with systemd. Replaces GRUB. Config at `/boot/loader/`.
+- **initramfs** — a tiny Linux filesystem loaded into RAM before the real root. Gives the kernel enough tools to mount `/`. Regenerated by `mkinitcpio`.
+- **mkinitcpio** — Arch's initramfs builder. Runs automatically on every kernel update.
+- **GRUB** / **Limine** — alternative bootloaders. GRUB is older and heavier; Limine is newer and natively supports btrfs snapshot boot entries. We use neither — systemd-boot is simpler for our needs.
+- **Ventoy** — the tool that built your install USB. Lets one USB carry many ISOs.
+
+### Packaging
+
+- **pacman** — Arch's package manager. Equivalent to `apt` on Debian or `winget` on Windows. Signed, fast, no bullshit.
+- **AUR** — Arch User Repository. Community-contributed PKGBUILDs for packages not in the official repos (e.g., VSCode, Edge, Bitwarden desktop as of when decisions.md was written).
+- **yay** — our AUR helper. Wraps `pacman` but also handles AUR builds. Use exactly the same flags (`yay -S pkg`, `yay -Syu`, etc.).
+- **PKGBUILD** — a bash script in the AUR that tells `makepkg` how to build a package from source.
+- **pacstrap** — bootstraps a base Arch system into a mounted root. Used once, by `install.sh`, from the live ISO.
+- **arch-chroot** — `chroot` with extras (binds `/dev`, `/proc`, `/sys`, etc.). Used to run commands "inside" a not-yet-booted Arch install.
+- **mise** — multi-tool version manager. Installs specific versions of `node`, `python`, `go`, etc. per-project. We use it to get `node` for Claude Code.
+- **npm** — JavaScript package manager. Ships with node. Claude Code installs through it.
+
+### Display + desktop
+
+- **Wayland** — modern display protocol. Replaces X11. Hyprland is Wayland-only.
+- **X11** — legacy display protocol. Still used by some older apps via XWayland compatibility.
+- **compositor** — the program that draws all the windows on your screen. Also handles input, animations, multi-monitor. On Arch/Hyprland, Hyprland is both the window manager and the compositor.
+- **Hyprland** — our tiling Wayland compositor. Animated, GPU-accelerated.
+- **SDDM** — Simple Desktop Display Manager. The graphical login screen that appears after boot. Hands off to Hyprland after you log in.
+- **Ghostty** — our terminal emulator. Like PowerShell/Terminal.app — the program that draws a black rectangle you type commands into.
+- **tmux** — terminal multiplexer. Lets you split one terminal into panes and keep sessions alive when you close the window. Prefix is `Ctrl+a` in our config.
+- **Waybar** — the status bar at the top of the screen in the end-4 Hyprland config.
+- **fuzzel** — our app launcher. `Super+Space` → type to filter apps → Enter.
+- **cliphist** — clipboard history.
+
+### Auth + security
+
+- **PAM** — Pluggable Authentication Modules. The Linux framework for "prove you're you." Every auth prompt (SDDM, sudo, polkit, screen lock) goes through a stack of PAM modules.
+- **polkit** — PolicyKit. The thing that pops up "Authentication required" dialogs when a GUI app wants admin privileges.
+- **hyprlock** — Hyprland's screen lock (`Super+L`).
+- **fprintd** / **libfprint** — the daemon + library that talks to fingerprint readers.
+- **pinpam** — PAM module that checks a TPM-sealed PIN. Our daily `sudo` auth.
+- **TPM** — Trusted Platform Module. A tiny crypto chip in the laptop. Stores secrets (your PIN, BitLocker key) sealed to the current hardware/boot state — moves them to another machine and they're unreadable.
+- **gnome-keyring** — a password store. Unlocks automatically when you log in to SDDM and hands credentials to apps that ask (Bitwarden desktop uses it to remember its master password).
+- **Bitwarden** — our password manager. Self-hosted at `hass4150.duckdns.org:7277`. Desktop app + CLI + browser extension all talk to the same vault. Also holds SSH keys and exposes them via `~/.bitwarden-ssh-agent.sock`.
+- **Secure Boot** — UEFI feature that refuses to run unsigned bootloaders/kernels. Defense against rootkits that survive reboot. Currently off on this install; `sbctl` would turn it on.
+- **sbctl** — the Arch tool that sets up Secure Boot with your own keys. See "Re-enabling Secure Boot" above.
+- **BitLocker** — Windows's disk encryption. Uses the TPM to auto-unlock at boot. Prompts for a recovery key when the TPM sees changes (e.g., us installing systemd-boot).
+
+### Hardware
+
+- **Optimus** — NVIDIA's dual-GPU laptop tech (iGPU for normal work, dGPU for graphics-heavy tasks). Flaky under Wayland; we bypass by blacklisting the MX250.
+- **iGPU** / **dGPU** — integrated / discrete GPU. Intel UHD 620 is integrated; NVIDIA MX250 is discrete.
+- **Wacom** — the dominant maker of pen tablets. Also used as a generic term for pen/stylus input. The 7786's built-in active pen talks through the Wacom driver.
+- **iio-sensor-proxy** — daemon that reads the laptop's accelerometer. Needed for auto-rotate when you flip the screen into tablet mode.
+- **iptsd** — Intel Precise Touch Stylus Daemon. The driver that makes the 7786's touchscreen work under Linux.
+
+### CLI tools we install
+
+- **fzf** — fuzzy finder. `Ctrl+R` for fuzzy history search.
+- **ripgrep** (`rg`) — faster `grep`.
+- **bat** — `cat` with syntax highlighting + line numbers.
+- **eza** — `ls` replacement with icons and git status.
+- **fd** — faster `find`.
+- **zoxide** (`z`) — `cd` replacement that learns your most-visited dirs.
+- **direnv** — per-directory environment variables (auto-loads when you `cd` in).
+- **chezmoi** — dotfile manager. Keeps `~/.zshrc`, `~/.tmux.conf`, etc. in a git repo.
+- **zgenom** — zsh plugin manager. Caches your plugin set so shell startup stays fast.
