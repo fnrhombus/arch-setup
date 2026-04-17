@@ -41,7 +41,7 @@ What gets touched:
    - Reboots itself **twice** — leave the USB in both times; Ventoy will re-show the menu. **Don't press anything** — it'll auto-select the Win11 ISO via the `autosel` timer. If the timer expires and you're stuck, just re-pick Win11.
    - Finally lands on the `Tom` desktop. No prompts, no OOBE.
 
-4. **Connect Wi-Fi immediately.** Click the network icon in the taskbar → your SSID → password. The winget-import scheduled task is waiting for `cdn.winget.microsoft.com` (20 min timeout).
+4. **Wi-Fi should already be connected** — the `ATTgs5BwGZ` credentials are embedded in `autounattend.xml` (`WifiProfileXml`, `connectionMode=auto`). Confirm by glancing at the taskbar network icon. If it's NOT connected (you're somewhere else, or the password changed), click the icon → pick SSID → enter password. The winget-import scheduled task is waiting for `cdn.winget.microsoft.com` (20 min timeout) and will proceed as soon as you're online.
 
 5. Watch for winget to run:
    - It's a scheduled task called **`WingetImportOnce`**, starts ~2 min after logon.
