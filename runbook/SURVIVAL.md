@@ -132,17 +132,17 @@ cat ~/.local/share/hyprland/hyprland.log | tail -100
 
 ### Arch won't boot (systemd-boot menu missing or broken)
 
-1. Boot the **Arch recovery entry** (on the Netac — systemd-boot has an entry for it; arrow down at the menu).
-2. If systemd-boot itself is gone, boot the **Ventoy USB** → Arch live ISO.
-3. From the live environment:
+1. **F12 at the Dell logo** → pick the Netac's EFI boot entry directly (the recovery Arch ISO `dd`'d onto the Netac's first partition — systemd-boot can't chain-load a raw ISO partition, so it's not in the systemd-boot menu). The ISO's own bootloader takes over and gives you a live Arch environment.
+2. If the Netac entry isn't in F12 either, boot the **Ventoy USB** → Arch live ISO.
+3. From the live environment — the EFI lives at `/boot` on the installed system, so mount it there (matches `chroot.sh`'s `bootctl --path=/boot install`):
    ```bash
    mount -o subvol=@ /dev/disk/by-label/ArchRoot /mnt
    # Find the EFI partition — Windows diskpart doesn't set a PARTLABEL, so
    # grep by the GPT EFI type GUID instead:
    EFI=$(lsblk -rno NAME,PARTTYPE | awk '$2=="c12a7328-f81f-11d2-ba4b-00a0c93ec93b"{print "/dev/"$1; exit}')
-   mount "$EFI" /mnt/efi
+   mount "$EFI" /mnt/boot
    arch-chroot /mnt
-   bootctl install                  # reinstalls systemd-boot to the ESP
+   bootctl --path=/boot install     # reinstalls systemd-boot to the ESP
    ```
 
 ### Samsung is physically dead

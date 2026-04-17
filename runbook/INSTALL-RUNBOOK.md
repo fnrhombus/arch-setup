@@ -385,8 +385,10 @@ These are the failure modes most likely to hit on the very first boot after `ins
 **Fix:** Boot the Ventoy USB → Arch ISO → live environment. Then:
 ```bash
 mount -o subvol=@ /dev/disk/by-label/ArchRoot /mnt
-mount /dev/disk/by-partlabel/EFI\ system\ partition /mnt/boot 2>/dev/null \
-  || mount "$(blkid -o device -t PARTLABEL='EFI System Partition')" /mnt/boot
+# Find the EFI partition by GPT type GUID — Windows diskpart doesn't
+# assign a PARTLABEL, so by-partlabel lookups are unreliable.
+EFI=$(lsblk -rno NAME,PARTTYPE | awk '$2=="c12a7328-f81f-11d2-ba4b-00a0c93ec93b"{print "/dev/"$1; exit}')
+mount "$EFI" /mnt/boot
 arch-chroot /mnt
 grep -q '^MODULES=(btrfs)' /etc/mkinitcpio.conf || sed -i 's/^MODULES=.*/MODULES=(btrfs)/' /etc/mkinitcpio.conf
 mkinitcpio -P
@@ -542,9 +544,9 @@ lsmod | grep -iE 'nvidia|nouveau'     # expect empty output
 ```
 If modules still load: check `/etc/mkinitcpio.conf` — `MODULES=(btrfs)` should NOT contain `nvidia` or `nouveau`. Check `/etc/modules-load.d/` for any file forcing them.
 
-### K. "Login incorrect" at SDDM / first TTY — you fat-fingered `tom`'s password during chroot
+### K. "Login incorrect" at SDDM / first TTY — you fat-fingered `tom`'s password at the install prompt
 
-**Cause:** `chroot.sh` calls `passwd tom` interactively. If you mistyped both times (the `until passwd tom; do :; done` loop only retries on non-matching password confirmation, NOT on wrong-but-matching typos), you've set a password you can't reproduce. Same goes for `root`.
+**Cause:** `install.sh`'s `prompt_password` accepts any entry that matches its own confirmation. If you typed the same wrong password twice, it hashed that wrong password via `openssl passwd -6` and handed it to `chroot.sh`, which applied it with `chpasswd -e`. No interactive validation ever happened. Same goes for `root`.
 
 **Fix — from the Ventoy USB Arch live environment:**
 ```bash

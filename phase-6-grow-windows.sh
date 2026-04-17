@@ -222,9 +222,9 @@ ask "Proceed? (yes/no)" || { skip "Aborted by user."; exit 0; }
 
 # ---------- capture old partition geometry ----------
 log "Recording current partition geometry of partition #$ARCH_PARTNUM..."
-OLD_START=$(sgdisk -i="$ARCH_PARTNUM" "$SAMSUNG" | awk '/First sector:/ {print $3}')
-OLD_END=$(sgdisk   -i="$ARCH_PARTNUM" "$SAMSUNG" | awk '/Last sector:/  {print $3}')
-OLD_TYPE=$(sgdisk  -i="$ARCH_PARTNUM" "$SAMSUNG" | awk '/Partition GUID code:/ {print $4}')
+OLD_START=$(sgdisk --info="$ARCH_PARTNUM" "$SAMSUNG" | awk '/First sector:/ {print $3}')
+OLD_END=$(sgdisk   --info="$ARCH_PARTNUM" "$SAMSUNG" | awk '/Last sector:/  {print $3}')
+OLD_TYPE=$(sgdisk  --info="$ARCH_PARTNUM" "$SAMSUNG" | awk '/Partition GUID code:/ {print $4}')
 [[ -n "$OLD_START" && -n "$OLD_END" ]] || fail "Couldn't read partition geometry."
 log "Original: start=$OLD_START, end=$OLD_END, typecode=$OLD_TYPE"
 
