@@ -45,7 +45,7 @@ log "Installing pacman packages from official repos..."
 sudo pacman -Syu --noconfirm --needed \
     base-devel git curl wget openssh \
     zsh tmux helix \
-    bat fd ripgrep eza lsd btop jq fzf zoxide direnv keychain \
+    bat fd ripgrep eza lsd btop jq fzf zoxide direnv \
     man-db man-pages pkgfile tldr \
     wl-clipboard grim slurp \
     xdg-user-dirs pipewire pipewire-pulse pipewire-jack wireplumber \
@@ -82,19 +82,26 @@ yay -S --noconfirm --needed \
 # SSH-agent toggle enabled. Public keys are readable via `ssh-add -L`.
 mkdir -p "$HOME/.ssh"; chmod 700 "$HOME/.ssh"
 
-# ---------- 5. Claude Code CLI + bash completion ----------
-if command -v mise >/dev/null && ! command -v claude >/dev/null; then
-    log "Installing Claude Code CLI via mise..."
-    mise use -g claude-code || warn "Claude Code install via mise failed; install manually later."
+# ---------- 5. Claude Code CLI ----------
+# Claude Code is distributed via npm (@anthropic-ai/claude-code). There's no
+# mise plugin named "claude-code" — that call was wrong. Route: use mise to
+# install a LTS node, then `npm install -g`. npm's prefix sits under
+# ~/.local/share/mise/installs/node/*/bin so it ends up on PATH once mise is
+# activated by .zshrc.
+if ! command -v claude >/dev/null; then
+    if command -v mise >/dev/null; then
+        log "Installing node@lts via mise, then Claude Code via npm..."
+        mise use -g node@lts 2>&1 | tee -a /tmp/mise-node.log || warn "mise node@lts install failed — check /tmp/mise-node.log"
+        # Run npm through mise so we hit the newly-installed node even in
+        # this non-interactive shell where mise hasn't been sourced yet.
+        mise exec -- npm install -g @anthropic-ai/claude-code 2>&1 | tee -a /tmp/mise-node.log || \
+            warn "Claude Code install failed — run manually: mise use -g node@lts && npm i -g @anthropic-ai/claude-code"
+    else
+        warn "mise missing; skipping Claude Code CLI install."
+    fi
 fi
-if [[ ! -f "$HOME/.local/share/bash-completion/completions/claude" ]]; then
-    log "Installing Claude Code bash completion (loaded via bashcompinit in zsh)..."
-    mkdir -p "$HOME/.local/share/bash-completion/completions"
-    curl --retry 3 -fsSL \
-        -o "$HOME/.local/share/bash-completion/completions/claude" \
-        "https://github.com/douglaswth/claude-code-completion/releases/latest/download/claude.bash" \
-        || warn "Claude completion download failed (non-fatal)."
-fi
+# Claude Code ships its own completions at runtime: `claude --print-completion zsh`
+# is wired in .zshrc below, no fragile external download needed.
 
 # ---------- 6. Fingerprint enrollment (Goodix-aware) ----------
 if [[ -z "${SKIP_FPRINT:-}" ]]; then
@@ -197,6 +204,20 @@ EOF
     chmod 600 "$HOME/.ssh/config"
 fi
 
+# ~/.ssh/config's IdentityAgent directive is consulted by `ssh(1)` only — NOT
+# by `ssh-add(1)`. The SSH-signing planter (below) calls `ssh-add -L` to
+# discover the Bitwarden-surfaced pubkey, which requires $SSH_AUTH_SOCK to
+# point at the Bitwarden socket. Export it for every shell session via a
+# .zshrc.d drop-in. We only set it when the socket actually exists so nothing
+# breaks on a fresh boot before Bitwarden desktop has started.
+mkdir -p "$HOME/.zshrc.d"
+cat > "$HOME/.zshrc.d/bitwarden-ssh-agent.zsh" <<'EOF'
+# Route ssh-add / ssh to the Bitwarden SSH agent socket, if present.
+if [[ -S "$HOME/.bitwarden-ssh-agent.sock" ]]; then
+    export SSH_AUTH_SOCK="$HOME/.bitwarden-ssh-agent.sock"
+fi
+EOF
+
 # ---------- 9. GitHub identity + SSH-signing planter ----------
 # Two-phase planter:
 #   Phase A (auth):    bw login -> gh auth login -> write name/email in ~/.gitconfig.local.
@@ -217,8 +238,12 @@ mkdir -p "$HOME/.zshrc.d"
 # Phase B planter — always written; it's idempotent and self-deletes on success.
 cat > "$HOME/.zshrc.d/arch-ssh-signing.zsh" <<'SIGEOF'
 # arch: wait for Bitwarden SSH agent to expose a key, then wire git signing (self-deleting)
-if [[ -t 0 ]] && command -v gh &>/dev/null && gh auth status &>/dev/null; then
-  _pubkey=$(ssh-add -L 2>/dev/null | head -1)
+# Explicitly set SSH_AUTH_SOCK to the Bitwarden socket here (rather than rely
+# on .zshrc.d load order) so we never wire signing to the wrong agent's key
+# if some future drop-in sets a competing SSH_AUTH_SOCK first.
+if [[ -t 0 ]] && command -v gh &>/dev/null && gh auth status &>/dev/null \
+   && [[ -S "$HOME/.bitwarden-ssh-agent.sock" ]]; then
+  _pubkey=$(SSH_AUTH_SOCK="$HOME/.bitwarden-ssh-agent.sock" ssh-add -L 2>/dev/null | head -1)
   if [[ "$_pubkey" == ssh-* ]]; then
     _gh_user=$(gh api user --jq '.login' 2>/dev/null) || _gh_user=""
     _gh_id=$(gh api user --jq '.id' 2>/dev/null) || _gh_id=""
@@ -559,9 +584,14 @@ EOF
 fi
 
 # ---------- 18. default shell ----------
-if [[ "$SHELL" != "$(which zsh)" ]]; then
-    log "Changing login shell to zsh..."
-    chsh -s "$(which zsh)"
+# chroot.sh already creates tom with -s /bin/zsh, so this is almost always a
+# no-op. If someone manually changed the shell or the useradd flag was lost,
+# use `sudo usermod` here instead of `chsh` — chsh invokes PAM auth and
+# stalls the script waiting for a password with no way to pipe one in.
+CURRENT_SHELL=$(getent passwd "$USER" | cut -d: -f7)
+if [[ "$CURRENT_SHELL" != "$(which zsh)" ]]; then
+    log "Changing login shell to zsh (via usermod — avoids chsh PAM prompt)..."
+    sudo usermod -s "$(which zsh)" "$USER"
 fi
 
 # ---------- 19. verify ----------

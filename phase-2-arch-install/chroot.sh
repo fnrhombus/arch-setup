@@ -16,7 +16,24 @@ die()  { printf '\033[1;31m[chroot ✗]\033[0m %s\n' "$*" >&2; exit 1; }
 # ---------- timezone + clock ----------
 log "Timezone → America/New_York (adjust in /etc/localtime if wrong)..."
 ln -sf /usr/share/zoneinfo/America/New_York /etc/localtime
-hwclock --systohc
+# Dual-boot clock handling:
+#   - Windows keeps the RTC in LOCAL time by default.
+#   - Linux (Arch default) reads RTC as UTC.
+#   - If Arch writes its UTC system-time back to RTC (`hwclock --systohc`),
+#     Windows's next boot reads that UTC value, applies the timezone offset,
+#     and the Windows clock jumps forward by 5 hours.
+# Fix: tell Arch the RTC is local time by setting /etc/adjtime's mode line
+# to LOCAL. NTP will still keep the system clock on UTC internally; only the
+# RTC interpretation changes, so Windows stays correct and Arch stays correct.
+# Do NOT call `hwclock --systohc` — it would overwrite the RTC with the chroot
+# UTC system-time (which is what breaks Windows).
+# (An alternative is to teach Windows about UTC via the RealTimeIsUniversal
+# registry key — see autounattend-oobe-patch.md if you prefer that route.)
+cat > /etc/adjtime <<'EOF'
+0.0 0 0.0
+0
+LOCAL
+EOF
 
 # ---------- locale ----------
 log "Locale → en_US.UTF-8..."

@@ -23,6 +23,19 @@ log()  { printf '\033[1;32m[+]\033[0m %s\n' "$*"; }
 warn() { printf '\033[1;33m[!]\033[0m %s\n' "$*" >&2; }
 die()  { printf '\033[1;31m[✗]\033[0m %s\n' "$*" >&2; exit 1; }
 
+# Cleanup trap: on any failure, unmount /mnt so a retry can start clean.
+# Without this, a mid-run abort leaves the new btrfs mounted, Netac ext4
+# mounted, and Netac swap active, and the next run dies at `mount /mnt`.
+cleanup_on_fail() {
+    local rc=$?
+    (( rc == 0 )) && return
+    warn "install.sh aborted (exit $rc) — unmounting /mnt for clean retry..."
+    sync 2>/dev/null || true
+    swapoff -a 2>/dev/null || true
+    umount -R /mnt 2>/dev/null || true
+}
+trap cleanup_on_fail EXIT
+
 confirm() {
     local prompt="${1:-Continue?}"
     read -rp "$prompt [yes/NO]: " reply
@@ -228,8 +241,15 @@ arch-chroot /mnt /root/chroot.sh
 
 # ---------- 12. recovery partition ----------
 log "Writing Arch ISO to recovery partition $NETAC_RECOVERY..."
-ARCH_ISO=$(ls "$VENTOY_MNT"/archlinux-*.iso | head -1)
-[[ -f "$ARCH_ISO" ]] || die "No Arch ISO found on Ventoy."
+ARCH_ISO=$(ls "$VENTOY_MNT"/archlinux-*.iso 2>/dev/null | head -1 || true)
+[[ -n "$ARCH_ISO" && -f "$ARCH_ISO" ]] || die "No Arch ISO found on Ventoy."
+# Size-gate: NETAC_RECOVERY is 1536 MiB. A larger ISO would dd past the
+# partition boundary into NETAC_SWAP with no error, silently corrupting swap.
+ISO_BYTES=$(stat -c%s "$ARCH_ISO")
+PART_BYTES=$(blockdev --getsize64 "$NETAC_RECOVERY")
+if (( ISO_BYTES > PART_BYTES )); then
+    die "Arch ISO ($ISO_BYTES bytes) is larger than recovery partition ($PART_BYTES bytes). Resize NETAC_RECOVERY in install.sh or use a smaller ISO."
+fi
 dd if="$ARCH_ISO" of="$NETAC_RECOVERY" bs=4M status=progress conv=fsync
 
 # ---------- 13. post-install hook ----------

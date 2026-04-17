@@ -26,7 +26,7 @@ Two things to know before starting:
 1. Plug the Ventoy USB. Power on. Hammer **F2** to enter BIOS setup.
 2. Set:
    - **Boot Mode**: UEFI (not Legacy)
-   - **Secure Boot**: **Disabled** (systemd-boot can't sign itself without extra work — re-enable later if you care)
+   - **Secure Boot**: **Disabled** for the install (systemd-boot isn't signed out of the box). `decisions.md` wants Secure Boot ON long-term; that's a separate later step using `sbctl` to enroll your own keys. Don't block on it now — get the install running first, then re-enable with signed kernel/bootloader after Phase 3 stabilizes.
    - **SATA Operation**: AHCI (should already be; RAID/Intel RST will hide disks from Arch)
    - **Fast Boot**: Disabled (stops it skipping the boot menu)
 3. Save & exit. Hammer **F12** at the Dell logo → boot menu → pick the USB (something like "UEFI: SanDisk …" or the WD label).
@@ -151,6 +151,18 @@ It will:
 
 **If nothing boots:** BIOS → Boot Sequence → make sure "Linux Boot Manager" is listed and first. If only "Windows Boot Manager" is there, run from a live USB: `bootctl --path=/boot install` to re-register.
 
+### 2f. Clear the BitLocker prompt now (before Phase 3)
+
+Do this before starting Phase 3 — you want the BitLocker key mess handled while you're still thinking about it, not 25 minutes into Hyprland setup.
+
+1. Reboot. At the systemd-boot menu, pick **Windows Boot Manager**.
+2. BitLocker prompts for the recovery key. Type the 48-digit key from Bitwarden ("Inspiron BitLocker recovery").
+3. Windows boots. Log in as `Tom`. Let it sit for 30 seconds so BitLocker re-seals against the new PCR values.
+4. Shut down (don't just log out — Fast Startup is off, but a clean shutdown is still cleaner). `shutdown /s /t 0` from PowerShell.
+5. Power on → systemd-boot → pick **Arch Linux** → back into Arch. No more BitLocker prompts from here.
+
+If the BitLocker key doesn't work: you have the phone photo from Phase 1 step 7 as a last-ditch copy. If even that doesn't work, Windows is gone and you need to reinstall — Arch is unaffected.
+
 ---
 
 ## Phase 3 — Post-install (~25 min)
@@ -224,15 +236,27 @@ Test: close Bitwarden. Log out. Log back in. Bitwarden should auto-unlock and `s
 ### 3f. Sanity checks
 
 ```bash
-# sudo should now offer TPM-PIN (type PIN instead of password)
-sudo -k; sudo echo ok          # you'll see PIN prompt, or finger prompt, or password — any work
+# sudo: clear cache, then test. Pay attention to WHICH prompt appears.
+sudo -k
+sudo echo ok
+```
 
-# fingerprint
+The prompt you see tells you what's wired:
+- `PIN:` → pinpam is working. TPM-PIN is your daily sudo auth. ✓
+- `Place your finger on the fingerprint reader` → fprintd is working. ✓
+- `[sudo] password for tom:` → **neither TPM-PIN nor fingerprint is wired**. Something went wrong. See recovery §I below before relying on this.
+
+```bash
+# fingerprint enrolled?
 fprintd-list tom               # should show a fingerprint enrolled
 
+# PAM wiring
+sudo grep -E 'pam_pinpam|pam_fprintd' /etc/pam.d/sudo
+# Expect both lines, both marked `sufficient`, before the pam_unix.so fallback.
+
 # ssh agent
-echo $SSH_AUTH_SOCK            # should be ~/.bitwarden-ssh-agent.sock
-ssh-add -l                     # should list keys (after Bitwarden unlocks)
+echo $SSH_AUTH_SOCK            # should be ~/.bitwarden-ssh-agent.sock (set by ~/.zshrc.d/bitwarden-ssh-agent.zsh)
+ssh-add -l                     # should list keys once Bitwarden desktop is unlocked + SSH-agent toggle is on
 ```
 
 ---
@@ -244,12 +268,24 @@ ssh-add -l                     # should list keys (after Bitwarden unlocks)
    ```bash
    mkdir -p ~/src
    cd ~/src
-   gh auth login                                    # if gh is installed, otherwise skip
-   git clone https://github.com/fnrhombus/arch-setup.git arch-setup@fnrhombus 2>/dev/null \
-     || cp -r /mnt/ventoy /tmp/arch-setup-snapshot  # fallback if not pushed to GH yet
-   cd arch-setup@fnrhombus   # or wherever you put it
+   # Primary: clone from GitHub (if repo is pushed).
+   git clone git@github.com:fnrhombus/arch-setup.git arch-setup@fnrhombus
+   cd arch-setup@fnrhombus
    ```
-   (If you never pushed this repo to GitHub, just pull the contents from the Ventoy USB: mount it, copy the directory.)
+
+   **If the clone fails** (repo not pushed, or gh auth not wired yet), recover from the Ventoy USB — it still has everything:
+   ```bash
+   # Re-insert the Ventoy USB (you pulled it at end of Phase 2d).
+   sudo mkdir -p /mnt/ventoy
+   sudo mount /dev/disk/by-label/Ventoy /mnt/ventoy
+   cp -r /mnt/ventoy/phase-2-arch-install /mnt/ventoy/phase-3-arch-postinstall \
+         /mnt/ventoy/INSTALL-RUNBOOK.md /mnt/ventoy/autounattend.xml \
+         /mnt/ventoy/decisions.md /mnt/ventoy/handoff.md \
+         /mnt/ventoy/CLAUDE.md \
+         ~/src/arch-setup@fnrhombus/ 2>/dev/null || \
+     cp -r /mnt/ventoy ~/src/arch-setup-snapshot
+   cd ~/src/arch-setup@fnrhombus    # or arch-setup-snapshot
+   ```
 
 3. Start Claude in that directory:
    ```bash
@@ -312,11 +348,11 @@ reboot
 ```bash
 # Log in as root (password you set in chroot).
 mount -o remount,rw /
-nano /etc/fstab
+vim /etc/fstab   # or `vi` — nano is NOT installed, only vim and helix are pacstrapped
 # Find the two lines whose target is /var/log and /var/cache.
 # In their options column (4th column), append:
 #   ,x-systemd.requires-mounts-for=/mnt/netac-var
-# Save. Exit editor.
+# Save with :wq
 systemctl daemon-reload
 reboot
 ```
@@ -343,7 +379,11 @@ If editing fstab from emergency mode is scary: add `systemd.unit=rescue.target` 
 sudo install -d -m 750 /etc/snapper/configs
 sudo cp /etc/snapper/config-templates/default /etc/snapper/configs/root
 sudo sed -i 's|^SUBVOLUME=.*|SUBVOLUME="/"|;s|^ALLOW_USERS=.*|ALLOW_USERS="tom"|' /etc/snapper/configs/root
-echo 'SNAPPER_CONFIGS="root"' | sudo tee -a /etc/conf.d/snapper
+# Guard against double-append if you're re-running this:
+grep -q '^SNAPPER_CONFIGS=.*root' /etc/conf.d/snapper 2>/dev/null || \
+  echo 'SNAPPER_CONFIGS="root"' | sudo tee -a /etc/conf.d/snapper
+sudo chown :tom /.snapshots 2>/dev/null || true
+sudo chmod 750 /.snapshots
 sudo snapper -c root create --description "manual baseline"
 ```
 
@@ -370,6 +410,40 @@ sudo systemctl restart bluetooth
 ### H. SDDM shows but fingerprint prompt never appears at login
 
 SDDM login doesn't use fingerprint by default — it's wired for **sudo/polkit/hyprlock** only. Type your password at SDDM. Fingerprint kicks in the first time you `sudo` after login.
+
+### I. `sudo` fails with "PAM module not found" — you're locked out of root
+
+**Cause:** If `pinpam-git` failed to install but `postinstall.sh`'s PAM wiring ran anyway (or vice versa), `/etc/pam.d/sudo` references a `pam_pinpam.so` module that doesn't exist on disk. Same for `pam_fprintd.so` if fprintd was uninstalled. PAM's error mode for a missing module is to **fail the entire auth stack**, not fall through — which means your password won't work either. You are hard-locked.
+
+**Fix — from the Ventoy USB Arch live environment:**
+```bash
+# Boot Ventoy → Arch ISO → live env → connect wifi.
+mount -o subvol=@ /dev/disk/by-label/ArchRoot /mnt
+arch-chroot /mnt
+
+# Strip every non-standard auth line from /etc/pam.d/sudo back to defaults.
+cat > /etc/pam.d/sudo <<'EOF'
+#%PAM-1.0
+auth       include      system-auth
+account    include      system-auth
+session    include      system-auth
+EOF
+exit
+reboot
+```
+After reboot, `sudo` takes your **password** (TPM-PIN + fingerprint are gone until you re-wire PAM). Fix the missing module: reinstall `pinpam-git` or `fprintd`, then re-run the PAM wiring blocks from `postinstall.sh` by hand.
+
+**Prevention:** after `postinstall.sh` finishes, always test sudo from a **second** terminal before closing the one you ran the script in. If sudo fails, you can fix PAM from the still-privileged parent session without rebooting.
+
+### J. `ssh-add -l` returns "error fetching identities" in every new shell
+
+**Cause:** Bitwarden desktop isn't running, OR Bitwarden's SSH-agent toggle is off, OR the socket moved. `~/.zshrc.d/bitwarden-ssh-agent.zsh` only exports `SSH_AUTH_SOCK` if the socket file exists, so if the socket is gone, `ssh-add` talks to no agent and errors.
+
+**Fix:**
+1. Check the socket exists: `ls -l ~/.bitwarden-ssh-agent.sock`
+2. If missing: launch Bitwarden desktop, unlock, Settings → SSH agent → toggle on. Quit and reopen a terminal.
+3. If present but `ssh-add -l` still errors: `SSH_AUTH_SOCK=~/.bitwarden-ssh-agent.sock ssh-add -l` to rule out an env issue.
+4. If the SSH-signing planter at `~/.zshrc.d/arch-ssh-signing.zsh` was never deleted, it will try again on each login — once Bitwarden is back online with at least one "SSH key" vault item, the planter fires and self-deletes.
 
 ---
 
