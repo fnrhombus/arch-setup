@@ -390,8 +390,13 @@ else
   compinit -C
 fi
 autoload -Uz bashcompinit && bashcompinit
-[[ -f ~/.local/share/bash-completion/completions/claude ]] && \
-    source ~/.local/share/bash-completion/completions/claude
+# Claude Code ships completions via `claude --print-completion zsh` at runtime.
+# Previous versions sourced a bash-completion file we never wrote — that was
+# dead code. Source only if the binary is actually on PATH, otherwise
+# mise-shim startup is a ~200ms tax on every shell for nothing.
+if command -v claude &>/dev/null; then
+    eval "$(claude --print-completion zsh 2>/dev/null)" || true
+fi
 zstyle ':completion:*' use-cache on
 zstyle ':completion:*' cache-path ~/.zsh/cache
 zstyle ':completion:*' menu select

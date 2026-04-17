@@ -113,6 +113,13 @@ ls /mnt/ventoy/phase-2-arch-install/     # sanity: you should see install.sh + c
 
 ### 2d. Run the installer
 
+**Optional but worth the 20 seconds if your connection feels slow:** the live ISO ships with a stale/geographically-random mirrorlist. pacstrap on a bad mirror can appear to hang at <50 KB/s for 20+ min before it finishes. Refresh first:
+
+```bash
+reflector --latest 10 --sort rate --protocol https --save /etc/pacman.d/mirrorlist
+```
+If `reflector` complains about no network, you haven't connected yet — go back to 2b. If it exits OK but the result still looks wrong (`head /etc/pacman.d/mirrorlist`), skip it — pacstrap will still work on the default list, just slower.
+
 ```bash
 bash /mnt/ventoy/phase-2-arch-install/install.sh
 ```
@@ -222,6 +229,8 @@ sudo reboot
 - Hyprland comes up with end-4 config: waybar at top, wallpaper, keybindings live.
 - Default terminal: `Super + Return` opens Ghostty (check end-4 keybind cheatsheet — it's `Super+T` in some variants).
 - App launcher: `Super + Space` (fuzzel).
+
+**Escape hatch if NO keybinding opens a terminal** (keybind variant mismatch, Hyprland config didn't install, wayland handshake fail): `Ctrl + Alt + F3` drops to TTY3 where you can log in as `tom` and debug. `Ctrl + Alt + F1` jumps back to the SDDM/Hyprland session. Worst case: from TTY3, `journalctl --user -u hyprland -b` tells you why Hyprland dropped you to a featureless compositor.
 
 ### 3e. Bitwarden one-time setup
 
