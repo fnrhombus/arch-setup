@@ -157,6 +157,17 @@ confirm "Proceed?"
 
 # ---------- 4. Samsung: add btrfs partition in trailing free space ----------
 log "Adding btrfs partition in trailing free space on $SAMSUNG..."
+# A previous aborted install.sh run may have left an "ArchRoot" partition
+# (or several) consuming the trailing free space. Delete any partition with
+# number > 3 before re-creating, so --largest-new finds room. Windows
+# partitions 1-3 (EFI, MSR, Windows) stay untouched.
+for n in $(sgdisk --print "$SAMSUNG" | awk '$1 ~ /^[0-9]+$/ && $1 > 3 {print $1}' | sort -rn); do
+    log "  removing stale partition ${SAMSUNG}${n}"
+    sgdisk --delete="$n" "$SAMSUNG"
+done
+partprobe "$SAMSUNG"
+udevadm settle
+
 # `sgdisk --largest-new` creates the largest possible new partition from free space.
 sgdisk --largest-new=0 --typecode=0:8300 --change-name=0:ArchRoot "$SAMSUNG"
 partprobe "$SAMSUNG"
