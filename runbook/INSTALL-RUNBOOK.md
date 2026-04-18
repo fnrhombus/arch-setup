@@ -108,17 +108,13 @@ ping -c2 archlinux.org
 
 **If `device list` is empty:** `rfkill unblock all`, try again. If still empty, plug in the USB-C dock for wired ethernet.
 
-### 2c. Mount the Ventoy USB data partition
+### 2c. Fetch the installer
 
-The install script needs access to the Ventoy USB (it reads the chroot script, the Arch ISO for the recovery partition, and the phase-3 files off it).
+You can't just `mount /dev/disk/by-label/Ventoy` — it fails with "Can't open blockdev" because Ventoy holds the USB disk exclusively via dm-linear to serve the booted ISO. The install script works around that internally (creates a dm-linear passthrough and mounts the data partition at `/run/ventoy`, per [ventoy.net/en/doc_compatible_mount.html](https://www.ventoy.net/en/doc_compatible_mount.html)), but you still need a way to invoke it. Pull a fresh copy from GitHub:
 
 ```bash
-mkdir -p /mnt/ventoy
-mount /dev/disk/by-label/Ventoy /mnt/ventoy
-ls /mnt/ventoy/phase-2-arch-install/     # sanity: you should see install.sh + chroot.sh
+git clone https://github.com/fnrhombus/arch-setup /tmp/arch-setup
 ```
-
-**If `by-label/Ventoy` doesn't exist:** find it manually: `lsblk -f` — look for the exFAT/NTFS partition on the USB (biggest, not the small 32 MB one). Mount that partition directly: `mount /dev/sdX2 /mnt/ventoy`.
 
 ### 2d. Run the installer
 
@@ -130,8 +126,10 @@ reflector --latest 10 --sort rate --protocol https --save /etc/pacman.d/mirrorli
 If `reflector` complains about no network, you haven't connected yet — go back to 2b. If it exits OK but the result still looks wrong (`head /etc/pacman.d/mirrorlist`), skip it — pacstrap will still work on the default list, just slower.
 
 ```bash
-bash /mnt/ventoy/phase-2-arch-install/install.sh
+bash /tmp/arch-setup/phase-2-arch-install/install.sh
 ```
+
+The script self-mounts the Ventoy data partition at `/run/ventoy` (for `chroot.sh` and the Arch ISO), so the clone is only needed to bootstrap this one invocation.
 
 It will:
 1. Size-detect the Samsung (500–600 GB) and Netac (100–150 GB). **Aborts loudly if either is missing** — don't blindly retry, fix it.

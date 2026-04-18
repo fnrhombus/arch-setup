@@ -13,8 +13,12 @@
 #
 # Usage:
 #   iwctl                                  # connect wifi (station wlan0 connect <ssid>)
-#   mount /dev/disk/by-label/Ventoy /mnt/ventoy   # or wherever Ventoy mounted
-#   bash /mnt/ventoy/phase-2-arch-install/install.sh
+#   bash /run/ventoy/phase-2-arch-install/install.sh
+#
+# The script self-mounts the Ventoy data partition at /run/ventoy on start
+# (see section 0.5). You do not need to mount it yourself — the obvious
+# `mount /dev/disk/by-label/Ventoy` fails with "Can't open blockdev" because
+# Ventoy holds the USB disk exclusively via dm-linear for ISO serving.
 
 set -euo pipefail
 
@@ -70,6 +74,39 @@ confirm() {
 [[ $EUID -eq 0 ]]                       || die "Run as root."
 [[ -d /sys/firmware/efi/efivars ]]      || die "Not booted in UEFI mode."
 command -v pacstrap >/dev/null          || die "pacstrap missing — not in Arch live env?"
+
+# ---------- 0.5 Ventoy data partition ----------
+# Ventoy boots the Arch ISO via a dm-linear target that holds the USB disk
+# exclusively, so a plain `mount /dev/sdX1` fails with "Can't open blockdev".
+# The documented workaround (https://www.ventoy.net/en/doc_compatible_mount.html)
+# is to create a dm-linear passthrough for the data partition and mount that.
+VENTOY_MNT=/run/ventoy
+if ! mountpoint -q "$VENTOY_MNT"; then
+    # Find the USB disk that the "ventoy" dm target depends on.
+    VENTOY_DISK=$(dmsetup deps -o devname ventoy 2>/dev/null \
+        | grep -oE '[sv]d[a-z]+|nvme[0-9]+n[0-9]+' | head -n1)
+    [[ -n "$VENTOY_DISK" ]] || die "No 'ventoy' dm target — boot the Arch ISO via Ventoy."
+
+    # NVMe partitions are nvme0n1 → nvme0n1p1; SATA/USB are sdX → sdX1.
+    if [[ "$VENTOY_DISK" == nvme* ]]; then VENTOY_PART="${VENTOY_DISK}p1"
+    else                                   VENTOY_PART="${VENTOY_DISK}1"
+    fi
+    [[ -b "/dev/$VENTOY_PART" ]] || die "Ventoy data partition /dev/$VENTOY_PART not found."
+
+    # Create the passthrough (idempotent across retries).
+    if [[ ! -e "/dev/mapper/$VENTOY_PART" ]]; then
+        VENTOY_SZ=$(blockdev --getsz "/dev/$VENTOY_PART")
+        echo "0 $VENTOY_SZ linear /dev/$VENTOY_PART 0" | dmsetup create "$VENTOY_PART" \
+            || die "dmsetup create $VENTOY_PART failed."
+    fi
+
+    mkdir -p "$VENTOY_MNT"
+    mount -o ro "/dev/mapper/$VENTOY_PART" "$VENTOY_MNT" \
+        || die "Failed to mount /dev/mapper/$VENTOY_PART at $VENTOY_MNT."
+    log "Ventoy data partition mounted at $VENTOY_MNT (ro, via dm passthrough)."
+fi
+[[ -f "$VENTOY_MNT/phase-2-arch-install/chroot.sh" ]] \
+    || die "$VENTOY_MNT is mounted but chroot.sh is missing — wrong USB stick?"
 
 # ---------- 1. locate disks by size ----------
 # decisions.md §Q9: Samsung 512 GB nominal (~476 GiB actual), Netac 128 GB nominal (~119 GiB actual).
@@ -297,8 +334,6 @@ PYEOF
 
 # ---------- 11. chroot config ----------
 log "Staging chroot script..."
-VENTOY_MNT=$(findmnt -n -o TARGET -S LABEL=Ventoy 2>/dev/null || true)
-[[ -n "$VENTOY_MNT" ]] || die "Ventoy USB not mounted — where is chroot.sh?"
 cp "$VENTOY_MNT/phase-2-arch-install/chroot.sh" /mnt/root/chroot.sh
 chmod +x /mnt/root/chroot.sh
 
