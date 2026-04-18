@@ -72,18 +72,19 @@ confirm() {
 command -v pacstrap >/dev/null          || die "pacstrap missing — not in Arch live env?"
 
 # ---------- 1. locate disks by size ----------
-# decisions.md §Q9: Samsung 512 GB (500-600 GB window), Netac 128 GB (100-150 GB window)
+# decisions.md §Q9: Samsung 512 GB nominal (~476 GiB actual), Netac 128 GB nominal (~119 GiB actual).
+# Sizes here are GiB (binary), not GB (decimal). Windows are widened to tolerate vendor capacity drift.
 SAMSUNG=""
 NETAC=""
 while read -r dev size; do
-    gb=$(( size / 1024 / 1024 / 1024 ))
-    if (( gb >= 500 && gb <= 600 )); then SAMSUNG="/dev/$dev"
-    elif (( gb >= 100 && gb <= 150 )); then NETAC="/dev/$dev"
+    gib=$(( size / 1024 / 1024 / 1024 ))
+    if (( gib >= 450 && gib <= 520 )); then SAMSUNG="/dev/$dev"
+    elif (( gib >= 100 && gib <= 150 )); then NETAC="/dev/$dev"
     fi
 done < <(lsblk -b -d -n -o NAME,SIZE -e 7,11)  # exclude loop + rom
 
-[[ -n "$SAMSUNG" ]] || die "No 500-600 GB disk detected (expected Samsung SSD 840 PRO 512GB)."
-[[ -n "$NETAC"   ]] || die "No 100-150 GB disk detected (expected Netac 128GB)."
+[[ -n "$SAMSUNG" ]] || die "No 450-520 GiB disk detected (expected Samsung SSD 840 PRO 512GB ~ 476 GiB)."
+[[ -n "$NETAC"   ]] || die "No 100-150 GiB disk detected (expected Netac 128GB ~ 119 GiB)."
 
 log "Samsung (install target): $SAMSUNG"
 log "Netac  (recovery+swap+/var): $NETAC"
