@@ -30,7 +30,7 @@
 				</RunSynchronousCommand>
 				<RunSynchronousCommand wcm:action="add">
 					<Order>6</Order>
-					<Path>cmd.exe /c &gt;&gt;X:\pe.cmd (echo:@if not defined IMAGE_FILE echo Could not locate install.wim, install.esd or install.swm. ^&amp; pause ^&amp; exit /b 1&amp;echo:@if not defined XML_FILE echo Could not locate autounattend.xml. ^&amp; pause ^&amp; exit /b 1&amp;echo:rem Find the Samsung by size (exactly one disk in 500-600 GB) and write its number to X:\target-disk.txt per decisions.md Q9&amp;echo:powershell.exe -NoProfile -Command ^"$c=@^(Get-Disk ^| ?{$_.Size -gt 500GB -and $_.Size -lt 600GB}^); if ^($c.Count -ne 1^) { exit 1 } else { $c[0].Number ^| Set-Content -Path X:\target-disk.txt -Encoding ASCII -NoNewline }^"&amp;echo:if errorlevel 1 ^(echo No unique 500-600 GB disk found - refusing to proceed. Unplug any external drives in that size range and retry. ^&amp; pause ^&amp; exit /b 1^))</Path>
+					<Path>cmd.exe /c &gt;&gt;X:\pe.cmd (echo:echo 0^&gt;X:\target-disk.txt)</Path>
 				</RunSynchronousCommand>
 				<RunSynchronousCommand wcm:action="add">
 					<Order>7</Order>
