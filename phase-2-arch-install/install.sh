@@ -230,6 +230,15 @@ mount --bind /mnt/mnt/netac-var/log   /mnt/var/log
 mount --bind /mnt/mnt/netac-var/cache /mnt/var/cache
 swapon "$NETAC_SWAP"
 
+# Wipe any Arch-managed files left on the EFI System Partition from a
+# previous aborted install. Phase 1 mkfs'd the ESP fresh for Windows, so
+# Microsoft's bootloader must survive; only Arch's kernel/initramfs/ucode
+# would conflict with pacstrap's next run.
+rm -f /mnt/boot/intel-ucode.img \
+      /mnt/boot/amd-ucode.img \
+      /mnt/boot/initramfs-linux*.img \
+      /mnt/boot/vmlinuz-linux*
+
 # ---------- 9. pacstrap ----------
 log "Running pacstrap (this pulls ~1-2 GB over the network)..."
 pacstrap -K /mnt \
