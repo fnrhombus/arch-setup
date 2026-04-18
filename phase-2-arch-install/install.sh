@@ -4,9 +4,14 @@
 # Run from the Arch live environment (boot the ISO from Ventoy, pick
 # the "archlinux-*x86_64.iso" entry — filename rolls monthly). This script reads every decision
 # from decisions.md §Q9 and lays down Arch on:
-#   - Samsung 512 GB SSD : btrfs in the trailing ~316 GB unallocated space
+#   - Samsung 512 GB SSD : LUKS2 + btrfs in the trailing ~316 GB unallocated space
 #                          (EFI/MSR/Windows partitions are left untouched)
-#   - Netac 128 GB SSD   : recovery ISO (1.5 GB) + swap (16 GB) + ext4 (~110 GB)
+#   - Netac 128 GB SSD   : recovery ISO (1.5 GB, unencrypted) + LUKS2 swap (16 GB,
+#                          random key per boot) + LUKS2 ext4 (~110 GB, keyfile-unlocked)
+#
+# Full-disk encryption per decisions.md §Q11 — parity with Windows BitLocker.
+# One passphrase unlocks both LUKS volumes at install; post-install phase 3
+# enrolls TPM2 so boot becomes silent (passphrase stays as recovery fallback).
 #
 # All disk operations are size-gated: the script aborts if the expected
 # disks are absent or if anything looks off. Never silently clobbers.
@@ -47,20 +52,45 @@ prompt_password() {
     openssl passwd -6 "$p1"
 }
 
-# Cleanup trap: on any failure, unmount /mnt so a retry can start clean.
-# Without this, a mid-run abort leaves the new btrfs mounted, Netac ext4
-# mounted, and Netac swap active, and the next run dies at `mount /mnt`.
+# Prompt twice for a LUKS passphrase and print the plaintext on stdout.
+# Unlike prompt_password above (which hashes for /etc/shadow), cryptsetup needs
+# the plaintext — it hashes internally via argon2id. Caller must keep it in
+# memory only; never let it touch disk.
+prompt_luks() {
+    local label="$1" p1 p2
+    while :; do
+        read -rsp "LUKS passphrase for $label: " p1 </dev/tty; printf '\n' >&2
+        read -rsp "  confirm $label passphrase: " p2 </dev/tty; printf '\n' >&2
+        if [[ ${#p1} -lt 8 ]]; then
+            warn "  (too short — 8+ chars; 12+ recommended. This is your recovery fallback if the TPM loses its seal.)"
+        elif [[ "$p1" != "$p2" ]]; then
+            warn "  (didn't match — try again)"
+        else
+            break
+        fi
+    done
+    printf '%s' "$p1"
+}
+
+# Cleanup trap: on any failure, unmount /mnt and close LUKS mappers so a
+# retry can start clean. Without this, a mid-run abort leaves the new btrfs
+# mounted, Netac ext4 mounted, swap active, and the mappers held — next run
+# dies at `mount /mnt` or `cryptsetup open` ("device busy").
 cleanup_on_fail() {
     local rc=$?
     (( rc == 0 )) && return
-    warn "install.sh aborted (exit $rc) — unmounting /mnt for clean retry..."
+    warn "install.sh aborted (exit $rc) — unmounting /mnt + closing LUKS for clean retry..."
     sync 2>/dev/null || true
     swapoff -a 2>/dev/null || true
     # Shred the pre-hashed-password file before unmount so nothing lingers
     # even on abort. rm -f instead of shred keeps this cheap (it's already
     # on a tmpfs-ish mount about to be torn down).
-    rm -f /mnt/root/.pw 2>/dev/null || true
+    rm -f /mnt/root/.pw /mnt/root/.luks 2>/dev/null || true
     umount -R /mnt 2>/dev/null || true
+    # Close LUKS mappers in reverse order (cryptvar may depend on nothing,
+    # but cryptroot's btrfs holds the cryptvar keyfile via /mnt mount).
+    cryptsetup close cryptvar  2>/dev/null || true
+    cryptsetup close cryptroot 2>/dev/null || true
 }
 trap cleanup_on_fail EXIT
 
@@ -74,6 +104,7 @@ confirm() {
 [[ $EUID -eq 0 ]]                       || die "Run as root."
 [[ -d /sys/firmware/efi/efivars ]]      || die "Not booted in UEFI mode."
 command -v pacstrap >/dev/null          || die "pacstrap missing — not in Arch live env?"
+command -v cryptsetup >/dev/null        || die "cryptsetup missing — not in Arch live env? (FDE requires it)"
 
 # ---------- 0.5 Ventoy data partition ----------
 # Ventoy boots the Arch ISO via a dm-linear target that holds the USB disk
@@ -170,23 +201,30 @@ fi
 log "Network: OK"
 timedatectl set-ntp true
 
-# ---------- 2.5 collect passwords up-front ----------
-# Prompt now so the long pacstrap + chroot stretch is unattended. Hashes
-# are handed to chroot.sh via /mnt/root/.pw (mode 600); cleanup_on_fail
-# and the post-chroot rm -f together ensure the file never survives this
-# script. Requires openssl, which is in the Arch live ISO.
+# ---------- 2.5 collect passwords + LUKS passphrase up-front ----------
+# Prompt now so the long pacstrap + chroot stretch is unattended. Account
+# password hashes are handed to chroot.sh via /mnt/root/.pw (mode 600);
+# cleanup_on_fail and the post-chroot rm -f together ensure the file never
+# survives this script. Requires openssl, which is in the Arch live ISO.
+#
+# LUKS passphrase stays in an in-memory variable for the duration of this
+# script — used to luksFormat both volumes and to luksAddKey the cryptvar
+# keyfile — then unset before exit. Never touches disk.
 command -v openssl >/dev/null || die "openssl not found in live env — needed for password hashing."
-log "Collecting passwords now (you won't be prompted again during install)."
+log "Collecting passwords + LUKS passphrase now (you won't be prompted again during install)."
+log "The LUKS passphrase is what you'll type at boot if the TPM ever loses its seal — stash it in Bitwarden."
 ROOT_PW_HASH=$(prompt_password "root")
 TOM_PW_HASH=$(prompt_password "tom")
+LUKS_PW=$(prompt_luks "disk encryption (used for both Samsung root and Netac /var)")
 
 # ---------- 3. confirm ----------
 cat <<EOF
 
 About to:
   - Leave Samsung partitions 1, 2, 3 (EFI, MSR, Windows) UNTOUCHED
-  - Create one new btrfs partition in the trailing unallocated space of $SAMSUNG
-  - WIPE $NETAC entirely (GPT label, 3 new partitions)
+  - Create one new LUKS2 + btrfs partition in the trailing unallocated space of $SAMSUNG
+  - WIPE $NETAC entirely (GPT label, 3 new partitions: recovery ISO,
+    LUKS2 swap w/ random key, LUKS2 ext4 for /var/log + /var/cache)
   - pacstrap a full Arch system and configure per decisions.md
 
 EOF
@@ -243,16 +281,39 @@ NETAC_RECOVERY="${NETAC}1"; [[ -b "$NETAC_RECOVERY" ]] || NETAC_RECOVERY="${NETA
 NETAC_SWAP="${NETAC}2";     [[ -b "$NETAC_SWAP"     ]] || NETAC_SWAP="${NETAC}p2"
 NETAC_VAR="${NETAC}3";      [[ -b "$NETAC_VAR"      ]] || NETAC_VAR="${NETAC}p3"
 
-# ---------- 6. filesystems ----------
-log "Creating filesystems..."
-mkfs.btrfs -f -L ArchRoot "$SAMSUNG_ROOT"
-mkfs.ext4  -F -L ArchVar  "$NETAC_VAR"
-mkswap -L ArchSwap "$NETAC_SWAP"
-# NETAC_RECOVERY stays raw — we dd the Arch ISO onto it later.
+# ---------- 6. LUKS format + filesystems ----------
+# Encrypt both data partitions with the same passphrase. The passphrase is
+# the ONLY key at install time; phase 3's postinstall.sh enrolls TPM2 later
+# so boot becomes silent. Passphrase stays as the recovery fallback.
+#
+# luksFormat defaults: LUKS2 + argon2id KDF + aes-xts-plain64. --batch-mode
+# suppresses the "THIS WILL OVERWRITE DATA" confirmation (we already got
+# the user's `yes` in section 3). --key-file=- reads the passphrase from
+# stdin so it never appears in `ps`.
+log "Encrypting Samsung root ($SAMSUNG_ROOT) with LUKS2..."
+printf '%s' "$LUKS_PW" | cryptsetup luksFormat --type luks2 --batch-mode \
+    --label ArchRootLUKS --key-file=- "$SAMSUNG_ROOT"
+printf '%s' "$LUKS_PW" | cryptsetup open --key-file=- "$SAMSUNG_ROOT" cryptroot
+
+log "Encrypting Netac /var ($NETAC_VAR) with LUKS2..."
+printf '%s' "$LUKS_PW" | cryptsetup luksFormat --type luks2 --batch-mode \
+    --label ArchVarLUKS --key-file=- "$NETAC_VAR"
+printf '%s' "$LUKS_PW" | cryptsetup open --key-file=- "$NETAC_VAR" cryptvar
+
+log "Creating filesystems on LUKS mappers..."
+mkfs.btrfs -f -L ArchRoot /dev/mapper/cryptroot
+mkfs.ext4  -F -L ArchVar  /dev/mapper/cryptvar
+# Swap is encrypted via /dev/urandom per boot (see /etc/crypttab in chroot.sh)
+# so we don't mkswap here — crypttab's `swap` option does it each boot against
+# /dev/mapper/cryptswap. The live ISO doesn't need swap (16 GB RAM is plenty
+# for pacstrap), so there's no benefit to swapon-ing a plaintext fallback.
+# NETAC_RECOVERY stays raw and unencrypted — we dd the Arch ISO onto it later.
+# (Rationale: recovery partition is intentionally bootable as-is; encrypting
+# it would defeat the "boot this from F12 if Arch is hosed" survival path.)
 
 # ---------- 7. btrfs subvolumes ----------
 log "Creating btrfs subvolumes..."
-mount "$SAMSUNG_ROOT" /mnt
+mount /dev/mapper/cryptroot /mnt
 btrfs subvolume create /mnt/@
 btrfs subvolume create /mnt/@home
 btrfs subvolume create /mnt/@snapshots
@@ -261,10 +322,10 @@ umount /mnt
 # ---------- 8. mount ----------
 log "Mounting filesystems..."
 MOPTS="noatime,compress=zstd:3,space_cache=v2,ssd"
-mount -o "$MOPTS,subvol=@"          "$SAMSUNG_ROOT" /mnt
+mount -o "$MOPTS,subvol=@"          /dev/mapper/cryptroot /mnt
 mkdir -p /mnt/{home,.snapshots,boot,var/log,var/cache}
-mount -o "$MOPTS,subvol=@home"      "$SAMSUNG_ROOT" /mnt/home
-mount -o "$MOPTS,subvol=@snapshots" "$SAMSUNG_ROOT" /mnt/.snapshots
+mount -o "$MOPTS,subvol=@home"      /dev/mapper/cryptroot /mnt/home
+mount -o "$MOPTS,subvol=@snapshots" /dev/mapper/cryptroot /mnt/.snapshots
 mount "$SAMSUNG_EFI" /mnt/boot
 # Netac ext4 at /var: we mount the single ext4 volume at /var and bind-mount
 # /var/log and /var/cache from it. Simpler: mount it at an intermediate path
@@ -272,11 +333,24 @@ mount "$SAMSUNG_EFI" /mnt/boot
 # decisions.md §Q9 says "/var/log + /var/cache on Netac" (not all of /var),
 # so use two subdirs + bind mounts so other /var paths stay on btrfs.
 mkdir -p /mnt/mnt/netac-var
-mount "$NETAC_VAR" /mnt/mnt/netac-var
+mount /dev/mapper/cryptvar /mnt/mnt/netac-var
 mkdir -p /mnt/mnt/netac-var/{log,cache}
 mount --bind /mnt/mnt/netac-var/log   /mnt/var/log
 mount --bind /mnt/mnt/netac-var/cache /mnt/var/cache
-swapon "$NETAC_SWAP"
+
+# ---------- 8.5 cryptvar keyfile (for unattended unlock at boot) ----------
+# cryptroot prompts for the passphrase at boot; cryptvar is unlocked from a
+# keyfile living on the (now-unlocked) root fs so the user doesn't type the
+# passphrase twice. The keyfile is 4096 random bytes, mode 400, root:root,
+# at /etc/cryptsetup-keys.d/cryptvar.key — a path systemd-cryptsetup-generator
+# understands natively.
+log "Generating keyfile for cryptvar auto-unlock..."
+install -d -m 700 /mnt/etc/cryptsetup-keys.d
+(umask 077 && dd if=/dev/urandom of=/mnt/etc/cryptsetup-keys.d/cryptvar.key \
+    bs=512 count=8 status=none)
+chmod 400 /mnt/etc/cryptsetup-keys.d/cryptvar.key
+printf '%s' "$LUKS_PW" | cryptsetup luksAddKey --key-file=- \
+    "$NETAC_VAR" /mnt/etc/cryptsetup-keys.d/cryptvar.key
 
 # Wipe any Arch-managed files left on the EFI System Partition from a
 # previous aborted install. Phase 1 mkfs'd the ESP fresh for Windows, so
@@ -342,8 +416,28 @@ chmod +x /mnt/root/chroot.sh
 # abort mid-chroot doesn't leave hashes behind on the freshly-installed fs.
 (umask 077 && printf '%s\n%s\n' "$ROOT_PW_HASH" "$TOM_PW_HASH" > /mnt/root/.pw)
 
+# Hand the LUKS partition UUIDs to chroot.sh (no passphrase — that stays
+# in-memory here). chroot.sh needs these for /etc/crypttab.initramfs +
+# /etc/crypttab + kernel cmdline. Use UUID (LUKS header) for cryptroot +
+# cryptvar so the mapping survives partition-table renumbering; PARTUUID
+# for cryptswap because there's no LUKS header (random-key plain dm-crypt).
+LUKS_ROOT_UUID=$(blkid -s UUID -o value "$SAMSUNG_ROOT")
+LUKS_VAR_UUID=$(blkid -s UUID -o value "$NETAC_VAR")
+SWAP_PARTUUID=$(blkid -s PARTUUID -o value "$NETAC_SWAP")
+[[ -n "$LUKS_ROOT_UUID" && -n "$LUKS_VAR_UUID" && -n "$SWAP_PARTUUID" ]] \
+    || die "Failed to resolve LUKS UUIDs (blkid returned empty)."
+(umask 077 && cat > /mnt/root/.luks <<EOF
+LUKS_ROOT_UUID=$LUKS_ROOT_UUID
+LUKS_VAR_UUID=$LUKS_VAR_UUID
+SWAP_PARTUUID=$SWAP_PARTUUID
+EOF
+)
+
 arch-chroot /mnt /root/chroot.sh
-rm -f /mnt/root/.pw
+rm -f /mnt/root/.pw /mnt/root/.luks
+
+# Passphrase was only needed for luksFormat + luksAddKey; scrub from memory.
+unset LUKS_PW
 
 # ---------- 12. recovery partition ----------
 log "Writing Arch ISO to recovery partition $NETAC_RECOVERY..."
@@ -371,14 +465,20 @@ arch-chroot /mnt chown -R tom:tom /home/tom
 # ---------- 14. cleanup ----------
 log "Syncing + unmounting..."
 sync
-swapoff "$NETAC_SWAP" || true
 umount -R /mnt
+# Close LUKS mappers so a retry (or a manual `cryptsetup luksFormat` later)
+# doesn't trip on "device still in use". No swap was mounted — cryptswap is
+# a boot-time construct — so no swapoff needed here.
+cryptsetup close cryptvar  || true
+cryptsetup close cryptroot || true
 
 cat <<EOF
 
 Done. Remove the USB and reboot.
 
-After first login as 'tom':
+First boot asks for the LUKS passphrase (you set it at the top of this run).
+Log in as 'tom', then:
     ./postinstall.sh           # installs yay, zgenom, illogical-impulse dots,
-                               # catppuccin, chezmoi, fingerprint, etc.
+                               # catppuccin, chezmoi, fingerprint, TPM2 enroll
+                               # for silent LUKS unlock, etc.
 EOF

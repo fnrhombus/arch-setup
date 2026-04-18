@@ -86,7 +86,13 @@ Organized by category so you can skim. Nothing here is install instructions — 
 - **Secure Boot** — UEFI feature that verifies signed bootloaders. Disabled for install; re-enabled later with `sbctl`.
 - **sbctl** — Tool to generate keys + sign kernel/bootloader for Secure Boot. Later-phase work.
 - **TPM** (Trusted Platform Module) — Chip that stores encryption keys. BitLocker and LUKS can use it.
-- **PCR** (Platform Configuration Register) — TPM slot that records a hash of the boot chain. You care: changing the bootloader can invalidate the PCRs BitLocker bound to, forcing recovery-key prompt.
+- **PCR** (Platform Configuration Register) — TPM slot that records a hash of the boot chain. You care: changing the bootloader can invalidate the PCRs BitLocker or LUKS bound to, forcing recovery-key/passphrase prompt. We bind to PCRs 0+7 (firmware + Secure Boot policy) because those are stable across kernel upgrades.
+- **LUKS** / **LUKS2** (Linux Unified Key Setup) — Disk-encryption format for block devices. Our Samsung root btrfs and Netac /var ext4 both live inside LUKS2 containers. Keys land in numbered "slots" — slot 0 is the install-time passphrase, a later slot gets the TPM2 binding.
+- **cryptsetup** — CLI for LUKS. `cryptsetup luksFormat` creates a container, `cryptsetup open <dev> <name>` unlocks it to `/dev/mapper/<name>`, `cryptsetup close <name>` tears it back down.
+- **sd-encrypt** — mkinitcpio hook that reads `/etc/crypttab.initramfs` inside the initramfs and opens LUKS containers before `/` is mounted. Sits between `block` and `filesystems` in the HOOKS line.
+- **crypttab** / **crypttab.initramfs** — `/etc/crypttab` is read post-init by systemd to unlock non-root encrypted volumes (ours: cryptvar + cryptswap). `/etc/crypttab.initramfs` is baked into the initramfs by `sd-encrypt` to unlock the root (cryptroot). Format: `<name> <device> <key-source> <options>`.
+- **systemd-cryptenroll** — Binds a LUKS2 key slot to a TPM2 (or FIDO2 / PKCS#11) credential. `systemd-cryptenroll --tpm2-device=auto --tpm2-pcrs=0+7 /dev/disk/by-partlabel/ArchRoot` after Phase 3 is what makes boot silent. Re-run with `--wipe-slot=tpm2` if PCRs drift.
+- **Random-key swap** — `/dev/urandom` as the crypttab key source, combined with the `swap` option, re-mkswaps the mapper device with a fresh random key on every boot. Means hibernation is impossible (keys die at shutdown), which is fine here — battery is dead.
 - **AHCI** — Normal SATA mode. Required for Linux to see the drives as plain block devices. Flip from RAID in BIOS before install.
 - **Ventoy** — USB tool that boots any ISO dropped onto the data partition. Menu pops up at boot.
 - **VTOYEFI** — Ventoy's ~32 MB companion partition (boots the menu). Sibling of the data partition on the same stick.

@@ -9,17 +9,18 @@ You'll need:
 - Wi-Fi SSID + password
 - The Bitwarden master password (for later — Bitwarden desktop in Arch)
 - A second device (phone) to read this if you can't print
-- A safe place to stash the **BitLocker recovery key** (see Phase 1 step 7)
+- A safe place to stash **two** recovery secrets: the **BitLocker recovery key** (see Phase 1 step 7) and the **LUKS passphrase** you pick in Phase 2d
 
 What gets touched:
-- **Samsung 512 GB** → EFI + MSR + Windows 160 GB + Arch btrfs (~316 GB)
-- **Netac 128 GB** → Arch recovery ISO + 16 GB swap + ext4 for `/var/log` + `/var/cache`
+- **Samsung 512 GB** → EFI + MSR + Windows 160 GB (BitLocker) + Arch LUKS+btrfs (~316 GB)
+- **Netac 128 GB** → Arch recovery ISO (unencrypted) + LUKS swap (16 GB, random key per boot) + LUKS ext4 for `/var/log` + `/var/cache`
 
 **Both drives are required.** `install.sh` size-detects both and aborts if either is missing. If you've repurposed the Netac for something else, swap it back in before starting — the layout is not optional (swap, recovery partition, and the `/var/log`+`/var/cache` ext4 all depend on it per [docs/decisions.md](../docs/decisions.md) §Q9).
 
-Two things to know before starting:
+Three things to know before starting:
 - **Hostnames are intentionally different**: Windows = `Metis`, Arch = `inspiron`. Your router sees whichever OS is up. This is cosmetic, not a bug (see recovery §D if it bothers you).
 - **First Windows boot after Arch install will prompt for the BitLocker recovery key.** Expected — systemd-boot changes PCR values. Phase 1 step 7 stashes the key in Bitwarden.
+- **First Arch boot after install will prompt for the LUKS passphrase.** Also expected — TPM2 autounlock isn't wired until Phase 3 runs `systemd-cryptenroll`. After that, Arch boots silently (same model as BitLocker). The passphrase stays as a key slot forever so you can always recover.
 
 ---
 
@@ -134,12 +135,15 @@ The script self-mounts the Ventoy data partition at `/run/ventoy` (for `chroot.s
 It will:
 1. Size-detect the Samsung (500–600 GB) and Netac (100–150 GB). **Aborts loudly if either is missing** — don't blindly retry, fix it.
 2. Show the plan and ask `[yes/NO]`. Type **`yes`** exactly.
-3. **Prompt once up-front for root password + tom's password** (both confirmed twice; SHA-512-hashed via `openssl passwd -6` before pacstrap starts). Tom's is your daily login — make it strong; you'll bypass it with TPM-PIN and fingerprint later. Nothing else will ask you for input until it's done.
-4. Partition, mkfs, pacstrap (~15 min — biggest wait, fully unattended).
-5. Enter chroot (passwords handed in via a mode-600 file), install systemd-boot, wire services, write PAM for fingerprint-sudo + gnome-keyring.
-6. `dd` the Arch ISO onto the Netac recovery partition (~1 min).
+3. **Prompt once up-front for three secrets** (all confirmed twice; nothing else will ask you for input until install is done):
+   - **root password** — account recovery.
+   - **tom's password** — your daily login. Make it strong; you'll bypass it with TPM-PIN and fingerprint later.
+   - **LUKS passphrase** — unlocks both the Samsung root and Netac /var at boot until TPM2 autounlock is wired in Phase 3. **Stash this in Bitwarden now** (next to the BitLocker key) as a Secure Note called "Inspiron LUKS passphrase". 8+ chars, 12+ recommended. If PCR values ever drift, this is what gets you back in.
+4. LUKS-format both data partitions, mkfs, pacstrap (~15 min — biggest wait, fully unattended).
+5. Enter chroot (passwords + LUKS UUIDs handed in via mode-600 files), install systemd-boot, write `/etc/crypttab.initramfs` + `/etc/crypttab`, add `sd-encrypt` to mkinitcpio HOOKS, wire services + PAM for fingerprint-sudo + gnome-keyring.
+6. `dd` the Arch ISO onto the Netac recovery partition (~1 min, unencrypted by design so it still boots from F12 if Arch is hosed).
 7. Copy `postinstall.sh` + dotfiles into `/home/tom/`.
-8. Unmount and print "Done."
+8. Unmount, close LUKS mappers, and print "Done."
 
 **If install.sh dies:**
 - **"No 500–600 GB disk detected"** → phase-1 Windows install didn't run. Boot back into Windows first.
@@ -168,6 +172,7 @@ It will:
   - Auto-discovered **Windows Boot Manager**
 
   3-sec timeout; Arch Linux (the non-LTS) is default.
+- **LUKS passphrase prompt** appears early in boot: `Please enter passphrase for disk (cryptroot):`. Type the passphrase you set in Phase 2d. The /var volume auto-unlocks from a keyfile — only cryptroot asks you for anything. After Phase 3's `systemd-cryptenroll` runs, this prompt is replaced by silent TPM unlock.
 - It boots to a black screen, then to **SDDM** (graphical login).
 
 **If the systemd-boot menu doesn't show Windows:** boot into Arch anyway, then as root: `bootctl list` should show Windows. If not: `ls /boot/EFI/Microsoft/Boot/bootmgfw.efi` — missing file means Windows install didn't write it (rare). Fix later; don't block on this.
@@ -217,6 +222,7 @@ It will:
 5. **Points Bitwarden at your self-hosted server** `https://hass4150.duckdns.org:7277` — CLI via `bw config server`, desktop via pre-seeded `~/.config/Bitwarden/data.json`. If the desktop login screen still shows "bitwarden.com" in the "Logging in on:" dropdown, pick **Self-hosted** and paste that URL manually.
 6. **Prompt you to enroll your fingerprint** — touch the sensor 5 times, slight re-position each touch. Reader is auto-detected; if enrollment fails the script prints a diagnostic (full `lsusb`, `fprintd-list`, last 20 log lines) and offers to install `libfprint-git` from AUR and retry.
 7. **Prompt you to set a TPM-PIN** (`pinutil setup`) — 6+ chars. This is what you'll type for sudo from now on.
+7.5. **Enroll TPM2 for silent LUKS autounlock** (`systemd-cryptenroll --tpm2-pcrs=0+7 /dev/disk/by-partlabel/ArchRoot`). Prompts once for your LUKS passphrase so it can add the TPM slot. After this reboot, `cryptroot` unseals from the TPM automatically — no passphrase prompt at boot. Passphrase slot stays intact as recovery.
 8. Wires `~/.ssh/config` for Bitwarden SSH agent.
 9. Plants `~/.zshrc.d/arch-first-login.zsh` (one-shot: `bw login` + `gh auth login` + git name/email) and `~/.zshrc.d/arch-ssh-signing.zsh` (every-login, self-deletes once SSH signing is wired).
 10. Builds zgenom plugins (warms cache so first login is fast), writes tmux/helix/ghostty configs.
@@ -382,7 +388,12 @@ These are the failure modes most likely to hit on the very first boot after `ins
 
 **Fix:** Boot the Ventoy USB → Arch ISO → live environment. Then:
 ```bash
-mount -o subvol=@ /dev/disk/by-label/ArchRoot /mnt
+# Unlock the LUKS container first — /dev/disk/by-label/ArchRoot is the btrfs
+# label inside LUKS, so it only appears after `cryptsetup open`. Use the
+# raw partition via PARTLABEL (set by install.sh sgdisk).
+cryptsetup open /dev/disk/by-partlabel/ArchRoot cryptroot
+# Prompt for the LUKS passphrase (the one from Phase 2d / Bitwarden).
+mount -o subvol=@ /dev/mapper/cryptroot /mnt
 # Find the EFI partition by GPT type GUID — Windows diskpart doesn't
 # assign a PARTLABEL, so by-partlabel lookups are unreliable.
 EFI=$(lsblk -rno NAME,PARTTYPE | awk '$2=="c12a7328-f81f-11d2-ba4b-00a0c93ec93b"{print "/dev/"$1; exit}')
@@ -391,6 +402,8 @@ arch-chroot /mnt
 grep -q '^MODULES=(btrfs)' /etc/mkinitcpio.conf || sed -i 's/^MODULES=.*/MODULES=(btrfs)/' /etc/mkinitcpio.conf
 mkinitcpio -P
 exit
+umount -R /mnt
+cryptsetup close cryptroot
 reboot
 ```
 
@@ -472,7 +485,8 @@ SDDM login doesn't use fingerprint by default — it's wired for **sudo/polkit/h
 **Fix — from the Ventoy USB Arch live environment:**
 ```bash
 # Boot Ventoy → Arch ISO → live env → connect wifi.
-mount -o subvol=@ /dev/disk/by-label/ArchRoot /mnt
+cryptsetup open /dev/disk/by-partlabel/ArchRoot cryptroot   # LUKS passphrase
+mount -o subvol=@ /dev/mapper/cryptroot /mnt
 arch-chroot /mnt
 
 # Strip every non-standard auth line from /etc/pam.d/sudo back to defaults.
@@ -483,15 +497,17 @@ account    include      system-auth
 session    include      system-auth
 EOF
 exit
+umount -R /mnt; cryptsetup close cryptroot
 reboot
 ```
 After reboot, `sudo` takes your **password** (TPM-PIN + fingerprint are gone until you re-wire PAM). Fix the missing module: reinstall `pinpam-git` or `fprintd`, then re-run the PAM wiring blocks from `postinstall.sh` by hand.
 
 **Prevention:** after `postinstall.sh` finishes, always test sudo from a **second** terminal before closing the one you ran the script in. If sudo fails, you can fix PAM from the still-privileged parent session without rebooting.
 
-**Sibling issue — locked out of SDDM login:** the same kind of break can hit `/etc/pam.d/sddm` (if postinstall added a `pam_fprintd.so` line and fprintd is missing). Symptom: SDDM rejects every password. Recovery is identical to the sudo case — boot the Ventoy USB → Arch live → chroot → restore the file:
+**Sibling issue — locked out of SDDM login:** the same kind of break can hit `/etc/pam.d/sddm` (if postinstall added a `pam_fprintd.so` line and fprintd is missing). Symptom: SDDM rejects every password. Recovery is identical to the sudo case — boot the Ventoy USB → Arch live → unlock LUKS → chroot → restore the file:
 ```bash
-mount -o subvol=@ /dev/disk/by-label/ArchRoot /mnt
+cryptsetup open /dev/disk/by-partlabel/ArchRoot cryptroot   # LUKS passphrase
+mount -o subvol=@ /dev/mapper/cryptroot /mnt
 arch-chroot /mnt
 cat > /etc/pam.d/sddm <<'EOF'
 #%PAM-1.0
@@ -500,7 +516,9 @@ account    include      system-login
 password   include      system-login
 session    include      system-login
 EOF
-exit; reboot
+exit
+umount -R /mnt; cryptsetup close cryptroot
+reboot
 ```
 Password login returns; re-wire fingerprint after you've reinstalled fprintd.
 
@@ -542,6 +560,59 @@ lsmod | grep -iE 'nvidia|nouveau'     # expect empty output
 ```
 If modules still load: check `/etc/mkinitcpio.conf` — `MODULES=(btrfs)` should NOT contain `nvidia` or `nouveau`. Check `/etc/modules-load.d/` for any file forcing them.
 
+### M-luks. LUKS prompt rejects your passphrase at boot
+
+**Cause:** Most likely you fat-fingered it during Phase 2d (same failure mode as the account passwords below — the `prompt_luks` helper in `install.sh` only confirms against its own re-entry, never against reality). Less likely: initramfs keyboard layout is wrong, so a symbol you're typing is different from what the kernel receives.
+
+**Fix (still have the passphrase in Bitwarden, typo was at install time):** you don't — if both copies were typed wrong identically, the LUKS header's slot 0 holds that typo as the real passphrase. Continue reading — there's no magic recovery.
+
+**Fix (typo at install, no backup):** boot the Ventoy USB → Arch ISO → live env. The Samsung data is unreachable without the passphrase. Full reinstall is the only path — re-run Phase 2 with the corrected passphrase, being careful to type it slowly both times.
+
+**Fix (passphrase is correct, layout issue):** at the LUKS prompt, try typing slowly. If your passphrase contains symbols (`!@#$%^&*`), the initramfs may be using a US layout even if your physical keyboard is something else. Workaround: reinstall with a passphrase that's ASCII letters + digits only until SDDM, then change it later with `sudo cryptsetup luksChangeKey /dev/disk/by-partlabel/ArchRoot`.
+
+**Preventive note for re-running Phase 2:** `install.sh` enforces an 8+ character minimum and re-prompts on mismatch, but it cannot catch a consistent typo. Type slowly; verify against Bitwarden before hitting Enter the second time.
+
+### N-luks. TPM autounlock didn't kick in — still getting the passphrase prompt every boot
+
+**Cause:** One of three things:
+1. `postinstall.sh` skipped the TPM enrollment block (no `/dev/tpm0`, or `SKIP_TPM_LUKS=1` was set).
+2. Enrollment succeeded but the PCR values the TPM sealed against have drifted — a firmware update, Secure Boot state change, or bootloader swap between enrollment and now will all do this.
+3. The LUKS crypttab entry is missing `tpm2-device=auto` (older `chroot.sh` runs).
+
+**Check:**
+```bash
+# Is there a tpm2 slot?
+sudo systemd-cryptenroll /dev/disk/by-partlabel/ArchRoot
+# Expect to see a row with TYPE=tpm2. If only "password", enrollment didn't happen.
+
+# Is crypttab.initramfs asking for TPM?
+grep tpm2-device /etc/crypttab.initramfs
+# Expect: ...luks,discard,tpm2-device=auto
+```
+
+**Fix (no tpm2 slot):** re-run the enrollment manually:
+```bash
+sudo systemd-cryptenroll --tpm2-device=auto --tpm2-pcrs=0+7 /dev/disk/by-partlabel/ArchRoot
+# Type the LUKS passphrase when prompted; new slot added.
+sudo reboot
+```
+
+**Fix (PCR drift):** unenroll the stale slot, re-enroll against current PCRs:
+```bash
+sudo systemd-cryptenroll --wipe-slot=tpm2 /dev/disk/by-partlabel/ArchRoot
+sudo systemd-cryptenroll --tpm2-device=auto --tpm2-pcrs=0+7 /dev/disk/by-partlabel/ArchRoot
+sudo reboot
+```
+
+**Fix (crypttab missing option):**
+```bash
+sudo sed -i 's/luks,discard$/luks,discard,tpm2-device=auto/' /etc/crypttab.initramfs
+sudo mkinitcpio -P
+sudo reboot
+```
+
+If TPM enrollment keeps failing entirely, not a blocker — the passphrase path works forever. You type ~6 chars extra per boot; that's it.
+
 ### K. "Login incorrect" at SDDM / first TTY — you fat-fingered `tom`'s password at the install prompt
 
 **Cause:** `install.sh`'s `prompt_password` accepts any entry that matches its own confirmation. If you typed the same wrong password twice, it hashed that wrong password via `openssl passwd -6` and handed it to `chroot.sh`, which applied it with `chpasswd -e`. No interactive validation ever happened. Same goes for `root`.
@@ -549,12 +620,14 @@ If modules still load: check `/etc/mkinitcpio.conf` — `MODULES=(btrfs)` should
 **Fix — from the Ventoy USB Arch live environment:**
 ```bash
 # Boot Ventoy → Arch ISO → live env.
-mount -o subvol=@ /dev/disk/by-label/ArchRoot /mnt
+cryptsetup open /dev/disk/by-partlabel/ArchRoot cryptroot   # LUKS passphrase
+mount -o subvol=@ /dev/mapper/cryptroot /mnt
 arch-chroot /mnt
 passwd tom        # set a new one
 passwd            # while you're here, reset root too if needed
 exit
 umount -R /mnt
+cryptsetup close cryptroot
 reboot
 ```
 No other state needs resetting — PAM, keyring, and Bitwarden are all keyed off the new password automatically from the next login.

@@ -167,3 +167,38 @@
 #### P) Installer password handoff: pre-hashed via mode-600 file
 - `phase-2-arch-install/install.sh` reads the root + `tom` passwords once at the top of the run, hashes them immediately with `openssl passwd -6` (SHA-512), and hands the hashes to `chroot.sh` via a mode-600 file under `/mnt/tmp/`. The plaintext values never touch disk.
 - **Caveat**: while the installer is still running, the `openssl passwd` invocation does briefly appear in `ps` (as the process argument) on the live ISO. The live environment is single-user and ephemeral, so this is acceptable — but don't run the installer on a shared/networked machine. After chroot finishes, the hash file is deleted and only the hashed values remain in `/etc/shadow`.
+
+### Q11: Full-Disk Encryption (LUKS2 + TPM2 autounlock)
+
+Parity with Windows BitLocker on the same machine. "Stolen laptop" becomes "brick" — data is readable only with the passphrase or an intact boot chain sealed to TPM2 PCRs 0+7.
+
+**Scope of encryption:**
+- **Samsung `ArchRoot`** (btrfs + @ / @home / @snapshots subvolumes) — LUKS2 container named `cryptroot`. Passphrase slot + TPM2 slot (PCRs 0+7).
+- **Netac `ArchVar`** (ext4 — /var/log + /var/cache) — LUKS2 container named `cryptvar`. Passphrase slot + keyfile slot reading from `/etc/cryptsetup-keys.d/cryptvar.key` on the (TPM-unlocked) cryptroot.
+- **Netac `ArchSwap`** — plain dm-crypt with a random `/dev/urandom` key generated per boot (`cryptswap`). Swap never needs to survive reboots, so a persistent LUKS header is pointless.
+- **Netac `ArchRecovery`** — **unencrypted by design.** It's a raw Arch ISO meant to be bootable from F12 when the main install is hosed; encrypting it would defeat that purpose and there's nothing sensitive on it.
+- **Samsung EFI** — unencrypted (UEFI spec requires the ESP to be FAT32 and unencrypted). The kernel + initramfs on it are public data, same as any normal install.
+
+**Key management:**
+- One passphrase set at install time (Phase 2d `install.sh`) unlocks both LUKS containers. Stored in a bash variable in install.sh, never touches disk. Used for `luksFormat` both volumes and `luksAddKey` for the cryptvar keyfile; then `unset` at end of install.
+- TPM2 enrollment happens in Phase 3 (`systemd-cryptenroll --tpm2-device=auto --tpm2-pcrs=0+7`). After that, `cryptroot` unseals silently unless the boot chain changes.
+- The passphrase is **the recovery mechanism.** Stash it in Bitwarden parallel to the BitLocker key.
+
+**PCR choice — 0+7:**
+- PCR 0 = UEFI firmware code. PCR 7 = Secure Boot policy (on/off + key hashes).
+- Both are stable across reboots with the same bootloader config, but change when firmware updates or Secure Boot state is toggled — exactly the "boot chain was tampered with" signal we want.
+- PCRs 4/5/8/9 (bootloader + kernel measurements) change every kernel upgrade, which would force a passphrase prompt after every `pacman -Syu`. Rejected.
+- This matches BitLocker's default PCR profile on the Windows side, so the security properties mirror each other across dual-boot.
+
+**crypttab layout:**
+- `/etc/crypttab.initramfs` — baked into initramfs by mkinitcpio's `sd-encrypt` hook. Contains cryptroot only.
+- `/etc/crypttab` — read post-init by systemd-cryptsetup generators. Contains cryptvar (keyfile) + cryptswap (random key).
+
+**mkinitcpio HOOKS ordering:** `sd-encrypt` sits between `block` and `filesystems`. Without this, initramfs can't open cryptroot before trying to mount `/`.
+
+**Kernel cmdline:** `root=/dev/mapper/cryptroot rootflags=subvol=@` in all three systemd-boot loader entries (arch.conf, arch-fallback.conf, arch-lts.conf). No `rd.luks.name=` needed — crypttab.initramfs is the single source of truth.
+
+**Known limitations:**
+- Secure Boot stays off until post-phase-3 `sbctl` wiring. PCR 7 still has a consistent hash for "Secure Boot off," so the TPM seal is stable — but re-enabling Secure Boot later will invalidate the seal and require a re-enrollment.
+- Recovery partition on Netac is unencrypted. A motivated attacker with physical access could swap the raw ISO for a malicious one. Mitigated by physical security of the laptop (no battery, stashed under a desk, no shared network access).
+- If the TPM is reset (firmware reset, motherboard replacement), the sealed slot is dead and the passphrase is the only way in. Hence the "stash in Bitwarden" step is mandatory, not optional.

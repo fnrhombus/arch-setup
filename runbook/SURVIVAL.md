@@ -30,11 +30,16 @@ Password: <the password you set during phase 2>
 If the password doesn't work, the `tom` account got scrambled. Boot the Netac recovery entry (Arch live ISO), then:
 
 ```bash
-mount -o subvol=@ /dev/disk/by-label/ArchRoot /mnt
+# Unlock LUKS first — /dev/disk/by-label/ArchRoot is inside the LUKS
+# container and only appears after cryptsetup open. The raw partition is
+# visible via PARTLABEL (set by install.sh).
+cryptsetup open /dev/disk/by-partlabel/ArchRoot cryptroot    # LUKS passphrase
+mount -o subvol=@ /dev/mapper/cryptroot /mnt
 arch-chroot /mnt
 passwd tom
 exit
 umount -R /mnt
+cryptsetup close cryptroot
 reboot
 ```
 
@@ -136,13 +141,16 @@ cat ~/.local/share/hyprland/hyprland.log | tail -100
 2. If the Netac entry isn't in F12 either, boot the **Ventoy USB** → Arch live ISO.
 3. From the live environment — the EFI lives at `/boot` on the installed system, so mount it there (matches `chroot.sh`'s `bootctl --path=/boot install`):
    ```bash
-   mount -o subvol=@ /dev/disk/by-label/ArchRoot /mnt
+   cryptsetup open /dev/disk/by-partlabel/ArchRoot cryptroot    # LUKS passphrase
+   mount -o subvol=@ /dev/mapper/cryptroot /mnt
    # Find the EFI partition — Windows diskpart doesn't set a PARTLABEL, so
    # grep by the GPT EFI type GUID instead:
    EFI=$(lsblk -rno NAME,PARTTYPE | awk '$2=="c12a7328-f81f-11d2-ba4b-00a0c93ec93b"{print "/dev/"$1; exit}')
    mount "$EFI" /mnt/boot
    arch-chroot /mnt
    bootctl --path=/boot install     # reinstalls systemd-boot to the ESP
+   exit
+   umount -R /mnt; cryptsetup close cryptroot
    ```
 
 ### Samsung is physically dead

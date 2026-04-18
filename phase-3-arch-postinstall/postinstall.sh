@@ -183,6 +183,46 @@ else
     warn "pinutil not found; skipping TPM-PIN setup."
 fi
 
+# ---------- 7.5 LUKS TPM2 autounlock (FDE per decisions.md §Q11) ----------
+# install.sh sets the LUKS passphrase (key slot 0) at install time; this
+# step binds the master key to TPM2 PCRs 0+7 as an additional slot so the
+# next boot is silent. The passphrase stays as the recovery fallback —
+# needed if PCR values drift (firmware update, bootloader swap, moving the
+# disk to a different machine). Idempotent: skips if a TPM2 slot is already
+# enrolled, so re-running postinstall doesn't pile up duplicate slots.
+#
+# Why PCRs 0+7:
+#   PCR 0 measures UEFI firmware code.
+#   PCR 7 measures the Secure Boot policy (on/off + key hashes).
+# Both are stable across reboots of the same bootloader configuration but
+# change when firmware is updated or Secure Boot state is toggled — exactly
+# the "the boot chain was tampered with" signal we want to gate unsealing
+# on. PCRs 4/5/8/9 (bootloader + kernel measurements) change every kernel
+# upgrade, which would force the passphrase after every `pacman -Syu`.
+# Only cryptroot is TPM-enrolled. cryptvar auto-unlocks from a keyfile on
+# the (TPM-unlocked) cryptroot filesystem — a second TPM slot would burn
+# LUKS budget without adding at-rest protection.
+if [[ -c /dev/tpm0 || -c /dev/tpmrm0 ]] && [[ -z "${SKIP_TPM_LUKS:-}" ]]; then
+    dev="/dev/disk/by-partlabel/ArchRoot"
+    if [[ -b "$dev" ]]; then
+        # systemd-cryptenroll with no action flag prints "SLOT TYPE" header
+        # plus one line per key slot. Check for an existing tpm2 slot so a
+        # re-run is idempotent (otherwise a second enroll adds a second
+        # tpm2 slot, wastes LUKS slot budget, and silently succeeds).
+        if sudo systemd-cryptenroll "$dev" 2>/dev/null | awk 'NR>1 && $2=="tpm2"{f=1} END{exit !f}'; then
+            log "TPM2 already enrolled on ArchRoot — skipping."
+        else
+            log "Enrolling TPM2 autounlock for ArchRoot (enter the LUKS passphrase when prompted)..."
+            sudo systemd-cryptenroll --tpm2-device=auto --tpm2-pcrs=0+7 "$dev" \
+                || warn "TPM enroll failed — boot still works with passphrase."
+        fi
+    else
+        warn "$dev not found — skipping TPM enroll."
+    fi
+else
+    warn "No TPM device (or SKIP_TPM_LUKS set) — boot will continue to prompt for the LUKS passphrase."
+fi
+
 # ---------- 8. Bitwarden: self-hosted server + SSH agent wiring ----------
 BW_SERVER="${BW_SERVER:-https://hass4150.duckdns.org:7277}"
 
@@ -676,6 +716,8 @@ check "bitwarden desktop"   "command -v bitwarden"
 check "bitwarden-cli"       "command -v bw"
 check "pinutil (TPM PIN)"   "command -v pinutil"
 check "pinpam in sudo"      "grep -q pam_pinpam /etc/pam.d/sudo"
+check "LUKS root TPM2"      "sudo systemd-cryptenroll /dev/disk/by-partlabel/ArchRoot 2>/dev/null | awk 'NR>1 && \$2==\"tpm2\"{f=1} END{exit !f}'"
+check "cryptvar keyfile"    "test -f /etc/cryptsetup-keys.d/cryptvar.key"
 check "fprintd enrolled"    "fprintd-list tom 2>/dev/null | grep -q 'Fingerprints for user tom'"
 check "ssh agent wired"     "grep -q bitwarden-ssh-agent.sock $HOME/.ssh/config"
 check "udev usb-serial"     "test -f /etc/udev/rules.d/99-usb-serial.rules"
