@@ -35,7 +35,7 @@ The whole end-to-end flow from a bare dev machine is:
 Markdown files split into two groups by audience:
 
 - **[docs/](docs/)** — Planning and rationale. Read on the dev machine when editing the project. Not strictly needed at the laptop (but staged anyway, since phase-3.5 references `docs/decisions.md`).
-- **[runbook/](runbook/)** — What the user reads *at the laptop* during the install. The PDF (`pnpm pdf`) is generated from `runbook/INSTALL-RUNBOOK.md`.
+- **[runbook/](runbook/)** — What the user reads *at the laptop* during the install. `pnpm pdf` renders every `runbook/*.md` to a sibling `.pdf`; `INSTALL-RUNBOOK.pdf` is the one you print.
 
 Everything else at the repo root is a deliverable the install itself consumes (scripts, XML, Ventoy config, phase dirs) or dev-machine plumbing (`package.json`, `.mise.toml`, `scripts/`).
 
@@ -54,10 +54,10 @@ Everything else at the repo root is a deliverable the install itself consumes (s
 - [runbook/SURVIVAL.md](runbook/SURVIVAL.md) — Minimum-viable rescue card. What to do if the desktop is broken or Claude isn't running: TTY login, Wi-Fi from `iwctl`, launch a terminal/browser, start Claude.
 
 ### Phase 0 — dev-machine USB prep
-- [package.json](package.json) — Entry points for the dev-machine prep flow. `pnpm i` chains `fetch-assets.ps1` → `stage-usb.ps1` (postinstall hook). `pnpm stage` re-runs the USB staging only; `pnpm restore:force` re-downloads ISOs. `pnpm pdf` renders `runbook/INSTALL-RUNBOOK.md` → `runbook/INSTALL-RUNBOOK.pdf`.
+- [package.json](package.json) — Entry points for the dev-machine prep flow. `pnpm i` chains `fetch-assets.ps1` → `stage-usb.ps1` (postinstall hook). `pnpm stage` re-runs the USB staging only; `pnpm restore:force` re-downloads ISOs. `pnpm pdf` renders every `runbook/*.md` to a sibling `.pdf`.
 - [scripts/fetch-assets.ps1](scripts/fetch-assets.ps1) — Downloads the Arch ISO (latest from Rackspace mirror) + Ventoy Windows release (latest from GitHub API) + Windows 11 consumer ISO via vendored [Fido.ps1](https://github.com/pbatard/Fido) into `assets/`. Fido output is renamed to the canonical `Win11_25H2_English_x64_v2.iso` so `ventoy/ventoy.json`'s `auto_install` match keeps working — bump both together when Microsoft ships 26H2. Idempotent (`-Force` to override). On any Fido failure (MS API drift, etc.) falls through to actionable manual-download instructions.
 - [scripts/stage-usb.ps1](scripts/stage-usb.ps1) — Auto-finds the Ventoy data partition by its `Ventoy` filesystem label, sanity-checks with the ~32 MB VTOYEFI companion, then mirrors ISOs + configs + phase scripts + `docs/` + `runbook/` onto it via robocopy. Soft-exits (code 2) if no USB is present, so `pnpm i` never fails just because the stick is unplugged.
-- [scripts/runbook-pdf.mjs](scripts/runbook-pdf.mjs) — `pnpm pdf` entry point. Renders `runbook/INSTALL-RUNBOOK.md` → `runbook/INSTALL-RUNBOOK.pdf` via `marked` + Edge headless (`--print-to-pdf`). 5.5"×8.5" pages, 0.5" margins, 12pt body.
+- [scripts/runbook-pdf.mjs](scripts/runbook-pdf.mjs) — `pnpm pdf` entry point. Renders every `runbook/*.md` → `runbook/<name>.pdf` via `marked` + Edge headless (`--print-to-pdf`). 5.5"×8.5" pages, 0.5" margins, 12pt body.
 - [assets/](assets/) — Directory where ISOs land. `.gitignore` covers all auto-populated entries; the Win11 ISO is also gitignored by pattern. Everything else you drop in shows up as untracked so you can decide deliberately.
 
 ### Phase 1 — Windows install
