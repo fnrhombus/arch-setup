@@ -53,7 +53,7 @@ sudo pacman -Syu --noconfirm --needed \
     noto-fonts noto-fonts-emoji ttf-jetbrains-mono-nerd ttf-firacode-nerd \
     bitwarden bitwarden-cli \
     ghostty fuzzel cliphist swaync satty hyprshot \
-    mise chezmoi github-cli sesh \
+    mise chezmoi github-cli \
     docker docker-compose docker-buildx \
     snapper snap-pac
 
@@ -87,7 +87,8 @@ yay -S --noconfirm --needed \
     visual-studio-code-bin \
     microsoft-edge-stable-bin \
     catppuccin-sddm-theme-mocha \
-    pinpam-git
+    pinpam-git \
+    sesh
 
 # ---------- 4. (no local SSH keygen — Bitwarden SSH agent holds keys) ----------
 # Keys live in the Bitwarden vault as "SSH key" items and surface via
