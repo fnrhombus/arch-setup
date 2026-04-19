@@ -38,9 +38,33 @@ function Get-WebFile {
 # ---------- Arch Linux ISO (latest) ----------
 # rackspace mirror keeps a stable /latest/ path with dated + undated symlinks.
 $archMirror = 'https://mirror.rackspace.com/archlinux/iso/latest'
-Get-WebFile "$archMirror/archlinux-x86_64.iso"     (Join-Path $assetsDir 'archlinux-x86_64.iso')
-Get-WebFile "$archMirror/archlinux-x86_64.iso.sig" (Join-Path $assetsDir 'archlinux-x86_64.iso.sig')
-Get-WebFile "$archMirror/sha256sums.txt"           (Join-Path $assetsDir 'archlinux-sha256sums.txt')
+$archIso     = Join-Path $assetsDir 'archlinux-x86_64.iso'
+$archSigFile = Join-Path $assetsDir 'archlinux-x86_64.iso.sig'
+$archSumFile = Join-Path $assetsDir 'archlinux-sha256sums.txt'
+Get-WebFile "$archMirror/archlinux-x86_64.iso"     $archIso
+Get-WebFile "$archMirror/archlinux-x86_64.iso.sig" $archSigFile
+Get-WebFile "$archMirror/sha256sums.txt"           $archSumFile
+
+# Verify ISO integrity. Without this a truncated/corrupt download silently
+# stages onto the USB; the laptop then boots far enough to copy airootfs to
+# RAM before failing with "Can't find ext4 filesystem" on loop0 — wasting
+# 10+ minutes before the user suspects the ISO. Compare against the
+# upstream sha256sums.txt we just downloaded (same mirror, same moment).
+$expectedLine = Get-Content $archSumFile | Where-Object { $_ -match '\s+archlinux-x86_64\.iso$' } | Select-Object -First 1
+if (-not $expectedLine) {
+    throw "Could not find archlinux-x86_64.iso entry in $archSumFile — mirror format changed?"
+}
+$expectedHash = ($expectedLine -split '\s+')[0].ToLower()
+$actualHash   = (Get-FileHash -Path $archIso -Algorithm SHA256).Hash.ToLower()
+if ($actualHash -ne $expectedHash) {
+    Write-Host "[fail] archlinux-x86_64.iso SHA256 mismatch:" -ForegroundColor Red
+    Write-Host "       expected $expectedHash" -ForegroundColor Red
+    Write-Host "       actual   $actualHash"   -ForegroundColor Red
+    Write-Host "       Deleting the corrupt ISO so the next `pnpm restore` re-downloads." -ForegroundColor Red
+    Remove-Item $archIso -Force -ErrorAction SilentlyContinue
+    throw "archlinux-x86_64.iso failed SHA256 verification — re-run `pnpm restore`."
+}
+Write-Host "[ok  ] archlinux-x86_64.iso SHA256 matches upstream"
 
 # ---------- Ventoy (latest release) ----------
 Write-Host "[info] querying Ventoy latest release..."

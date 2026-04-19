@@ -90,6 +90,23 @@ The inline PowerShell safety check in `autounattend.xml` aborted because either 
 2. Ventoy menu → pick **`archlinux-x86_64.iso`** → "Boot in normal mode". (The filename is always the undated symlink — `fetch-assets.ps1` mirrors that, not a dated release.)
 3. At the Arch ISO menu, pick **"Arch Linux install medium (x86_64, UEFI)"**. You land at a root shell.
 
+**If step 3 fails with `ERROR: Failed to mount '/dev/loop0'` + `EXT4-fs: VFS: Can't find ext4 filesystem`:** archiso copied the rootfs image to RAM but couldn't loop-mount it. Two causes, try in order:
+
+1. **Ventoy ISO-virtualization hiccup** (tried first because it's a 30-second retry). Reboot, Ventoy menu, arrow onto `archlinux-x86_64.iso`, press **`d`** to toggle Memdisk mode (status indicator appears next to the filename), then Enter. Memdisk loads the whole ISO into RAM before boot, bypassing Ventoy's loopback layer. The 7786's 16 GB RAM easily absorbs the 1.3 GB ISO.
+
+2. **Corrupt ISO on the USB.** If Memdisk mode fails with the same error, the ISO file itself is bad (download or robocopy corrupted it — `fetch-assets.ps1` and `stage-usb.ps1` both SHA256-verify post-op now, but older sticks may predate that). Go back to the dev machine:
+
+   ```powershell
+   # Replace V: with the Ventoy data drive letter
+   CertUtil -hashfile V:\archlinux-x86_64.iso SHA256
+   Get-Content V:\archlinux-sha256sums.txt | Select-String archlinux-x86_64.iso
+   ```
+   If the two hashes don't match, re-download + re-stage:
+   ```powershell
+   pnpm restore:force   # re-downloads + verifies the Arch ISO
+   pnpm stage:force     # re-copies + verifies on the USB
+   ```
+
 ### 2b. Network
 
 - **Ethernet via USB-C dock is the primary path** — plug it in before booting. `install.sh` pings `archlinux.org`; if ethernet is up, it skips Wi-Fi entirely.

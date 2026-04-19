@@ -138,6 +138,35 @@ foreach ($d in $dirs) {
     }
 }
 
+# ---------- post-copy SHA256 verification ----------
+# robocopy has been observed to silently corrupt large files when the USB
+# is flaky or the cable glitches mid-copy. A bad archlinux ISO on the stick
+# causes the laptop to boot archiso far enough to copy airootfs to RAM
+# before failing with "Can't find ext4 filesystem" on loop0 — wasting
+# ~10 min before the user suspects the ISO. Verify the on-USB copy against
+# the sha256sums.txt we just staged alongside it.
+$usbIso = Join-Path $usb 'archlinux-x86_64.iso'
+$usbSum = Join-Path $usb 'archlinux-sha256sums.txt'
+if ((Test-Path $usbIso) -and (Test-Path $usbSum)) {
+    Write-Host "[hash] verifying archlinux-x86_64.iso on USB (~30 s)..."
+    $expectedLine = Get-Content $usbSum | Where-Object { $_ -match '\s+archlinux-x86_64\.iso$' } | Select-Object -First 1
+    if ($expectedLine) {
+        $expectedHash = ($expectedLine -split '\s+')[0].ToLower()
+        $actualHash   = (Get-FileHash -Path $usbIso -Algorithm SHA256).Hash.ToLower()
+        if ($actualHash -ne $expectedHash) {
+            Write-Header "archlinux-x86_64.iso on USB is CORRUPT" 'Red'
+            Write-Host "expected $expectedHash" -ForegroundColor Red
+            Write-Host "actual   $actualHash"   -ForegroundColor Red
+            Write-Host "Deleting the bad copy — re-run `pnpm stage:force` to re-copy." -ForegroundColor Red
+            Remove-Item $usbIso -Force -ErrorAction SilentlyContinue
+            throw "archlinux-x86_64.iso on USB failed SHA256 verification."
+        }
+        Write-Host "[ok  ] archlinux-x86_64.iso on USB verified"
+    } else {
+        Write-Host "[warn] sha256sums.txt on USB has no archlinux-x86_64.iso entry — skipping verify" -ForegroundColor Yellow
+    }
+}
+
 Write-Header "Ventoy USB staged at $usb"
 Write-Host "Boot this stick on the Dell 7786 to start phase 1 (Windows install)." -ForegroundColor Green
 Write-Host ""
