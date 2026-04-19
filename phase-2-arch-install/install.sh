@@ -107,10 +107,16 @@ command -v pacstrap >/dev/null          || die "pacstrap missing — not in Arch
 command -v cryptsetup >/dev/null        || die "cryptsetup missing — not in Arch live env? (FDE requires it)"
 
 # ---------- 0.5 Ventoy data partition ----------
-# Ventoy boots the Arch ISO via a dm-linear target that holds the USB disk
-# exclusively, so a plain `mount /dev/sdX1` fails with "Can't open blockdev".
+# Ventoy boots the Arch ISO via a dm-linear target on /dev/sdX. While that
+# parent disk can still be read (dm is a passthrough, not an exclusive
+# claim), the kernel-synthesised partition node /dev/sdX1 is held busy by
+# archiso's probe hooks — so `mount /dev/sdX1` and even
+# `dmsetup create ... linear /dev/sdX1 0` both fail with "Device or
+# resource busy".
+#
 # The documented workaround (https://www.ventoy.net/en/doc_compatible_mount.html)
-# is to create a dm-linear passthrough for the data partition and mount that.
+# is to build a fresh dm-linear against the parent disk at partition 1's
+# sector offset, and mount *that* mapper device.
 VENTOY_MNT=/run/ventoy
 if ! mountpoint -q "$VENTOY_MNT"; then
     # Find the USB disk that the "ventoy" dm target depends on.
@@ -119,15 +125,19 @@ if ! mountpoint -q "$VENTOY_MNT"; then
     [[ -n "$VENTOY_DISK" ]] || die "No 'ventoy' dm target — boot the Arch ISO via Ventoy."
 
     # NVMe partitions are nvme0n1 → nvme0n1p1; SATA/USB are sdX → sdX1.
+    # Only used as the dm mapper name — we target /dev/$VENTOY_DISK below.
     if [[ "$VENTOY_DISK" == nvme* ]]; then VENTOY_PART="${VENTOY_DISK}p1"
     else                                   VENTOY_PART="${VENTOY_DISK}1"
     fi
-    [[ -b "/dev/$VENTOY_PART" ]] || die "Ventoy data partition /dev/$VENTOY_PART not found."
 
-    # Create the passthrough (idempotent across retries).
+    # Create the passthrough against the parent disk + partition 1 offset
+    # (idempotent across retries).
     if [[ ! -e "/dev/mapper/$VENTOY_PART" ]]; then
-        VENTOY_SZ=$(blockdev --getsz "/dev/$VENTOY_PART")
-        echo "0 $VENTOY_SZ linear /dev/$VENTOY_PART 0" | dmsetup create "$VENTOY_PART" \
+        PART_START=$(partx -g -o START "/dev/$VENTOY_DISK" | head -n1 | awk '{print $1}')
+        PART_SIZE=$(partx  -g -o SECTORS "/dev/$VENTOY_DISK" | head -n1 | awk '{print $1}')
+        [[ "$PART_START" =~ ^[0-9]+$ && "$PART_SIZE" =~ ^[0-9]+$ ]] \
+            || die "Could not read partition 1 geometry from /dev/$VENTOY_DISK."
+        echo "0 $PART_SIZE linear /dev/$VENTOY_DISK $PART_START" | dmsetup create "$VENTOY_PART" \
             || die "dmsetup create $VENTOY_PART failed."
     fi
 
