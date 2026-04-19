@@ -105,11 +105,18 @@ mkdir -p "$HOME/.ssh"; chmod 700 "$HOME/.ssh"
 if ! command -v claude >/dev/null; then
     if command -v mise >/dev/null; then
         log "Installing node@lts via mise, then Claude Code via npm..."
-        mise use -g node@lts 2>&1 | tee -a /tmp/mise-node.log || warn "mise node@lts install failed — check /tmp/mise-node.log"
-        # Run npm through mise so we hit the newly-installed node even in
-        # this non-interactive shell where mise hasn't been sourced yet.
-        mise exec -- npm install -g @anthropic-ai/claude-code 2>&1 | tee -a /tmp/mise-node.log || \
-            warn "Claude Code install failed — run manually: mise use -g node@lts && npm i -g @anthropic-ai/claude-code"
+        # Bash's `cmd | tee` returns tee's exit, masking a failed install behind
+        # success. Redirect to the log file directly so the `if` sees the real
+        # exit status, then show the tail on failure.
+        if ! mise use -g node@lts >>/tmp/mise-node.log 2>&1; then
+            warn "mise node@lts install failed — tail of /tmp/mise-node.log:"
+            tail -n 10 /tmp/mise-node.log >&2 || true
+        fi
+        if ! mise exec -- npm install -g @anthropic-ai/claude-code >>/tmp/mise-node.log 2>&1; then
+            warn "Claude Code install failed — tail of /tmp/mise-node.log:"
+            tail -n 10 /tmp/mise-node.log >&2 || true
+            warn "Retry manually: mise use -g node@lts && mise exec -- npm i -g @anthropic-ai/claude-code"
+        fi
     else
         warn "mise missing; skipping Claude Code CLI install."
     fi
@@ -682,6 +689,9 @@ fi
 # ---------- 19. verify ----------
 echo
 echo "=== Verify ==="
+# Clear shell's command hash cache so binaries installed during this very run
+# (e.g. pinutil from pinpam-git) resolve via `command -v` without a shell restart.
+hash -r 2>/dev/null || true
 check() {
     local name="$1"; local cmd="$2"
     if eval "$cmd" >/dev/null 2>&1; then
@@ -693,7 +703,7 @@ check() {
 
 check "zsh"                 "command -v zsh"
 check "tmux"                "command -v tmux"
-check "helix (hx)"          "command -v hx"
+check "helix"               "command -v helix || command -v hx"
 check "yay"                 "command -v yay"
 check "mise"                "command -v mise"
 check "chezmoi"             "command -v chezmoi"
@@ -716,15 +726,15 @@ check "sddm"                "systemctl is-enabled sddm"
 check "pipewire"            "systemctl --user is-enabled pipewire"
 check "bluetooth"           "systemctl is-enabled bluetooth"
 check "fprintd"             "systemctl is-enabled fprintd"
-check "snapper config /"    "test -f /etc/snapper/configs/root"
+check "snapper config /"    "sudo test -f /etc/snapper/configs/root"
 check "dotfiles staged"     "test -d $HOME/dotfiles/dots-hyprland"
 check "hyprland config"     "test -f $HOME/.config/hypr/hyprland.conf"
-check "bitwarden desktop"   "command -v bitwarden"
+check "bitwarden desktop"   "command -v bitwarden-desktop || command -v bitwarden"
 check "bitwarden-cli"       "command -v bw"
-check "pinutil (TPM PIN)"   "command -v pinutil"
+check "pinutil (TPM PIN)"   "test -x /usr/bin/pinutil || command -v pinutil"
 check "pinpam in sudo"      "grep -q pam_pinpam /etc/pam.d/sudo"
 check "LUKS root TPM2"      "sudo systemd-cryptenroll /dev/disk/by-partlabel/ArchRoot 2>/dev/null | awk 'NR>1 && \$2==\"tpm2\"{f=1} END{exit !f}'"
-check "cryptvar keyfile"    "test -f /etc/cryptsetup-keys.d/cryptvar.key"
+check "cryptvar keyfile"    "sudo test -f /etc/cryptsetup-keys.d/cryptvar.key"
 check "fprintd enrolled"    "fprintd-list tom 2>/dev/null | grep -q 'Fingerprints for user tom'"
 check "ssh agent wired"     "grep -q bitwarden-ssh-agent.sock $HOME/.ssh/config"
 check "udev usb-serial"     "test -f /etc/udev/rules.d/99-usb-serial.rules"
