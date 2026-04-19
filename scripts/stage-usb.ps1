@@ -14,13 +14,16 @@
 # Idempotent: re-running is cheap (robocopy skips unchanged files). -Force
 # re-copies everything regardless of size match.
 #
+# Does NOT delete stale files — that's `scripts/prune-usb.ps1`, invoked
+# by `pnpm prune:usb` (and chained after this script by `pnpm stage`).
+#
 # Auto-detection: finds the Ventoy data partition by its "Ventoy" filesystem
 # label, sanity-checks by confirming the ~32 MB VTOYEFI companion partition
 # is on the same physical disk. Aborts if the stick looks wrong.
 #
 # Called by:
-#   - `pnpm stage`                         (manual trigger)
-#   - `pnpm stage:force`                   (manual, re-copy everything)
+#   - `pnpm stage`                         (stage then prune)
+#   - `pnpm stage:force`                   (re-copy everything, then prune)
 #   - scripts/fetch-assets.ps1 end         (auto, if USB present)
 
 [CmdletBinding()]
@@ -124,6 +127,7 @@ foreach ($d in $dirs) {
     # /XO  : skip files in dest that are newer or same (idempotent)
     # /FFT : FAT-timestamp granularity (USB is exFAT — avoids false "newer" matches)
     # /NFL /NDL /NJH /NJS /NP /NC : quiet output (just the counts, no per-file spam)
+    # (No /PURGE — deletion is delegated to prune-usb.ps1.)
     $flags = @('/E', '/FFT', '/NFL', '/NDL', '/NJH', '/NJS', '/NP', '/NC')
     if (-not $Force) { $flags += '/XO' }
     Write-Host "[sync] $d\"
