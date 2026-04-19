@@ -119,10 +119,28 @@ command -v cryptsetup >/dev/null        || die "cryptsetup missing — not in Ar
 # sector offset, and mount *that* mapper device.
 VENTOY_MNT=/run/ventoy
 if ! mountpoint -q "$VENTOY_MNT"; then
-    # Find the USB disk that the "ventoy" dm target depends on.
+    # Find the USB disk. Prefer the "ventoy" dm target (present on the
+    # initial boot), but if the stick was unplugged + replugged the target
+    # is orphaned; fall back to blkid-by-label, then any USB-TRAN disk.
+    # Every fallback is wrapped in `|| true` so set -e doesn't kill us
+    # inside the command substitution before we can diagnose.
     VENTOY_DISK=$(dmsetup deps -o devname ventoy 2>/dev/null \
-        | grep -oE '[sv]d[a-z]+|nvme[0-9]+n[0-9]+' | head -n1)
-    [[ -n "$VENTOY_DISK" ]] || die "No 'ventoy' dm target — boot the Arch ISO via Ventoy."
+        | grep -oE '[sv]d[a-z]+|nvme[0-9]+n[0-9]+' | head -n1 || true)
+
+    if [[ -z "$VENTOY_DISK" ]]; then
+        # blkid -L Ventoy prints e.g. /dev/sdb1; PKNAME strips to the parent disk.
+        PART_NODE=$(blkid -L Ventoy 2>/dev/null || true)
+        if [[ -n "$PART_NODE" ]]; then
+            VENTOY_DISK=$(lsblk -ndo PKNAME "$PART_NODE" 2>/dev/null || true)
+        fi
+    fi
+
+    if [[ -z "$VENTOY_DISK" ]]; then
+        VENTOY_DISK=$(lsblk -ndo NAME,TRAN 2>/dev/null \
+            | awk '$2=="usb"{print $1; exit}' || true)
+    fi
+
+    [[ -n "$VENTOY_DISK" ]] || die "Could not locate the Ventoy USB disk (tried dmsetup/blkid/lsblk). Is the stick plugged in?"
 
     # NVMe partitions are nvme0n1 → nvme0n1p1; SATA/USB are sdX → sdX1.
     # Only used as the dm mapper name — we target /dev/$VENTOY_DISK below.
