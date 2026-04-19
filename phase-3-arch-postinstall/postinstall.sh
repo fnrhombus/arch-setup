@@ -131,6 +131,19 @@ fi
 # is wired in .zshrc below, no fragile external download needed.
 
 # ---------- 6. Fingerprint enrollment (Goodix-aware) ----------
+# Known unsupported Goodix PIDs (Match-On-Chip variants — require proprietary
+# vendor firmware/driver, not covered by stock libfprint OR libfprint-git).
+# Listing them up front lets us skip the enroll→diagnose→AUR-fallback dance
+# entirely on re-runs for hardware that will never work.
+GOODIX_UNSUPPORTED_PIDS='538c|5395|533c|55b4|600c|639c'
+if [[ -z "${SKIP_FPRINT:-}" ]]; then
+    if command -v lsusb >/dev/null && lsusb | grep -qiE "27c6:($GOODIX_UNSUPPORTED_PIDS)"; then
+        warn "Goodix reader ($(lsusb | grep -iE "27c6:($GOODIX_UNSUPPORTED_PIDS)" | head -1 | awk '{print $6}')) is a Match-On-Chip variant with no open-source driver."
+        warn "Skipping fingerprint setup. Set SKIP_FPRINT=1 on re-runs to suppress this message."
+        warn "Status reference: https://fprint.freedesktop.org/supported-devices.html"
+        SKIP_FPRINT=1
+    fi
+fi
 if [[ -z "${SKIP_FPRINT:-}" ]]; then
     GOODIX_PRESENT=0
     if command -v lsusb >/dev/null && lsusb | grep -qi '27c6:'; then
@@ -162,11 +175,14 @@ if [[ -z "${SKIP_FPRINT:-}" ]]; then
         # prompt defaults to N under --noconfirm, so the install aborts. Pull the
         # stock package out first (-Rdd bypasses reverse-dep check; fprintd will
         # briefly have no provider until libfprint-git re-provides it below).
-        if pacman -Q libfprint >/dev/null 2>&1; then
+        # Only attempt removal if stock libfprint is actually installed AND
+        # libfprint-git isn't already taking its place (avoids "target not found"
+        # noise on re-runs where the swap already happened).
+        if pacman -Q libfprint >/dev/null 2>&1 && ! pacman -Q libfprint-git >/dev/null 2>&1; then
             sudo pacman -Rdd --noconfirm libfprint || warn "Could not remove stock libfprint — conflict will still block install."
         fi
         if yay -S --noconfirm --needed libfprint-git && sudo systemctl restart fprintd; then
-            fprintd-enroll || warn "libfprint-git retry also failed — see https://fprint.freedesktop.org/supported-devices.html"
+            fprintd-enroll || warn "libfprint-git retry also failed — likely unsupported reader. See https://fprint.freedesktop.org/supported-devices.html"
         else
             warn "libfprint-git install failed — see https://fprint.freedesktop.org/supported-devices.html"
         fi
@@ -183,7 +199,18 @@ if command -v pinutil >/dev/null; then
         # it'd block forever with no way to type. Skip and warn instead.
         if [[ -t 0 ]]; then
             log "Setting up TPM-backed PIN (follow prompt; 6+ chars recommended)..."
-            sudo pinutil setup || warn "pinutil setup failed; skipping PIN wiring."
+            # tee lets the user see pinutil's prompts while we capture output
+            # for the "already has a PIN" check. PIPESTATUS[0] recovers pinutil's
+            # real exit code since tee always exits 0.
+            sudo pinutil setup 2>&1 | tee /tmp/pinutil-setup.log
+            pin_rc=${PIPESTATUS[0]}
+            if (( pin_rc == 0 )); then
+                log "TPM PIN set."
+            elif grep -q 'already has a PIN' /tmp/pinutil-setup.log; then
+                log "TPM PIN already set — skipping (idempotent re-run)."
+            else
+                warn "pinutil setup failed (rc=$pin_rc); PAM PIN unlock won't work until fixed."
+            fi
         else
             warn "No TTY — skipping 'pinutil setup'. Run it manually after login: sudo pinutil setup"
         fi
@@ -664,7 +691,10 @@ if command -v snapper >/dev/null && [[ ! -f /etc/snapper/configs/root ]]; then
         sudo chown -R :tom /.snapshots 2>/dev/null || true
         sudo chmod 750 /.snapshots
         # Baseline snapshot — safe now that config exists and .snapshots is writable.
-        sudo snapper -c root create --description "clean install postinstall baseline" || \
+        # --no-dbus bypasses snapperd (which caches config list at startup and
+        # doesn't see our hand-written /etc/snapper/configs/root without a
+        # restart). Reading config files directly makes `-c root` resolve.
+        sudo snapper --no-dbus -c root create --description "clean install postinstall baseline" || \
             warn "snapper baseline failed — config is in place but no snapshot taken."
     fi
 fi
