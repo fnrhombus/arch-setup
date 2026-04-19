@@ -629,18 +629,28 @@ fi
 if command -v snapper >/dev/null && [[ ! -f /etc/snapper/configs/root ]]; then
     log "Writing snapper config for / (handmade, avoids .snapshots conflict)..."
     sudo install -d -m 750 /etc/snapper/configs
-    sudo cp /etc/snapper/config-templates/default /etc/snapper/configs/root
-    sudo sed -i 's|^SUBVOLUME=.*|SUBVOLUME="/"|' /etc/snapper/configs/root
-    sudo sed -i 's|^ALLOW_USERS=.*|ALLOW_USERS="tom"|' /etc/snapper/configs/root
-    # Register the config name so `snapper list-configs` sees it.
-    if ! grep -q '^SNAPPER_CONFIGS=.*root' /etc/conf.d/snapper 2>/dev/null; then
-        echo 'SNAPPER_CONFIGS="root"' | sudo tee -a /etc/conf.d/snapper >/dev/null
+    # snapper moved its default template from /etc/ to /usr/share/ in recent
+    # releases. Probe both so this works on old and new package versions.
+    snapper_tmpl=""
+    for candidate in /usr/share/snapper/config-templates/default /etc/snapper/config-templates/default; do
+        if [[ -f "$candidate" ]]; then snapper_tmpl="$candidate"; break; fi
+    done
+    if [[ -z "$snapper_tmpl" ]]; then
+        warn "snapper installed but no default template found — skipping config."
+    else
+        sudo cp "$snapper_tmpl" /etc/snapper/configs/root
+        sudo sed -i 's|^SUBVOLUME=.*|SUBVOLUME="/"|' /etc/snapper/configs/root
+        sudo sed -i 's|^ALLOW_USERS=.*|ALLOW_USERS="tom"|' /etc/snapper/configs/root
+        # Register the config name so `snapper list-configs` sees it.
+        if ! grep -q '^SNAPPER_CONFIGS=.*root' /etc/conf.d/snapper 2>/dev/null; then
+            echo 'SNAPPER_CONFIGS="root"' | sudo tee -a /etc/conf.d/snapper >/dev/null
+        fi
+        sudo chown -R :tom /.snapshots 2>/dev/null || true
+        sudo chmod 750 /.snapshots
+        # Baseline snapshot — safe now that config exists and .snapshots is writable.
+        sudo snapper -c root create --description "clean install postinstall baseline" || \
+            warn "snapper baseline failed — config is in place but no snapshot taken."
     fi
-    sudo chown -R :tom /.snapshots 2>/dev/null || true
-    sudo chmod 750 /.snapshots
-    # Baseline snapshot — safe now that config exists and .snapshots is writable.
-    sudo snapper -c root create --description "clean install postinstall baseline" || \
-        warn "snapper baseline failed — config is in place but no snapshot taken."
 fi
 
 # ---------- 17. USB-serial udev rules (ESP32 / Pico / FTDI / CH340) ----------
