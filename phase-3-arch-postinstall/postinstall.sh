@@ -144,15 +144,11 @@ if [[ -z "${SKIP_FPRINT:-}" ]]; then
             echo "Reader vendor unknown/unrecognized — stock libfprint may still work with a retry,"
             echo "or your reader may be newer than the packaged libfprint."
         fi
-        echo "Fallback: install libfprint-git from AUR and retry. Covers newer PIDs for all vendors."
-        read -rp "Install libfprint-git now and retry fprintd-enroll? [y/N] " ans
-        if [[ "$ans" == "y" || "$ans" == "Y" ]]; then
-            if yay -S --noconfirm --needed libfprint-git && sudo systemctl restart fprintd; then
-                fprintd-enroll || warn "libfprint-git retry also failed."
-            else
-                warn "libfprint-git install failed."
-            fi
-            echo "Supported-device reference: https://fprint.freedesktop.org/supported-devices.html"
+        log "Falling back to libfprint-git from AUR (covers newer PIDs for all vendors)..."
+        if yay -S --noconfirm --needed libfprint-git && sudo systemctl restart fprintd; then
+            fprintd-enroll || warn "libfprint-git retry also failed — see https://fprint.freedesktop.org/supported-devices.html"
+        else
+            warn "libfprint-git install failed — see https://fprint.freedesktop.org/supported-devices.html"
         fi
     fi
 fi
