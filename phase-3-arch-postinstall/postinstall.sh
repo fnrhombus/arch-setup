@@ -158,6 +158,13 @@ if [[ -z "${SKIP_FPRINT:-}" ]]; then
             echo "or your reader may be newer than the packaged libfprint."
         fi
         log "Falling back to libfprint-git from AUR (covers newer PIDs for all vendors)..."
+        # libfprint-git conflicts with stock libfprint; pacman's "Remove libfprint? [y/N]"
+        # prompt defaults to N under --noconfirm, so the install aborts. Pull the
+        # stock package out first (-Rdd bypasses reverse-dep check; fprintd will
+        # briefly have no provider until libfprint-git re-provides it below).
+        if pacman -Q libfprint >/dev/null 2>&1; then
+            sudo pacman -Rdd --noconfirm libfprint || warn "Could not remove stock libfprint — conflict will still block install."
+        fi
         if yay -S --noconfirm --needed libfprint-git && sudo systemctl restart fprintd; then
             fprintd-enroll || warn "libfprint-git retry also failed — see https://fprint.freedesktop.org/supported-devices.html"
         else
