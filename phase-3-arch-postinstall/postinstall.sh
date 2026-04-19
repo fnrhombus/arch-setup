@@ -99,9 +99,10 @@ mkdir -p "$HOME/.ssh"; chmod 700 "$HOME/.ssh"
 # ---------- 5. Claude Code CLI ----------
 # Claude Code is distributed via npm (@anthropic-ai/claude-code). There's no
 # mise plugin named "claude-code" — that call was wrong. Route: use mise to
-# install a LTS node, then `npm install -g`. npm's prefix sits under
-# ~/.local/share/mise/installs/node/*/bin so it ends up on PATH once mise is
-# activated by .zshrc.
+# install a LTS node, then `npm install -g`. The binary lands under
+# ~/.local/share/mise/installs/node/<version>/bin/claude and is only on PATH
+# in mise-activated shells — symlink it into /usr/local/bin so `claude` works
+# from any shell, including sudo, scripts, and SDDM-launched apps.
 if ! command -v claude >/dev/null; then
     if command -v mise >/dev/null; then
         log "Installing node@lts via mise, then Claude Code via npm..."
@@ -120,6 +121,11 @@ if ! command -v claude >/dev/null; then
     else
         warn "mise missing; skipping Claude Code CLI install."
     fi
+fi
+# Ensure claude resolves globally (outside mise-activated shells too). Re-run
+# every time so a node version bump silently refreshes the symlink target.
+if claude_bin=$(mise which claude 2>/dev/null) && [[ -x "$claude_bin" ]]; then
+    sudo ln -sf "$claude_bin" /usr/local/bin/claude
 fi
 # Claude Code ships its own completions at runtime: `claude --print-completion zsh`
 # is wired in .zshrc below, no fragile external download needed.
@@ -712,7 +718,7 @@ check "zgenom"              "test -d $HOME/.zgenom"
 check "p10k"                "test -d $HOME/.zgenom/romkatv"
 check "bat / fd / rg / eza" "command -v bat && command -v fd && command -v rg && command -v eza"
 check "mise node@lts"       "mise exec -- node --version"
-check "claude (CLI)"        "mise which claude || command -v claude"
+check "claude (CLI)"        "command -v claude"
 check "vscode"              "command -v code"
 check "edge"                "command -v microsoft-edge-stable"
 check "ghostty"             "command -v ghostty"
