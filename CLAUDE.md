@@ -99,3 +99,10 @@ There is no build, lint, or test target. Work is almost entirely **editing markd
 
 - Markdown checkboxes (`- [ ]`) in `docs/decisions.md` track unmet requirements — tick them as work completes, don't delete them.
 - Platform-specific notes in prose should stay plain; the `[Windows]`/`[WSL]` annotation convention is for the user's global `~/.claude/CLAUDE.md`, not for this repo's content.
+
+## Commit discipline
+
+- **Always commit on task completion.** Never leave a finished task as uncommitted work.
+- **Commits MUST be atomic** — one logical change per commit. If uncommitted changes span multiple tasks, split them into separate commits (use `git add -p` or path-scoped `git add`).
+- **Hierarchy:** a *task* is the lowest unit of work (one commit). A *feature* is the next level up (one or more task commits that together deliver the feature).
+- **Push on feature completion.** Once all task commits that make up a feature are in, push to the remote. Don't push partial features mid-stream unless the user asks.
