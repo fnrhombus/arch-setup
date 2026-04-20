@@ -93,10 +93,15 @@ if ! command -v yay >/dev/null; then
 fi
 
 # ---------- 3. AUR: only what's not in extra ----------
-log "Installing AUR-exclusive apps (VSCode, Edge, pinpam-git, SDDM theme)..."
+# claude-desktop-native: unofficial repackage of Anthropic's Windows Electron
+# build (Anthropic ships no official Linux binary). `-native` variant is the
+# community-recommended one — `-bin` has recurring ffmpeg dep issues. Lags
+# official releases; expect occasional breakage on Anthropic updates.
+log "Installing AUR-exclusive apps (VSCode, Edge, Claude desktop, pinpam-git, SDDM theme)..."
 yay -S --noconfirm --needed \
     visual-studio-code-bin \
     microsoft-edge-stable-bin \
+    claude-desktop-native \
     catppuccin-sddm-theme-mocha \
     pinpam-git \
     sesh
@@ -884,6 +889,7 @@ check "mise node@lts"       "mise exec -- node --version"
 check "claude (CLI)"        "command -v claude"
 check "vscode"              "command -v code"
 check "edge"                "command -v microsoft-edge-stable"
+check "claude-desktop"      "command -v claude-desktop"
 check "ghostty"             "command -v ghostty"
 check "fuzzel"              "command -v fuzzel"
 check "cliphist"            "command -v cliphist"
