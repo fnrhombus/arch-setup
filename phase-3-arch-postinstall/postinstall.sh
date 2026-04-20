@@ -72,6 +72,15 @@ if ! id -nG tom | grep -qw docker; then
     warn "Added tom to docker group — log out and back in for it to take effect."
 fi
 
+# ---------- 1b. user services ----------
+# hyprpolkitagent ships a user unit but the preset doesn't auto-activate on
+# a fresh install — end-4's first-launch wizard can't see the auth agent
+# until it's registered on the session D-Bus, which requires the service
+# to be started at least once. Idempotent: --now starts it here, enable
+# persists across logins.
+systemctl --user enable --now hyprpolkitagent.service 2>/dev/null || \
+    warn "hyprpolkitagent.service enable failed — end-4 wizard may flag auth agent as Missing."
+
 # ---------- 2. yay bootstrap ----------
 if ! command -v yay >/dev/null; then
     log "Bootstrapping yay from AUR..."
@@ -699,7 +708,7 @@ mkdir -p "$HOME/.config/ghostty"
 cat > "$HOME/.config/ghostty/config" <<'GSEOF'
 font-family = "JetBrainsMono Nerd Font"
 font-size = 12
-theme = "catppuccin-mocha"
+theme = "Catppuccin Mocha"
 cursor-style = block
 cursor-style-blink = false
 window-decoration = false
