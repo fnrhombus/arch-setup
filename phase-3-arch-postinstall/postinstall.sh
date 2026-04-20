@@ -688,11 +688,21 @@ fi
 if [[ -d "$HOME/dotfiles/dots-hyprland" ]]; then
     log "Installing end-4/dots-hyprland..."
     pushd "$HOME/dotfiles/dots-hyprland" >/dev/null
-    if [[ -x ./install.sh ]]; then
-        warn "Running end-4 installer INTERACTIVELY — answer prompts."
+    # Installer naming history: end-4 renamed `install.sh` → `setup` (with
+    # subcommands) in late 2025 / early 2026. Configs also moved from
+    # ./.config/ to ./dots/.config/. Try in order: new setup, old install.sh,
+    # then the corrected cp fallback.
+    if [[ -x ./setup ]]; then
+        warn "Running end-4 ./setup install INTERACTIVELY — answer prompts."
+        ./setup install || warn "end-4 ./setup install exited non-zero; review manually"
+    elif [[ -x ./install.sh ]]; then
+        warn "Running end-4 ./install.sh INTERACTIVELY (legacy) — answer prompts."
         ./install.sh || warn "end-4 installer exited non-zero; review manually"
+    elif [[ -d ./dots/.config ]]; then
+        warn "No setup script in dots-hyprland; copying ./dots/.config/* manually."
+        cp -rn ./dots/.config/* "$HOME/.config/" 2>/dev/null || true
     else
-        warn "No install.sh in dots-hyprland; copying ./.config/* manually."
+        warn "No setup script AND no ./dots/.config/ in dots-hyprland; copying ./.config/* (legacy layout)."
         cp -rn .config/* "$HOME/.config/" 2>/dev/null || true
     fi
     popd >/dev/null
@@ -700,6 +710,26 @@ else
     warn "Dotfiles not available at ~/dotfiles/dots-hyprland — Hyprland config skipped."
     warn "  Fix: GIT_TEMPLATE_DIR=\"\" git clone --depth 1 https://github.com/end-4/dots-hyprland.git ~/dotfiles/dots-hyprland"
     warn "       then re-run this script."
+fi
+
+# ---------- 13a. Hyprland customizations layered on top of end-4 ----------
+# end-4's setup overwrites ~/.config/hypr/hyprland.conf on every install.
+# Append our customizations idempotently — guarded by a marker comment so
+# re-runs don't keep stacking the same lines.
+HYPR_CONF="$HOME/.config/hypr/hyprland.conf"
+if [[ -f "$HYPR_CONF" ]] && ! grep -q '# arch-setup-customizations' "$HYPR_CONF"; then
+    log "Appending arch-setup customizations to $HYPR_CONF..."
+    cat >> "$HYPR_CONF" <<'HYPREOF'
+
+# arch-setup-customizations (do not remove this marker — postinstall.sh skips re-append on its presence)
+# Lid close → disable internal panel; lid open → re-enable. No external monitor
+# required for the binding to be safe (worst case: open the lid to get display back).
+bindl = , switch:on:Lid Switch,  exec, hyprctl keyword monitor "eDP-1, disable"
+bindl = , switch:off:Lid Switch, exec, hyprctl keyword monitor "eDP-1, preferred, auto, 1"
+# Auto-start quickshell (end-4's status bar) — vanilla end-4 hyprland.conf does
+# NOT exec-once it, so the bar is missing on first login without this.
+exec-once = quickshell
+HYPREOF
 fi
 
 # ---------- 14. Ghostty Catppuccin ----------
