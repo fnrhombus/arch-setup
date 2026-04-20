@@ -490,6 +490,24 @@ fi
 AUTHEOF
 fi
 
+# ---------- 9a. fnpostinstall shell function ----------
+# Convenience wrapper for re-running postinstall from HEAD of the feature
+# branch, piped through tee so you always have a log to grep. Written to
+# a .zshrc.d fragment so it lands on $PATH via the .zshrc loop at line 576.
+cat > "$HOME/.zshrc.d/arch-postinstall.zsh" <<'FNEOF'
+# arch-setup: re-run the latest postinstall from GitHub, logging to /tmp.
+fnpostinstall() {
+    local log="/tmp/postinstall-$(date +%Y%m%d-%H%M%S).log"
+    echo "Logging to $log"
+    {
+        gh api 'repos/fnrhombus/arch-setup/contents/phase-3-arch-postinstall/postinstall.sh?ref=claude/fix-linux-boot-issue-9ps2s' --jq .content \
+            | base64 -d > ~/postinstall.sh \
+            && chmod +x ~/postinstall.sh \
+            && bash ~/postinstall.sh
+    } 2>&1 | tee "$log"
+}
+FNEOF
+
 # ---------- 10. zgenom + zsh config (enriched from fnwsl) ----------
 if [[ ! -d "$HOME/.zgenom" ]]; then
     log "Cloning zgenom..."
