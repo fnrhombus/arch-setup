@@ -748,17 +748,19 @@ if [[ -f "$HYPR_CONF" ]] && ! grep -q '# arch-setup-customizations' "$HYPR_CONF"
     cat >> "$HYPR_CONF" <<'HYPREOF'
 
 # arch-setup-customizations (do not remove this marker — postinstall.sh skips re-append on its presence)
-# Monitor layout: Vizio V505-G9 (4K 50") as primary at top-left; Dell Inspiron 7786
-# built-in (FHD) flush-left directly below the TV. TV scaled 1.5x → logical
-# 2560x1440, so laptop sits at y=1440. Mouse flows continuously across the
-# shared edge within the laptop's 0–1920 horizontal span.
-monitor = HDMI-A-1, 3840x2160@60, 0x0, 1.5
-monitor = eDP-1,    1920x1080@60, 0x1440, 1
-# Lid close → disable internal panel; lid open → re-enable at the position
-# above. Laptop lives under a desk most of the time; closing the lid is the
-# normal "kiosk mode" signal. Open the lid to get the internal display back.
+# Monitor layout is authored via `nwg-displays` → writes ~/.config/hypr/monitors.conf,
+# which hyprland.conf sources. Intended layout: Vizio V505-G9 (4K 50", DP-1) at
+# (0,0) scale 1.5 → logical 2560x1440; Dell Inspiron 7786 internal panel (eDP-1)
+# at (0, 1440) scale 1 → left edges aligned, laptop directly below the TV.
+# Do NOT pin `monitor = ...` lines here — the kernel-reported name for the TV is
+# DP-1 (DisplayPort-over-HDMI alt-mode), which varies by port/cable, and monitors.conf
+# is the single source of truth.
+#
+# Lid close → disable internal panel; lid open → reload hyprland.conf so monitors.conf
+# reapplies the nwg-displays-authored layout. Laptop lives under a desk most of the
+# time; closing the lid is the normal "kiosk mode" signal.
 bindl = , switch:on:Lid Switch,  exec, hyprctl keyword monitor "eDP-1, disable"
-bindl = , switch:off:Lid Switch, exec, hyprctl keyword monitor "eDP-1, 1920x1080@60, 0x1440, 1"
+bindl = , switch:off:Lid Switch, exec, hyprctl reload
 # Auto-start quickshell (end-4's status bar) — vanilla end-4 hyprland.conf does
 # NOT exec-once it, so the bar is missing on first login without this.
 exec-once = quickshell
