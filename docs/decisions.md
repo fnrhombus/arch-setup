@@ -110,6 +110,23 @@
 - Simplest, fastest, already part of systemd
 - Arch recovery ISO written to a dedicated 1.5 GB partition on the Netac; systemd-boot entry points at it, so it boots straight from the menu without hunting for a USB stick.
 - USB is only needed for the *initial* Windows + Arch install. All later rescue work (including `phase-6-grow-windows.sh`, which must run from a live environment with the btrfs unmounted) can boot the recovery entry instead.
+- **Why not limine** (Omarchy's required bootloader, considered 2026-04-20):
+  - Limine *would* gain us first-class snapper-snapshot rollback in the boot
+    menu (`limine-snapper-sync` + `limine-mkinitcpio-hook`) and a branded
+    splash. systemd-boot has neither — snapshot rollback today requires booting
+    the recovery ISO and `arch-chroot`-ing to manage subvolumes manually.
+  - Cost: migration is a 30–60 min btrfs-aware exercise (`pacman -S limine`,
+    `cp /usr/share/limine/BOOTX64.EFI /boot/EFI/limine/`, write `limine.conf`
+    with `rootflags=subvol=@`, add an `efibootmgr` NVRAM entry, optionally
+    `bootctl remove`) — recoverable as long as the systemd-boot NVRAM entry is
+    kept until the limine boot succeeds.
+  - Trade-off: systemd-boot is in the `systemd` package (zero AUR), wider
+    ArchWiki coverage, and auto-discovers the Windows EFI loader for dual-boot.
+    Limine needs an explicit `/EFI/Microsoft/Boot/bootmgfw.efi` chainload stanza.
+  - Verdict: the only motivating use case is enabling Omarchy. Migration is
+    NOT worth it just to run a dotfiles distro — HyDE achieves 80 % of
+    Omarchy's UX without touching the bootloader. Revisit if one-keystroke
+    snapshot rollback becomes load-bearing.
 
 #### B) AUR helper: yay
 - Less strict about PKGBUILD review prompts, better fit for user who won't read them
