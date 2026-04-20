@@ -17,7 +17,7 @@
   - SDDM is the primary moment of the day where the user authenticates (no suspend/resume cycles → no lock screens) — fingerprint at SDDM is therefore load-bearing, not cosmetic.
 
 ## Requirements
-- [ ] Fingerprint scanner support (fprintd + libfprint)
+- [x] Fingerprint scanner support (fprintd + libfprint). **Device: Goodix `27c6:538c`** — supported only via the AUR `libfprint-goodix-53xc` package (older Dell OEM blob, pre-v0.0.11) riding on `libfprint-tod-git`. Current upstream AUR `libfprint-2-tod1-goodix` / `-v2` ship a **550A-only** blob that does NOT cover 538C. `libfprint-tod-git` must be built with `!lto` in PKGBUILD options — LTO strips ABI symbol versioning and breaks the link. `postinstall.sh` pre-flights this automatically. Enrollment on a bare TTY needs `sudo fprintd-enroll -f <finger> tom` (polkit denies unprivileged enroll without a graphical session).
 - [ ] Lid close: no sleep/shutdown on AC power (logind.conf)
 - [ ] Wacom Intuos pen tablet support
 - [ ] Touch gestures (touchpad + tablet mode):
@@ -117,12 +117,15 @@
 #### C) Terminal emulator: Ghostty
 - GPU-accelerated, great defaults, Kitty graphics protocol support
 - Pairs with tmux for splits/sessions
+- **end-4 compatibility shim: also install `foot`.** end-4's first-launch wizard hardcodes its "supported terminals" list to kitty, alacritty, foot, wezterm, konsole, gnome-terminal, xterm — Ghostty is unknown to it. `foot` is the lightest Wayland-native entry in their list; it satisfies the wizard's detector while Ghostty remains the daily driver via a Super+Return remap in the end-4 Hyprland keybinds.
+- **Ghostty theme config gotcha**: the bundled theme file name is `Catppuccin Mocha` (capital C, literal space), not `catppuccin-mocha`. `theme = "Catppuccin Mocha"` in `~/.config/ghostty/config`.
 
 #### D) Login screen: SDDM
 - Wayland-native, themeable, fingerprint integration
 
-#### E) Notifications: swaync
-- Notification center with history panel, DND toggle, Waybar integration
+#### E) Notifications: mako
+- Wayland-native, lightweight, matches the foot/fuzzel/swww profile of the rest of the stack.
+- **Why not swaync**: end-4's first-launch wizard only accepts `dunst` or `mako` as the notification daemon. swaync is installed-but-invisible to end-4's detector. mako is the simpler of the two accepted options; dunst is the feature-rich alternative if mako ever feels too minimal.
 
 #### F) App launcher: fuzzel
 - Wayland-native, lightweight, fuzzy matching
@@ -164,9 +167,32 @@
 - For accessing Windows 10 machine
 - **Not installed by default** (deferred to phase-3.5 — no RDP target to validate against during a fresh install). Add with `sudo pacman -S remmina freerdp` when needed.
 
+#### Q-file) File manager: yazi (primary) + nautilus (GUI fallback)
+- **yazi** — terminal file manager, keyboard-first, vim-style keybinds, Rust-native, rich previews (images/PDF/code). Fits the terminal-heavy workflow (tmux/helix/ghostty). Daily driver.
+- **nautilus** — GTK4 GUI file manager, Wayland-tested, picks up the Catppuccin GTK theme for free, minimal-friction for drag/drop, network mounts (smb://, sftp://). The deliberate polar opposite of yazi for "sit back, click around" mode. Also satisfies end-4's wizard-detected file-manager slot.
+- **Not Dolphin/Nemo/Thunar/PCManFM**: Dolphin adds a Qt/KDE theming tax while being philosophically the same dense-power-user tool as yazi; Thunar's Wayland support is X11-first; PCManFM is a low-RAM pick we don't need; Nemo's maintenance velocity lags Nautilus.
+
 #### P) Installer password handoff: pre-hashed via mode-600 file
 - `phase-2-arch-install/install.sh` reads the root + `tom` passwords once at the top of the run, hashes them immediately with `openssl passwd -6` (SHA-512), and hands the hashes to `chroot.sh` via a mode-600 file under `/mnt/tmp/`. The plaintext values never touch disk.
 - **Caveat**: while the installer is still running, the `openssl passwd` invocation does briefly appear in `ps` (as the process argument) on the live ISO. The live environment is single-user and ephemeral, so this is acceptable — but don't run the installer on a shared/networked machine. After chroot finishes, the hash file is deleted and only the hashed values remain in `/etc/shadow`.
+
+### Q12: end-4/dots-hyprland runtime dependencies
+
+The current `end-4/dots-hyprland` repo ships a **GUI first-launch wizard that detects components but does not install them** — older versions ran a CLI `install.sh` that auto-pulled deps; that's no longer true. `postinstall.sh` must install everything end-4 expects on the host directly.
+
+**Required packages end-4 expects (per its first-launch detector):**
+- **Authentication agent**: `hyprpolkitagent` (also accepted: `polkit-kde-agent`). **Must be activated via `systemctl --user enable --now hyprpolkitagent.service`** — the package ships the unit with preset `enabled`, but the preset does NOT auto-activate on a fresh install; `postinstall.sh` enables it explicitly.
+- **Terminal**: see §Q10-C (Ghostty as daily driver + `foot` as end-4 shim).
+- **File manager**: see §Q10-Q-file (`nautilus` fills end-4's slot; `yazi` is primary).
+- **Notification daemon**: `mako` (§Q10-E). `swaync` is not on end-4's accepted list and shows as Missing in the wizard even when installed and running.
+- **Wallpaper**: `swww`.
+- **XDG Desktop Portal**: `xdg-desktop-portal-hyprland` (installed in phase 2 pacstrap) + `xdg-desktop-portal-gtk` (installed in phase 3 postinstall as the GTK backend).
+- **Status bar / shell**: `quickshell-git` (AUR). end-4 replaced their earlier `ags`-based bar with quickshell.
+- **Application launcher**: `fuzzel` (already decided in §Q10-F, accepted by end-4).
+- **Clipboard**: `wl-clipboard` provides `wl-copy` (already in §Q10-H).
+- **Pipewire**: already in §Q10-I.
+
+**The wizard's color legend**: red = not installed, green = installed but not running, blue = installed AND running. Hover on each component to see its accepted-package list. `postinstall.sh` bakes the above list into sections 1 (pacman) + 3 (yay) + 1b (systemctl --user enable hyprpolkitagent).
 
 ### Q11: Full-Disk Encryption (LUKS2 + TPM2 autounlock)
 

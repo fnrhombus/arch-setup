@@ -41,8 +41,10 @@ This document is meant to be fed to Claude Code once you're inside Arch Linux. I
 ### Ghostty (Terminal Emulator)
 - **What it is**: GPU-accelerated terminal — where zsh/tmux/helix run
 - **Config location**: `~/.config/ghostty/config`
-- **Theme**: Catppuccin Mocha
+- **Theme**: Catppuccin Mocha — config string is `theme = "Catppuccin Mocha"` (capital C, literal space). The lowercase-hyphen form is NOT Ghostty's theme filename.
 - **Font**: JetBrains Mono Nerd Font
+- **Reload config**: Ctrl+Shift+, (comma)
+- **end-4 wizard note**: Ghostty is NOT on end-4's hardcoded supported-terminal list; `foot` is installed alongside as the wizard's detected shim. Ghostty stays daily driver via Super+Return remap in end-4's keybinds.
 - **Teach me**: Ghostty-specific features (if any beyond basic terminal use)
 
 ### tmux (Terminal Multiplexer)
@@ -99,10 +101,11 @@ This document is meant to be fed to Claude Code once you're inside Arch Linux. I
   - Wayland-native mode vs XWayland
   - Any Hyprland-specific window rules needed
 
-### Waybar (Status Bar)
-- **Config location**: `~/.config/waybar/`
-- Part of illogical-impulse dotfiles — may need customization
-- **Teach me**: How to add/remove/configure modules
+### quickshell (Status Bar / Shell)
+- **What it is**: end-4/illogical-impulse's current status-bar + shell, built on QtQuick. Replaced the earlier `ags` (GTK) and `waybar` baselines.
+- **Package**: `quickshell-git` from AUR (baked into `postinstall.sh` yay list).
+- **Config location**: managed by end-4's dotfiles under `~/.config/quickshell/` (path may move — check after install).
+- **Teach me**: How end-4 exposes config knobs, how to add/remove modules, how it differs from waybar.
 
 ### Docker
 - Already know Docker basics from Windows
@@ -128,6 +131,8 @@ This document is meant to be fed to Claude Code once you're inside Arch Linux. I
 
 ### Fingerprint Reader
 - fprintd + libfprint
+- **Device**: Goodix `27c6:538c` — supported via AUR `libfprint-goodix-53xc` (older Dell OEM blob) on top of `libfprint-tod-git` built with `!lto`. See `docs/decisions.md` requirement list for the rationale. Do NOT swap to `libfprint-2-tod1-goodix` / `-v2` — those ship the 550A-only blob fork.
+- **Post-install**: 5 fingers pre-enrolled by `postinstall.sh` (right-index, left-index, right-middle, left-middle, right-thumb). Use `sudo fprintd-enroll -f <finger> tom` to add more (polkit denies unprivileged enroll from bare TTY).
 - Integrate with: login (SDDM), sudo, screen lock
 
 ---
@@ -189,7 +194,9 @@ Everything listed below is installed automatically by the phase-2 + phase-3 scri
 ### From official repos (pacman, phase-3 postinstall.sh)
 - Core CLI: bat, fd, ripgrep, eza, lsd, btop, jq, fzf, zoxide, direnv, sd, yq, xh, pkgfile, tldr, github-cli
 - Screenshots/clipboard: wl-clipboard, grim, slurp, cliphist, satty, hyprshot
-- Desktop extras: ghostty, fuzzel, swaync
+- Terminals: ghostty (daily driver), foot (end-4 wizard shim)
+- File managers: yazi (TUI primary), nautilus (GUI fallback)
+- end-4 runtime: hyprpolkitagent (auth agent, enabled as user unit), swww (wallpaper), xdg-desktop-portal-gtk, mako (notifications), fuzzel (launcher)
 - Password/vault: bitwarden, bitwarden-cli
 - Version manager: mise
 - Dotfile manager: chezmoi
@@ -204,6 +211,8 @@ Everything listed below is installed automatically by the phase-2 + phase-3 scri
 - microsoft-edge-stable-bin
 - catppuccin-sddm-theme-mocha
 - pinpam-git (PAM module used by fprintd login stack)
+- quickshell-git (end-4 status bar / shell)
+- libfprint-goodix-53xc (Goodix 538C fingerprint blob) — built on top of libfprint-tod-git with `!lto` workaround (see `docs/decisions.md` Requirements → fingerprint entry)
 
 ### Via mise (tool version manager, phase-3 postinstall.sh)
 - `node@lts` — installed globally (`mise use -g node@lts`). Other runtimes (python, pnpm, dotnet, etc.) are installed per-project via `.mise.toml`, not globally.
