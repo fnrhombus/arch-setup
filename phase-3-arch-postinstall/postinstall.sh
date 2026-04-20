@@ -11,8 +11,7 @@
 #   - yay bootstrap; yay -S for AUR-only tail (VSCode, Edge, pinpam-git, ...)
 #   - SSH key (ed25519) if missing
 #   - sshd: hardened drop-in (key-only, no root, AllowUsers tom) + enable
-#   - Callisto pubkey planter (one-shot, fetches from Bitwarden agent on
-#     first interactive shell where the agent socket is reachable)
+#   - Callisto pubkey (hardcoded, idempotent append to authorized_keys)
 #   - Claude Code CLI + bash completion
 #   - Goodix-aware fingerprint enrollment (VID 27C6 detected → detailed diag on fail)
 #   - pinpam TPM-PIN + PAM wiring for sudo/polkit/hyprlock
@@ -123,9 +122,6 @@ touch "$HOME/.ssh/authorized_keys"; chmod 600 "$HOME/.ssh/authorized_keys"
 
 # ---------- 4a. sshd: accept incoming connections, key-only ----------
 # Hardened sshd drop-in: pubkey only, no root, no passwords, no kbd-interactive.
-# Authorized keys come from the Bitwarden vault — the "Callisto" item's
-# public key is added to authorized_keys by the planter at §4b once Bitwarden
-# desktop's SSH agent is unlocked and the socket is reachable.
 log "Installing sshd hardened drop-in and enabling sshd..."
 sudo install -d -m 755 /etc/ssh/sshd_config.d
 sudo tee /etc/ssh/sshd_config.d/10-arch-setup.conf >/dev/null <<'SSHDEOF'
@@ -140,30 +136,15 @@ AllowUsers tom
 SSHDEOF
 sudo systemctl enable --now sshd.service
 
-# ---------- 4b. Callisto pubkey planter ----------
-# The Bitwarden desktop SSH agent surfaces every vault SSH-key item via
-# `ssh-add -L`, with the item name as the key comment. We grep for ' Callisto$'
-# and, on first interactive shell where the agent is reachable, append it to
-# authorized_keys (idempotent — won't append a duplicate). Self-deletes once
-# the key has been planted.
-mkdir -p "$HOME/.zshrc.d"
-cat > "$HOME/.zshrc.d/arch-add-callisto.zsh" <<'CALEOF'
-# arch: one-time Callisto pubkey planter (self-deleting)
-if [[ -t 0 && -S "${SSH_AUTH_SOCK:-$HOME/.bitwarden-ssh-agent.sock}" ]]; then
-  _cal_pub=$(SSH_AUTH_SOCK="${SSH_AUTH_SOCK:-$HOME/.bitwarden-ssh-agent.sock}" \
-             ssh-add -L 2>/dev/null | grep -m1 ' Callisto$' || true)
-  if [[ -n "$_cal_pub" ]]; then
-    mkdir -p ~/.ssh && chmod 700 ~/.ssh
-    touch ~/.ssh/authorized_keys && chmod 600 ~/.ssh/authorized_keys
-    if ! grep -qxF "$_cal_pub" ~/.ssh/authorized_keys; then
-      echo "$_cal_pub" >> ~/.ssh/authorized_keys
-      echo "arch: planted Callisto pubkey into ~/.ssh/authorized_keys"
-    fi
-    rm -f ~/.zshrc.d/arch-add-callisto.zsh
-  fi
-  unset _cal_pub
+# ---------- 4b. Callisto authorized key ----------
+# Hardcoded public half of the user's "Callisto" Bitwarden vault SSH key.
+# Public keys are non-secret; private half stays in Bitwarden, surfaces via
+# the Bitwarden SSH agent socket on the originating box. Idempotent append.
+CALLISTO_PUBKEY='ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAICmgv+3Enh89mb5vutzHEgwzKitOzdrje8lQVF/bss/X thoma@callisto'
+if ! grep -qxF "$CALLISTO_PUBKEY" "$HOME/.ssh/authorized_keys"; then
+    log "Adding Callisto pubkey to authorized_keys..."
+    echo "$CALLISTO_PUBKEY" >> "$HOME/.ssh/authorized_keys"
 fi
-CALEOF
 
 # ---------- 5. Claude Code CLI ----------
 # Claude Code is distributed via npm (@anthropic-ai/claude-code). There's no
@@ -1024,7 +1005,7 @@ check "fprintd enrolled"    "fprintd-list tom 2>/dev/null | grep -q 'Fingerprint
 check "ssh agent wired"     "grep -q bitwarden-ssh-agent.sock $HOME/.ssh/config"
 check "sshd enabled"        "systemctl is-enabled sshd"
 check "sshd hardened conf"  "sudo test -f /etc/ssh/sshd_config.d/10-arch-setup.conf"
-check "callisto planted/done" "test -f $HOME/.zshrc.d/arch-add-callisto.zsh || grep -q Callisto $HOME/.ssh/authorized_keys"
+check "callisto authorized" "grep -q 'thoma@callisto' $HOME/.ssh/authorized_keys"
 check "udev usb-serial"     "test -f /etc/udev/rules.d/99-usb-serial.rules"
 check "gh-auth planter or done" "test -f $HOME/.zshrc.d/arch-first-login.zsh || test -f $HOME/.gitconfig.local"
 check "ssh-signing planter" "test -f $HOME/.zshrc.d/arch-ssh-signing.zsh || grep -q allowedSignersFile $HOME/.gitconfig.local 2>/dev/null"
