@@ -176,9 +176,27 @@ if [[ -z "${SKIP_FPRINT:-}" ]]; then
         log "Goodix fingerprint reader detected: $(lsusb | grep -i '27c6:' | head -1)"
     fi
 
-    log "Enrolling fingerprint (you'll be prompted to touch the reader ~5x)..."
-    if ! fprintd-enroll 2>&1 | tee /tmp/fprint-enroll.log; then
-        warn "fprintd-enroll failed. Diagnostic:"
+    # sudo + explicit user: bypasses polkit which denies enroll from a bare TTY
+    # (no graphical session = no active-local seat). Idempotent: skip already-enrolled
+    # fingers so re-runs don't force re-touching.
+    FINGERS_TO_ENROLL=(right-index-finger left-index-finger right-middle-finger left-middle-finger right-thumb)
+    log "Enrolling ${#FINGERS_TO_ENROLL[@]} fingerprints (~5 taps each)..."
+    fp_any_success=0
+    for finger in "${FINGERS_TO_ENROLL[@]}"; do
+        if sudo fprintd-list tom 2>/dev/null | grep -q "$finger"; then
+            log "  $finger: already enrolled — skipping."
+            fp_any_success=1
+            continue
+        fi
+        log "  $finger: touch power button ~5 times..."
+        if sudo fprintd-enroll -f "$finger" tom 2>&1 | tee /tmp/fprint-enroll.log; then
+            fp_any_success=1
+        else
+            warn "  $finger: enroll failed (rc=${PIPESTATUS[0]})."
+        fi
+    done
+    if (( ! fp_any_success )); then
+        warn "fprintd-enroll failed for all fingers. Diagnostic:"
         echo "----- lsusb (full) -----"
         lsusb 2>&1 || true
         echo "----- fingerprint candidates (Goodix/Validity/Synaptics/Elan/AuthenTec) -----"
@@ -213,7 +231,7 @@ if [[ -z "${SKIP_FPRINT:-}" ]]; then
                 sudo pacman -Rdd --noconfirm libfprint || warn "Could not remove stock libfprint — conflict will still block install."
             fi
             if yay -S --noconfirm --needed libfprint-git && sudo systemctl restart fprintd; then
-                fprintd-enroll || warn "libfprint-git retry also failed — likely unsupported reader. See https://fprint.freedesktop.org/supported-devices.html"
+                sudo fprintd-enroll -f right-index-finger tom || warn "libfprint-git retry also failed — likely unsupported reader. See https://fprint.freedesktop.org/supported-devices.html"
             else
                 warn "libfprint-git install failed — see https://fprint.freedesktop.org/supported-devices.html"
             fi
