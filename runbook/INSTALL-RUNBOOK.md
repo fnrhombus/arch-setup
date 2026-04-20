@@ -288,6 +288,96 @@ sudo reboot
 
 After the re-login: Bitwarden auto-unlocks (via gnome-keyring), and `ssh-add -l` lists your keys with no prompt.
 
+### 3e-bis. Azure DDNS one-time setup (`metis.rhombus.rocks`)
+
+`postinstall.sh` installs the `metis-ddns` script + systemd timer + NetworkManager dispatcher hook + the `az` CLI, and stubs `/etc/metis-ddns.env` from a template. **You still have to fill in the service-principal credentials once.**
+
+On this laptop (or any machine with `az` CLI):
+
+```bash
+az login                                 # device-code flow, opens browser
+SUB=$(az account show --query id -o tsv)
+RG=<your-DNS-resource-group>             # the one containing rhombus.rocks
+ZONE_ID=$(az network dns zone show -g "$RG" -n rhombus.rocks --query id -o tsv)
+az ad sp create-for-rbac \
+    --name metis-ddns \
+    --role "DNS Zone Contributor" \
+    --scopes "$ZONE_ID" \
+    --years 2
+```
+
+Last command prints `appId`, `password`, `tenant`. Paste them into `/etc/metis-ddns.env` (mode 600, root-owned — `sudoedit /etc/metis-ddns.env`):
+
+```ini
+AZ_TENANT_ID=<tenant>
+AZ_CLIENT_ID=<appId>
+AZ_CLIENT_SECRET=<password>
+AZ_SUBSCRIPTION_ID=<SUB>
+AZ_RESOURCE_GROUP=<RG>
+AZ_DNS_ZONE=rhombus.rocks
+AZ_DNS_RECORD=metis
+DDNS_DISABLE_IPV4=1                      # IPv6-only — flip to 0 if you ever expose v4
+```
+
+Kick the first run:
+
+```bash
+sudo systemctl start metis-ddns.service
+sudo journalctl -u metis-ddns -n 30
+```
+
+First call may 403 with "AuthorizationFailed" — Azure role assignments propagate in 30s–5min. Wait, retry. After first success, the timer + NM hook take over and you don't think about it again until the SP secret expires in 2 years.
+
+**Verify from the outside** (any machine, even your phone):
+
+```bash
+dig AAAA metis.rhombus.rocks +short
+```
+
+Should return your laptop's current public IPv6 address.
+
+### 3e-ter. Let's Encrypt cert for `metis.rhombus.rocks`
+
+Only useful **after step 3e-bis succeeds** (DNS must resolve before the dns-01 challenge will).
+
+`postinstall.sh` installs `certbot` + the `certbot-dns-azure` plugin and stubs `/etc/letsencrypt/azure.ini` from a template. Same SP that DDNS uses works here — `DNS Zone Contributor` already lets it write the TXT challenge records.
+
+Mirror the SP creds into `/etc/letsencrypt/azure.ini` (the keys differ from the DDNS env file because certbot's plugin uses its own INI scheme):
+
+```ini
+dns_azure_environment = "AzurePublicCloud"
+dns_azure_tenant_id = <tenant>
+dns_azure_subscription_id = <SUB>
+dns_azure_resource_group = <RG>
+dns_azure_sp_client_id = <appId>
+dns_azure_sp_client_secret = <password>
+```
+
+Issue the cert (one-time):
+
+```bash
+sudo certbot certonly \
+    --authenticator dns-azure \
+    --dns-azure-credentials /etc/letsencrypt/azure.ini \
+    --dns-azure-propagation-seconds 60 \
+    -d metis.rhombus.rocks \
+    --agree-tos -m <your-email> --no-eff-email
+```
+
+Cert lands at `/etc/letsencrypt/live/metis.rhombus.rocks/{fullchain,privkey}.pem`. `certbot-renew.timer` is already enabled by postinstall — it'll renew within 30d of expiry, twice daily, with no further action.
+
+### 3e-quater. Firewall — confirm and tweak
+
+`postinstall.sh` enables `ufw` with default-deny incoming, default-allow outgoing, and `22/tcp ALLOW` for SSH (Callisto pubkey already in `~/.ssh/authorized_keys`). Rules apply to **both IPv4 and IPv6** — ufw is dual-stack out of the box.
+
+```bash
+sudo ufw status verbose                  # confirm "Status: active", "Default: deny (incoming)"
+sudo ufw allow <port>/tcp                # add a rule
+sudo ufw delete allow <port>/tcp         # remove a rule
+```
+
+Why this matters: your router can globally enable/disable IPv6 TCP to Metis but can't filter per port. With IPv6 there's no NAT — every device gets a publicly routable address, so anything bound to a port on the laptop is exposed when the router-side toggle is on. ufw is the per-port gate on the host side.
+
 ### 3f. Sanity checks
 
 ```bash
