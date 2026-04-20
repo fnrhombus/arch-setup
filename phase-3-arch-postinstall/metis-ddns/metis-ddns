@@ -33,12 +33,22 @@ mkdir -p "$CACHE_DIR"
 
 # Detect public IPs. ipify's ipv4-only / ipv6-only hostnames force the
 # stack we want; api.ipify.org is dual-stack and would return whichever
-# curl picks. Each probe gets 10s — outage tolerance.
-IPV4=$(curl -4 -fsS --max-time 10 https://api.ipify.org 2>/dev/null || true)
-IPV6=$(curl -6 -fsS --max-time 10 https://api6.ipify.org 2>/dev/null || true)
+# curl picks. Each probe gets 10s — outage tolerance. Either stack can be
+# disabled via DDNS_DISABLE_IPV4 / DDNS_DISABLE_IPV6 in the env file.
+IPV4=""
+IPV6=""
+if [[ "${DDNS_DISABLE_IPV4:-0}" != "1" ]]; then
+    IPV4=$(curl -4 -fsS --max-time 10 https://api.ipify.org 2>/dev/null || true)
+fi
+if [[ "${DDNS_DISABLE_IPV6:-0}" != "1" ]]; then
+    IPV6=$(curl -6 -fsS --max-time 10 https://api6.ipify.org 2>/dev/null || true)
+fi
 
 if [[ -z "$IPV4" && -z "$IPV6" ]]; then
-    warn "no public IP detected (both v4 and v6 probes failed) — network down? skipping."
+    if [[ "${DDNS_DISABLE_IPV4:-0}" == "1" && "${DDNS_DISABLE_IPV6:-0}" == "1" ]]; then
+        die "Both DDNS_DISABLE_IPV4 and DDNS_DISABLE_IPV6 are set — nothing to do."
+    fi
+    warn "no public IP detected — network down? skipping."
     exit 0
 fi
 

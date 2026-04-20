@@ -40,6 +40,25 @@ log()  { printf '\033[1;32m[+]\033[0m %s\n' "$*"; }
 warn() { printf '\033[1;33m[!]\033[0m %s\n' "$*" >&2; }
 die()  { printf '\033[1;31m[✗]\033[0m %s\n' "$*" >&2; exit 1; }
 
+# CLI flags. Order-independent, no-arg.
+SKIP_VERIFY=0
+for arg in "$@"; do
+    case "$arg" in
+        --no-verify|--skip-verify) SKIP_VERIFY=1 ;;
+        -h|--help)
+            cat <<USAGE
+Usage: postinstall.sh [--no-verify]
+
+  --no-verify    Skip the verify block at the end (faster re-runs when
+                 you've just touched one section and don't want to wait
+                 for ~70 checks to fan out).
+USAGE
+            exit 0 ;;
+        *)
+            warn "unknown arg: $arg (ignoring)" ;;
+    esac
+done
+
 [[ "$(id -un)" == "tom" ]] || die "Run as user 'tom'."
 ping -c1 -W3 archlinux.org >/dev/null || die "No network."
 
@@ -69,6 +88,7 @@ sudo pacman -Syu --noconfirm --needed \
     iio-sensor-proxy wvkbd libwacom \
     remmina freerdp \
     ufw \
+    azure-cli certbot \
     mise chezmoi github-cli \
     docker docker-compose docker-buildx \
     snapper snap-pac
@@ -111,7 +131,7 @@ fi
 # build (Anthropic ships no official Linux binary). `-native` variant is the
 # community-recommended one — `-bin` has recurring ffmpeg dep issues. Lags
 # official releases; expect occasional breakage on Anthropic updates.
-log "Installing AUR-exclusive apps (VSCode, Edge, Claude desktop, pinpam-git, SDDM theme, iio-hyprland)..."
+log "Installing AUR-exclusive apps (VSCode, Edge, Claude desktop, pinpam-git, SDDM theme, iio-hyprland, certbot-dns-azure)..."
 yay -S --noconfirm --needed \
     visual-studio-code-bin \
     microsoft-edge-stable-bin \
@@ -119,7 +139,8 @@ yay -S --noconfirm --needed \
     catppuccin-sddm-theme-mocha \
     pinpam-git \
     sesh \
-    iio-hyprland
+    iio-hyprland \
+    python-certbot-dns-azure
 
 # ---------- 4. (no local SSH keygen — Bitwarden SSH agent holds keys) ----------
 # Keys live in the Bitwarden vault as "SSH key" items and surface via
@@ -195,11 +216,20 @@ if [[ -d "$DDNS_DIR" ]]; then
         warn "    sudo systemctl start metis-ddns.service && sudo journalctl -u metis-ddns -n 20"
     fi
     sudo install -d -m 755 /var/lib/metis-ddns
+    # Stub Let's Encrypt credentials for the dns-azure plugin (same SP works
+    # for both DDNS record updates and dns-01 challenge TXT records).
+    sudo install -d -m 755 /etc/letsencrypt
+    sudo install -m 644 "$DDNS_DIR/letsencrypt-azure.ini.template" /etc/letsencrypt/azure.ini.template
+    if [[ ! -f /etc/letsencrypt/azure.ini ]]; then
+        sudo install -m 600 -o root -g root "$DDNS_DIR/letsencrypt-azure.ini.template" /etc/letsencrypt/azure.ini
+    fi
     sudo systemctl daemon-reload
     # Enable the timer (don't --now: env file likely empty on first pass; the
     # timer's first tick will no-op-fail until creds are filled in, which is
     # fine — we just don't want the FAILED state to scream at first boot).
     sudo systemctl enable metis-ddns.timer
+    # Enable certbot's renewal timer too — no-op until a cert exists.
+    sudo systemctl enable certbot-renew.timer 2>/dev/null || true
 else
     warn "metis-ddns/ sidecar dir missing — Azure DDNS not installed."
 fi
@@ -1000,20 +1030,33 @@ if [[ "$CURRENT_SHELL" != "$(which zsh)" ]]; then
 fi
 
 # ---------- 19. verify ----------
+if (( SKIP_VERIFY == 1 )); then
+    log "Skipping verify (--no-verify). Re-run without the flag for the full sweep."
+    echo
+    echo "Log out and back in (or reboot) to start Hyprland via SDDM."
+    exit 0
+fi
 echo
 echo "=== Verify ==="
 # Clear shell's command hash cache so binaries installed during this very run
 # (e.g. pinutil from pinpam-git) resolve via `command -v` without a shell restart.
 hash -r 2>/dev/null || true
+VERIFY_PASS=0
+VERIFY_FAIL=0
+VERIFY_FAILED_NAMES=()
 check() {
     local name="$1"; local cmd="$2"
     if eval "$cmd" >/dev/null 2>&1; then
         printf '  \033[1;32mOK\033[0m    %s\n' "$name"
+        VERIFY_PASS=$((VERIFY_PASS+1))
     else
         printf '  \033[1;31mFAIL\033[0m  %s\n' "$name"
+        VERIFY_FAIL=$((VERIFY_FAIL+1))
+        VERIFY_FAILED_NAMES+=("$name")
     fi
 }
 
+echo "-- shell + core CLI --"
 check "zsh"                 "command -v zsh"
 check "tmux"                "command -v tmux"
 check "helix"               "command -v helix || command -v hx"
@@ -1021,62 +1064,186 @@ check "yay"                 "command -v yay"
 check "mise"                "command -v mise"
 check "chezmoi"             "command -v chezmoi"
 check "gh (github-cli)"     "command -v gh"
+check "sesh"                "command -v sesh"
 check "zgenom"              "test -d $HOME/.zgenom"
 check "p10k"                "test -d $HOME/.zgenom/romkatv"
-check "bat / fd / rg / eza" "command -v bat && command -v fd && command -v rg && command -v eza"
+check "bat/fd/rg/eza/lsd"   "command -v bat && command -v fd && command -v rg && command -v eza && command -v lsd"
+check "btop/jq/fzf/zoxide"  "command -v btop && command -v jq && command -v fzf && command -v zoxide"
+check "direnv/sd/yq/xh"     "command -v direnv && command -v sd && command -v yq && command -v xh"
+check "tldr/pkgfile"        "command -v tldr && command -v pkgfile"
+check "JetBrainsMono Nerd"  "fc-list | grep -qi 'JetBrainsMono Nerd Font'"
+
+echo "-- mise + node + Claude CLI --"
 check "mise node@lts"       "mise exec -- node --version"
 check "claude (CLI)"        "command -v claude"
+
+echo "-- desktop apps --"
 check "vscode"              "command -v code"
 check "edge"                "command -v microsoft-edge-stable"
 check "claude-desktop"      "command -v claude-desktop"
+check "bitwarden desktop"   "command -v bitwarden-desktop || command -v bitwarden"
+check "bitwarden-cli"       "command -v bw"
+check "remmina (RDP)"       "command -v remmina"
+check "freerdp"             "command -v xfreerdp || command -v xfreerdp3"
+check "nautilus"            "command -v nautilus"
+check "yazi"                "command -v yazi"
+
+echo "-- terminal stack --"
 check "ghostty"             "command -v ghostty"
+check "foot (fallback)"     "command -v foot"
+check "ghostty config"      "test -f $HOME/.config/ghostty/config && grep -q 'Catppuccin Mocha' $HOME/.config/ghostty/config"
+
+echo "-- Hyprland / HyDE --"
+check "HyDE staged"         "test -d $HOME/HyDE/Scripts"
+check "HyDE installed"      "test -x $HOME/.local/share/bin/theme-switch.sh || test -d $HOME/.local/lib/hyde"
+check "hyprland config"     "test -f $HOME/.config/hypr/hyprland.conf"
+check "arch-setup customs"  "grep -q 'arch-setup-customizations' $HOME/.config/hypr/hyprland.conf"
+check "monitors.conf src"   "grep -q 'monitors.conf' $HOME/.config/hypr/hyprland.conf"
 check "fuzzel"              "command -v fuzzel"
 check "cliphist"            "command -v cliphist"
 check "mako"                "command -v makoctl"
 check "satty"               "command -v satty"
+check "swww"                "command -v swww"
+check "hyprshot"            "command -v hyprshot"
 check "wl-copy"             "command -v wl-copy"
-check "NetworkManager"      "systemctl is-enabled NetworkManager"
-check "sddm"                "systemctl is-enabled sddm"
-check "pipewire"            "pacman -Q pipewire wireplumber"
-check "bluetooth"           "systemctl is-enabled bluetooth"
-check "fprintd"             "systemctl is-enabled fprintd"
-check "snapper config /"    "sudo test -f /etc/snapper/configs/root"
-check "HyDE staged"         "test -d $HOME/HyDE/Scripts"
-check "HyDE installed"      "test -x $HOME/.local/share/bin/theme-switch.sh || test -d $HOME/.local/lib/hyde"
-check "hyprland config"     "test -f $HOME/.config/hypr/hyprland.conf"
-check "monitors.conf src"   "grep -q 'monitors.conf' $HOME/.config/hypr/hyprland.conf"
-check "iio-sensor-proxy"    "systemctl is-enabled iio-sensor-proxy 2>/dev/null || pacman -Q iio-sensor-proxy"
+check "xdg-portal-gtk"      "pacman -Q xdg-desktop-portal-gtk"
+check "hyprpolkitagent svc" "systemctl --user is-enabled hyprpolkitagent.service 2>/dev/null"
+
+echo "-- 2-in-1 hardware --"
+check "iio-sensor-proxy"    "pacman -Q iio-sensor-proxy"
 check "iio-hyprland (AUR)"  "command -v iio-hyprland"
 check "wvkbd (touch OSK)"   "command -v wvkbd-mobintl"
 check "libwacom"            "pacman -Q libwacom"
-check "remmina (RDP)"       "command -v remmina"
-check "freerdp"             "command -v xfreerdp || command -v xfreerdp3"
 check "hyprgrass plugin"    "hyprpm list 2>/dev/null | grep -q hyprgrass"
-check "bitwarden desktop"   "command -v bitwarden-desktop || command -v bitwarden"
-check "bitwarden-cli"       "command -v bw"
+
+echo "-- session / login / display --"
+check "NetworkManager"      "systemctl is-enabled NetworkManager"
+check "sddm"                "systemctl is-enabled sddm"
+check "sddm catppuccin"     "pacman -Q catppuccin-sddm-theme-mocha"
+check "pipewire"            "pacman -Q pipewire wireplumber"
+check "bluetooth"           "systemctl is-enabled bluetooth"
+
+echo "-- secrets / auth --"
+check "fprintd enabled"     "systemctl is-enabled fprintd"
+check "fprintd enrolled"    "fprintd-list tom 2>/dev/null | grep -q 'Fingerprints for user tom'"
 check "pinutil (TPM PIN)"   "test -x /usr/bin/pinutil || command -v pinutil"
 check "pinpam in sudo"      "grep -q pam_pinpam /etc/pam.d/sudo"
 check "LUKS root TPM2"      "sudo systemd-cryptenroll /dev/disk/by-partlabel/ArchRoot 2>/dev/null | awk 'NR>1 && \$2==\"tpm2\"{f=1} END{exit !f}'"
 check "cryptvar keyfile"    "sudo test -f /etc/cryptsetup-keys.d/cryptvar.key"
-check "fprintd enrolled"    "fprintd-list tom 2>/dev/null | grep -q 'Fingerprints for user tom'"
 check "ssh agent wired"     "grep -q bitwarden-ssh-agent.sock $HOME/.ssh/config"
+
+echo "-- inbound network --"
 check "sshd enabled"        "systemctl is-enabled sshd"
+check "sshd listening :22"  "ss -tlnH 'sport = 22' | grep -q :22"
+check "sshd PasswordAuth=no" "sudo sshd -T 2>/dev/null | grep -qi '^passwordauthentication no'"
+check "sshd PermitRoot=no"  "sudo sshd -T 2>/dev/null | grep -qi '^permitrootlogin no'"
 check "sshd hardened conf"  "sudo test -f /etc/ssh/sshd_config.d/10-arch-setup.conf"
 check "callisto authorized" "grep -q 'thoma@callisto' $HOME/.ssh/authorized_keys"
 check "ufw enabled"         "sudo ufw status | grep -q 'Status: active'"
 check "ufw ssh allowed"     "sudo ufw status | grep -E '^22/tcp|^22 ' | grep -q ALLOW"
+check "ufw default deny in" "sudo ufw status verbose | grep -qi 'Default: deny (incoming)'"
+
+echo "-- DDNS + Let's Encrypt --"
+check "azure-cli"           "command -v az"
 check "metis-ddns binary"   "test -x /usr/local/bin/metis-ddns"
+check "metis-ddns service"  "systemctl is-enabled metis-ddns.service 2>/dev/null || systemctl cat metis-ddns.service >/dev/null 2>&1"
 check "metis-ddns timer"    "systemctl is-enabled metis-ddns.timer"
+check "metis-ddns NM hook"  "test -x /etc/NetworkManager/dispatcher.d/90-metis-ddns"
 check "metis-ddns env"      "sudo test -f /etc/metis-ddns.env"
+check "metis-ddns env filled" "sudo grep -qE '^AZ_TENANT_ID=.+' /etc/metis-ddns.env"
+check "metis-ddns last run OK" "sudo systemctl status metis-ddns.service 2>/dev/null | grep -q 'status=0/SUCCESS' || ! sudo test -f /etc/metis-ddns.env || ! sudo grep -qE '^AZ_TENANT_ID=.+' /etc/metis-ddns.env"
+check "certbot"             "command -v certbot"
+check "certbot azure plugin" "pacman -Qq python-certbot-dns-azure 2>/dev/null || pip show certbot-dns-azure >/dev/null 2>&1"
+check "LE cert (if issued)" "! test -d /etc/letsencrypt/live/metis.rhombus.rocks || sudo test -f /etc/letsencrypt/live/metis.rhombus.rocks/fullchain.pem"
+
+echo "-- snapshots / udev / planters --"
+check "snapper config /"    "sudo test -f /etc/snapper/configs/root"
 check "udev usb-serial"     "test -f /etc/udev/rules.d/99-usb-serial.rules"
 check "gh-auth planter or done" "test -f $HOME/.zshrc.d/arch-first-login.zsh || test -f $HOME/.gitconfig.local"
 check "ssh-signing planter" "test -f $HOME/.zshrc.d/arch-ssh-signing.zsh || grep -q allowedSignersFile $HOME/.gitconfig.local 2>/dev/null"
+check "fnpostinstall fn"    "test -f $HOME/.zshrc.d/arch-postinstall.zsh"
+
+# Summary panel
+echo
+if (( VERIFY_FAIL == 0 )); then
+    printf '\033[1;32m=== %d/%d checks passed — clean run ===\033[0m\n' "$VERIFY_PASS" "$((VERIFY_PASS + VERIFY_FAIL))"
+else
+    printf '\033[1;31m=== %d FAIL / %d total ===\033[0m\n' "$VERIFY_FAIL" "$((VERIFY_PASS + VERIFY_FAIL))"
+    echo "Failed checks:"
+    for n in "${VERIFY_FAILED_NAMES[@]}"; do
+        printf '  - %s\n' "$n"
+    done
+fi
 
 echo
-echo "Log out and back in (or reboot) to start Hyprland via SDDM."
-echo "Then, one-time Bitwarden setup:"
-echo "  1. Launch Bitwarden desktop, log in once with your master password."
-echo "  2. Settings -> Security -> enable 'Unlock with system keyring'."
-echo "  3. Settings -> SSH agent -> enable. Import your keys as SSH key vault items."
-echo "After that, vault + agent + sudo-PIN + fingerprint all unlock via your login."
-echo "If the first-login planter ran, gh + git identity are already wired."
+cat <<'POSTINSTALL_OUTRO'
+====================================================================
+  ONE-TIME ACTIONS (only matter the first time you run this)
+====================================================================
+
+[1] Reboot or log out → log back in via SDDM to start Hyprland.
+
+[2] Bitwarden desktop:
+      - Launch, log in once with your master password.
+      - Settings → Security → enable "Unlock with system keyring".
+      - Settings → SSH agent → enable. Import keys as "SSH key" items.
+    After that, vault + agent + sudo-PIN + fingerprint all unlock via login.
+
+[3] gh + git identity:
+      Already wired if the first-login planter ran (see ~/.gitconfig.local).
+      Otherwise: open a new terminal and `gh auth login` once.
+
+[4] Azure DDNS (metis.rhombus.rocks):
+      One-time service principal setup (run on this laptop or any machine
+      with the az CLI — `az` is now installed locally either way):
+
+        az login
+        SUB=$(az account show --query id -o tsv)
+        RG=<resource-group-with-the-DNS-zone>      # fnrhombus knows this
+        ZONE_ID=$(az network dns zone show -g "$RG" -n rhombus.rocks --query id -o tsv)
+        az ad sp create-for-rbac \
+            --name metis-ddns \
+            --role "DNS Zone Contributor" \
+            --scopes "$ZONE_ID" \
+            --years 2
+
+      Paste the output into /etc/metis-ddns.env  (mode 600, root):
+        AZ_TENANT_ID=<tenant>
+        AZ_CLIENT_ID=<appId>
+        AZ_CLIENT_SECRET=<password>
+        AZ_SUBSCRIPTION_ID=<SUB>
+        AZ_RESOURCE_GROUP=<RG>
+        # zone + record already set; DDNS_DISABLE_IPV4=1 is the default
+        # (router blocks v4 anyway). Flip to 0 if you ever expose v4.
+
+      Then:
+        sudo systemctl start metis-ddns.service
+        sudo journalctl -u metis-ddns -n 20
+      First call may 403 (role propagation, ~30s–5min) — just retry.
+      The timer + NetworkManager hook take over after first success.
+
+[5] Let's Encrypt cert for metis.rhombus.rocks (after step 4 succeeds):
+      Mirror the same SP creds into /etc/letsencrypt/azure.ini using its
+      INI keys (template already in place), then:
+
+        sudo certbot certonly \
+            --authenticator dns-azure \
+            --dns-azure-credentials /etc/letsencrypt/azure.ini \
+            --dns-azure-propagation-seconds 60 \
+            -d metis.rhombus.rocks \
+            --agree-tos -m <your-email> --no-eff-email
+
+      certbot-renew.timer is already enabled — it'll renew within 30d
+      of expiry, twice daily, with no further action.
+
+[6] Firewall:
+      Already on (default deny in, allow out, 22/tcp ALLOW for ssh).
+        sudo ufw status verbose          # confirm
+        sudo ufw allow <port>/tcp        # add a rule
+        sudo ufw delete allow <port>/tcp # remove
+      Rules apply to BOTH IPv4 and IPv6 — ufw is dual-stack.
+
+See runbook/INSTALL-RUNBOOK.md (printed PDF) for the same instructions
+in case this output scrolls off.
+====================================================================
+POSTINSTALL_OUTRO
