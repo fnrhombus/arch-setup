@@ -28,15 +28,19 @@ This document is meant to be fed to Claude Code once you're inside Arch Linux. I
 
 ### Hyprland (Window Manager)
 - **What it is**: Tiling Wayland compositor — windows auto-arrange, keyboard-driven
-- **Config location**: `~/.config/hypr/hyprland.conf`
-- **Using end-4/illogical-impulse dotfiles** as the base
+- **Config location**: `~/.config/hypr/hyprland.conf` (HyDE splits keybinds into `~/.config/hypr/keybindings.conf`)
+- **Using HyDE-Project/HyDE dotfiles** (clone at `~/HyDE`, helpers under `~/.local/share/bin/`).
+  - Switched from end-4/illogical-impulse on 2026-04-20 (decisions.md §Q3).
+  - HyDE clobbers prior `~/.config/hypr/` on install but writes a backup to `~/.config/cfg_backups/<timestamp>/`.
+  - Theme switcher: `~/.local/share/bin/theme-switch.sh -s "Catppuccin-Mocha"` or `Ctrl+Super+T`.
 - **Teach me**:
-  - Core keybindings (move focus, move windows, resize, workspaces)
+  - Core keybindings (move focus, move windows, resize, workspaces) — HyDE defaults differ from end-4
   - How to open/close/float windows
   - How workspaces work
   - How to use the scratchpad
-  - How to configure monitors (laptop + external HDMI)
-  - Touch gestures setup
+  - How to configure monitors (laptop + external HDMI) — `nwg-displays` GUI writes `~/.config/hypr/monitors.conf` (sourced by `hyprland.conf`)
+  - Touch gestures (3-finger swipe = workspace switch built-in; long-press / edge swipes via the **hyprgrass** plugin)
+  - Lid behaviour: lid-close disables eDP-1; lid-open `hyprctl reload`s to re-apply `monitors.conf`
 
 ### Ghostty (Terminal Emulator)
 - **What it is**: GPU-accelerated terminal — where zsh/tmux/helix run
@@ -44,7 +48,7 @@ This document is meant to be fed to Claude Code once you're inside Arch Linux. I
 - **Theme**: Catppuccin Mocha — config string is `theme = "Catppuccin Mocha"` (capital C, literal space). The lowercase-hyphen form is NOT Ghostty's theme filename.
 - **Font**: JetBrains Mono Nerd Font
 - **Reload config**: Ctrl+Shift+, (comma)
-- **end-4 wizard note**: Ghostty is NOT on end-4's hardcoded supported-terminal list; `foot` is installed alongside as the wizard's detected shim. Ghostty stays daily driver via Super+Return remap in end-4's keybinds.
+- **HyDE swap note**: HyDE's default terminal is `kitty`. `postinstall.sh` §13a sed-rewrites the `$term` / `$TERMINAL` variable to `ghostty` across `hyprland.conf` and `keybindings.conf`. `foot` is also installed as a TTY-recovery fallback (Wayland-native, ~2 MB).
 - **Teach me**: Ghostty-specific features (if any beyond basic terminal use)
 
 ### tmux (Terminal Multiplexer)
@@ -102,11 +106,11 @@ This document is meant to be fed to Claude Code once you're inside Arch Linux. I
   - Wayland-native mode vs XWayland
   - Any Hyprland-specific window rules needed
 
-### quickshell (Status Bar / Shell)
-- **What it is**: end-4/illogical-impulse's current status-bar + shell, built on QtQuick. Replaced the earlier `ags` (GTK) and `waybar` baselines.
-- **Package**: `quickshell-git` from AUR (baked into `postinstall.sh` yay list).
-- **Config location**: managed by end-4's dotfiles under `~/.config/quickshell/` (path may move — check after install).
-- **Teach me**: How end-4 exposes config knobs, how to add/remove modules, how it differs from waybar.
+### Waybar (Status Bar)
+- **What it is**: HyDE's status bar — multi-themed via the `theme-switch.sh` machinery, picks up the active Catppuccin-Mocha look on switch.
+- **Package**: `waybar` (pacman; pulled in by HyDE's installer).
+- **Config location**: `~/.config/waybar/` (HyDE writes per-theme variants and symlinks the active one).
+- **Teach me**: How HyDE exposes module knobs, how to add/remove modules, how the theme switcher rebuilds the bar config, how to bump font sizes for the 4K TV.
 
 ### Docker
 - Already know Docker basics from Windows
@@ -117,18 +121,32 @@ This document is meant to be fed to Claude Code once you're inside Arch Linux. I
 ## Touch & Input Devices
 
 ### Touchpad Gestures
-- Two-finger drag → scroll
-- Three-finger tap → middle click
-- Three-finger left/right swipe → back/forward
-- Single-finger double-tap+drag → drag/drop
+- Two-finger drag → scroll (libinput default)
+- Three-finger tap → middle click (libinput default)
+- Three-finger left/right swipe → workspace switch (Hyprland built-in: `gestures { workspace_swipe = true; workspace_swipe_fingers = 3 }`, written by `postinstall.sh` §13a)
+- Long-press, edge swipes, OSK toggle — via the **hyprgrass** Hyprland plugin (installed via `hyprpm add` in postinstall §13a). `hyprpm list` should show it; `hyprctl plugin list` confirms it's loaded.
 
-### Wacom Intuos Tablet
-- Needs libwacom + Hyprland tablet config
-- Should work for drawing/input in supported apps
+### Wacom AES Stylus (built-in digitizer)
+- Kernel `wacom` module (in-tree linuxwacom); `libwacom` installed for tablet metadata.
+- Pressure / tilt expected to work under Wayland out of the box; no `xf86-input-wacom` needed (that's the Xorg driver).
+- Quirk to test: eraser-end may need a udev rule if not auto-detected.
 
 ### Touchscreen
-- Should work via libinput
-- Auto-rotation via iio-sensor-proxy when in tablet mode
+- Driven by `hid-multitouch` (kernel) + libinput; works out of the box.
+- **Verify on hardware**: confirm panel chipset with `dmesg | grep -i -E 'wacom|goodix|hid-multitouch'` — Dell's 7786 revision can be Wacom-AES or Goodix; the touchscreen-driver assumption above is unverified until hardware says so.
+
+### On-screen Keyboard (tablet mode)
+- **wvkbd** (`wvkbd-mobintl`) — de-facto Hyprland OSK as of 2026. Toggle via a hyprgrass long-press gesture or a manual keybind.
+- Maliit and squeekboard render poorly under Hyprland; do not switch without testing.
+
+### Auto-rotation
+- `iio-sensor-proxy` (pacman) reads the accelerometer.
+- `iio-hyprland` (AUR) bridges the proxy to `hyprctl keyword monitor` transforms — `exec-once = iio-hyprland` is in `hyprland.conf` (postinstall §13a).
+- Manual rotation override: `hyprctl keyword monitor eDP-1,preferred,auto,1,transform,1` (0=normal, 1=90°, 2=180°, 3=270°).
+
+### Tablet-mode detection (deferred to phase-3.5)
+- Kernel emits `SW_TABLET_MODE` events on a `gpio-keys` / `intel-hid` input device.
+- Bind via udev + script that toggles OSK + disables keyboard/touchpad. Not wired yet.
 
 ### Fingerprint Reader
 - fprintd + libfprint
@@ -195,9 +213,11 @@ Everything listed below is installed automatically by the phase-2 + phase-3 scri
 ### From official repos (pacman, phase-3 postinstall.sh)
 - Core CLI: bat, fd, ripgrep, eza, lsd, btop, jq, fzf, zoxide, direnv, sd, yq, xh, pkgfile, tldr, github-cli
 - Screenshots/clipboard: wl-clipboard, grim, slurp, cliphist, satty, hyprshot
-- Terminals: ghostty (daily driver), foot (end-4 wizard shim)
+- Terminals: ghostty (daily driver), foot (TTY-recovery fallback)
 - File managers: yazi (TUI primary), nautilus (GUI fallback)
-- end-4 runtime: hyprpolkitagent (auth agent, enabled as user unit), swww (wallpaper), xdg-desktop-portal-gtk, mako (notifications), fuzzel (launcher)
+- HyDE runtime: hyprpolkitagent (auth agent, enabled as user unit), swww (wallpaper), xdg-desktop-portal-gtk, mako (notifications), fuzzel (launcher)
+- 2-in-1 hardware: iio-sensor-proxy (accelerometer), wvkbd (on-screen keyboard), libwacom (Wacom AES metadata)
+- Remote desktop: remmina (GUI / connection manager) + freerdp (RDP backend) — primary use case Windows 10; also speaks VNC/SSH/SPICE/X2Go and can RDP into Linux machines running xrdp.
 - Password/vault: bitwarden, bitwarden-cli
 - Version manager: mise
 - Dotfile manager: chezmoi
@@ -210,9 +230,10 @@ Everything listed below is installed automatically by the phase-2 + phase-3 scri
 ### From AUR (yay, phase-3 postinstall.sh)
 - visual-studio-code-bin
 - microsoft-edge-stable-bin
+- claude-desktop-native (unofficial repackage of Anthropic's Windows Electron build — no official Linux binary; expect occasional breakage on Anthropic updates)
 - catppuccin-sddm-theme-mocha
 - pinpam-git (PAM module used by fprintd login stack)
-- quickshell-git (end-4 status bar / shell)
+- iio-hyprland (accelerometer → `hyprctl monitor` transform bridge for 2-in-1 auto-rotation)
 - libfprint-goodix-53xc (Goodix 538C fingerprint blob) — built on top of libfprint-tod-git with `!lto` workaround (see `docs/decisions.md` Requirements → fingerprint entry)
 
 ### Via mise (tool version manager, phase-3 postinstall.sh)
@@ -226,8 +247,9 @@ Everything listed below is installed automatically by the phase-2 + phase-3 scri
 - tpm (tmux plugin manager — `~/.tmux/plugins/tpm`)
 
 ### Known deferred (phase-3.5 hardware handoff)
-- Wacom pen/tablet stack: `libwacom`, `xf86-input-wacom` — only installed if the pen stylus enumerates on real hardware.
-- Auto-rotation: `iio-sensor-proxy` — deferred for the same reason.
+- Tablet-mode detection (`SW_TABLET_MODE` udev rule + script that toggles OSK and disables keyboard/touchpad).
+- Palm rejection tuning (`LIBINPUT_ATTR_PALM_PRESSURE_THRESHOLD` quirk).
+- Wacom AES eraser-end udev quirk if it doesn't auto-detect.
 - Jupyter, extra Python scientific libs: install on demand once the machine is in use.
 - Firefox: deliberately not installed — Edge is the default browser. Add with `sudo pacman -S firefox` if you want it.
 - dotnet SDK: not installed by default. Add per-project via `mise use dotnet@lts` when needed.

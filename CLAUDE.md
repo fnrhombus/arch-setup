@@ -90,7 +90,7 @@ There is no build, lint, or test target. Work is almost entirely **editing markd
 ## Context that should influence every edit
 
 - **The target machine cannot use NVIDIA under Wayland.** MX250 requires nvidia-470xx, which lacks GBM. Any suggestion involving Optimus/nvidia on this hardware is wrong — Intel UHD 620 only, external monitor via HDMI (wired to iGPU), NVIDIA modules blacklisted.
-- **User does not enjoy config tweaking.** Choose opinionated defaults with sane upgrade paths. The `end-4/illogical-impulse` Hyprland dotfiles are the baseline — don't suggest building Hyprland config from scratch.
+- **User does not enjoy config tweaking.** Choose opinionated defaults with sane upgrade paths. The `HyDE-Project/HyDE` Hyprland dotfiles are the baseline (switched from end-4/illogical-impulse on 2026-04-20 — see `docs/decisions.md` §Q3); don't suggest building Hyprland config from scratch. Omarchy is a closer fit but requires the limine bootloader (out of scope until/unless we redo phase 2).
 - **tmux is required, not optional.** It's there for Claude Code's worktree workflow (Zellij is not supported). Prefix is `Ctrl+a`, carried from the prior `fnwsl` setup.
 - **Dotfiles will be managed by `chezmoi`** eventually — don't propose `stow` or plain symlinks.
 - **Shell stack is locked:** zsh + zgenom + powerlevel10k + the plugin list in `wsl-cli-test.sh`. Mirror any plugin change across both the `.zshrc` block *and* the pre-build block at the bottom of that script, or the zgenom cache will be stale on first login.

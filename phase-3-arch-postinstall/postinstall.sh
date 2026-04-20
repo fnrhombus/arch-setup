@@ -17,7 +17,9 @@
 #   - gh identity + signing key registration (first-login planter if no token yet)
 #   - zgenom + p10k + the full fnwsl plugin set (history/completion/PATH dedup
 #     brought in from fnwsl; WSL-specific pieces dropped)
-#   - end-4/illogical-impulse Hyprland dotfiles
+#   - HyDE-Project/HyDE Hyprland dotfiles + Catppuccin-Mocha theme
+#   - 2-in-1 touch: iio-sensor-proxy / iio-hyprland (rotation), wvkbd (OSK),
+#     hyprgrass plugin (touch gestures), libwacom (Wacom AES stylus)
 #   - Catppuccin Mocha across Ghostty/SDDM/tmux/Helix
 #   - Snapper baseline snapshot
 #   - USB-serial udev rules (ESP32/Pico)
@@ -55,6 +57,8 @@ sudo pacman -Syu --noconfirm --needed \
     ghostty fuzzel cliphist mako satty hyprshot \
     foot nautilus yazi \
     hyprpolkitagent swww xdg-desktop-portal-gtk \
+    iio-sensor-proxy wvkbd libwacom \
+    remmina freerdp \
     mise chezmoi github-cli \
     docker docker-compose docker-buildx \
     snapper snap-pac
@@ -74,12 +78,12 @@ fi
 
 # ---------- 1b. user services ----------
 # hyprpolkitagent ships a user unit but the preset doesn't auto-activate on
-# a fresh install — end-4's first-launch wizard can't see the auth agent
-# until it's registered on the session D-Bus, which requires the service
-# to be started at least once. Idempotent: --now starts it here, enable
-# persists across logins.
+# a fresh install — apps that need PolicyKit auth (Bitwarden unlock, mount
+# prompts, etc.) silently fail until the service is registered on the
+# session D-Bus. Idempotent: --now starts it here, enable persists across
+# logins.
 systemctl --user enable --now hyprpolkitagent.service 2>/dev/null || \
-    warn "hyprpolkitagent.service enable failed — end-4 wizard may flag auth agent as Missing."
+    warn "hyprpolkitagent.service enable failed — Bitwarden may flag system-auth as unavailable."
 
 # ---------- 2. yay bootstrap ----------
 if ! command -v yay >/dev/null; then
@@ -97,14 +101,15 @@ fi
 # build (Anthropic ships no official Linux binary). `-native` variant is the
 # community-recommended one — `-bin` has recurring ffmpeg dep issues. Lags
 # official releases; expect occasional breakage on Anthropic updates.
-log "Installing AUR-exclusive apps (VSCode, Edge, Claude desktop, pinpam-git, SDDM theme)..."
+log "Installing AUR-exclusive apps (VSCode, Edge, Claude desktop, pinpam-git, SDDM theme, iio-hyprland)..."
 yay -S --noconfirm --needed \
     visual-studio-code-bin \
     microsoft-edge-stable-bin \
     claude-desktop-native \
     catppuccin-sddm-theme-mocha \
     pinpam-git \
-    sesh
+    sesh \
+    iio-hyprland
 
 # ---------- 4. (no local SSH keygen — Bitwarden SSH agent holds keys) ----------
 # Keys live in the Bitwarden vault as "SSH key" items and surface via
@@ -694,58 +699,78 @@ select = "underline"
 render = true
 HXEOF
 
-# ---------- 13. Hyprland dotfiles (end-4/illogical-impulse) ----------
-# Clone fresh at run time — we get the latest dots, the repo stays lean, and
-# phase 2 doesn't have to carry a snapshot on the USB. GIT_TEMPLATE_DIR="" is
-# the wsl-setup-lessons.md mitigation for stale user-dir template hooks.
-if [[ ! -d "$HOME/dotfiles/dots-hyprland" ]]; then
-    log "Cloning end-4/dots-hyprland..."
-    mkdir -p "$HOME/dotfiles"
-    GIT_TEMPLATE_DIR="" git clone --depth 1 https://github.com/end-4/dots-hyprland.git \
-        "$HOME/dotfiles/dots-hyprland" \
-        || warn "dots-hyprland clone failed — network? Retry manually later: \
-GIT_TEMPLATE_DIR=\"\" git clone --depth 1 https://github.com/end-4/dots-hyprland.git ~/dotfiles/dots-hyprland"
+# ---------- 13. Hyprland dotfiles (HyDE-Project/HyDE) ----------
+# Switched away from end-4/illogical-impulse to HyDE on 2026-04-20 (decisions.md
+# §Q10/§Q14): HyDE is bootloader-agnostic (we keep systemd-boot), ships
+# Catppuccin-Mocha as a bundled theme, doesn't require a fresh-install boot
+# (works as an overlay on existing Arch + Hyprland), and has a `theme-switch`
+# CLI for one-shot theme application. Trade-off vs Omarchy: Omarchy is a closer
+# fit (Ghostty default + opinionated keyboard-ninja UX) but mandates the
+# `limine` bootloader — out of scope until/unless we redo phase 2.
+#
+# HyDE clobbers ~/.config/hypr/, ~/.config/waybar/, ~/.config/rofi/, etc.
+# It backs the prior tree up to ~/.config/cfg_backups/<timestamp>/ before
+# overwriting. Do NOT layer HyDE on top of end-4 — pick one and commit; if
+# end-4 was previously installed, this script's HyDE install will replace it
+# (the backup is your safety net).
+#
+# Clone fresh at run time so the dots stay current and the repo stays lean.
+# GIT_TEMPLATE_DIR="" is the wsl-setup-lessons.md mitigation for stale
+# user-dir template hooks.
+if [[ ! -d "$HOME/HyDE" ]]; then
+    log "Cloning HyDE-Project/HyDE..."
+    GIT_TEMPLATE_DIR="" git clone --depth 1 https://github.com/HyDE-Project/HyDE.git \
+        "$HOME/HyDE" \
+        || warn "HyDE clone failed — network? Retry manually later: \
+GIT_TEMPLATE_DIR=\"\" git clone --depth 1 https://github.com/HyDE-Project/HyDE.git ~/HyDE"
 fi
 
-if [[ -d "$HOME/dotfiles/dots-hyprland" ]]; then
-    log "Installing end-4/dots-hyprland..."
-    pushd "$HOME/dotfiles/dots-hyprland" >/dev/null
-    # Installer naming history: end-4 renamed `install.sh` → `setup` (with
-    # subcommands) in late 2025 / early 2026. Configs also moved from
-    # ./.config/ to ./dots/.config/. Try in order: new setup, old install.sh,
-    # then the corrected cp fallback.
-    if [[ -x ./setup ]]; then
-        warn "Running end-4 ./setup install INTERACTIVELY — answer prompts."
-        ./setup install || warn "end-4 ./setup install exited non-zero; review manually"
-    elif [[ -x ./install.sh ]]; then
-        warn "Running end-4 ./install.sh INTERACTIVELY (legacy) — answer prompts."
-        ./install.sh || warn "end-4 installer exited non-zero; review manually"
-    elif [[ -d ./dots/.config ]]; then
-        warn "No setup script in dots-hyprland; copying ./dots/.config/* manually."
-        cp -rn ./dots/.config/* "$HOME/.config/" 2>/dev/null || true
+if [[ -d "$HOME/HyDE/Scripts" ]]; then
+    # Idempotency guard: HyDE drops a marker into ~/.local/share/bin/ on first
+    # successful install (theme-switch.sh, Hyde.sh helpers). Skip re-run if
+    # those exist — re-running install.sh would re-clobber configs and bury
+    # the most-recent backup behind a useless overwrite-of-an-overwrite.
+    if [[ -x "$HOME/.local/share/bin/theme-switch.sh" ]] || [[ -d "$HOME/.local/lib/hyde" ]]; then
+        log "HyDE already installed (theme-switch.sh / .local/lib/hyde present) — skipping re-install."
     else
-        warn "No setup script AND no ./dots/.config/ in dots-hyprland; copying ./.config/* (legacy layout)."
-        cp -rn .config/* "$HOME/.config/" 2>/dev/null || true
+        warn "Running HyDE install.sh INTERACTIVELY — answer prompts (skip NVIDIA: -n)."
+        pushd "$HOME/HyDE/Scripts" >/dev/null
+        # -n skips NVIDIA wiring (MX250 is blacklisted; iGPU only on this box).
+        ./install.sh -n || warn "HyDE install.sh exited non-zero; review manually"
+        popd >/dev/null
     fi
-    popd >/dev/null
 else
-    warn "Dotfiles not available at ~/dotfiles/dots-hyprland — Hyprland config skipped."
-    warn "  Fix: GIT_TEMPLATE_DIR=\"\" git clone --depth 1 https://github.com/end-4/dots-hyprland.git ~/dotfiles/dots-hyprland"
+    warn "HyDE not available at ~/HyDE/Scripts — Hyprland config skipped."
+    warn "  Fix: GIT_TEMPLATE_DIR=\"\" git clone --depth 1 https://github.com/HyDE-Project/HyDE.git ~/HyDE"
     warn "       then re-run this script."
 fi
 
-# ---------- 13a. Hyprland customizations layered on top of end-4 ----------
-# end-4's setup overwrites ~/.config/hypr/hyprland.conf on every install.
-# We patch + append idempotently so re-runs restore our overrides.
+# Force Catppuccin-Mocha theme. HyDE ships Catppuccin-Mocha in its bundled
+# theme list; theme-switch.sh is idempotent (no-op if already set).
+if [[ -x "$HOME/.local/share/bin/theme-switch.sh" ]]; then
+    log "Setting HyDE theme to Catppuccin-Mocha..."
+    "$HOME/.local/share/bin/theme-switch.sh" -s "Catppuccin-Mocha" \
+        || warn "theme-switch.sh failed — set manually with Ctrl+Super+T."
+fi
+
+# ---------- 13a. Hyprland customizations layered on top of HyDE ----------
+# HyDE's install.sh overwrites ~/.config/hypr/* on every run. We patch + append
+# idempotently so re-runs restore our overrides. The marker comment makes the
+# append a one-shot.
 HYPR_CONF="$HOME/.config/hypr/hyprland.conf"
 
-# end-4 defaults `$terminal = foot` (line 35 at time of writing). foot stays
-# installed as their first-launch-wizard shim (docs/decisions.md §Q10-C), but
-# the daily-driver terminal is Ghostty — rewrite the var so every keybind that
-# uses $terminal launches Ghostty. sed is inherently idempotent: once the line
-# already says ghostty the pattern stops matching.
+# HyDE defaults the terminal var (`$term` or `$TERMINAL`) to kitty. The
+# daily-driver terminal is Ghostty (decisions.md §Q10-C). Rewrite both common
+# spellings so every keybind that uses the var launches Ghostty. sed is
+# inherently idempotent: once the line already says ghostty the pattern stops
+# matching.
 if [[ -f "$HYPR_CONF" ]]; then
-    sed -i 's|^\$terminal = foot$|$terminal = ghostty|' "$HYPR_CONF"
+    sed -i -E 's|^\$(term|TERMINAL|terminal)\s*=\s*kitty\s*$|$\1 = ghostty|' "$HYPR_CONF"
+fi
+# HyDE may also keep the terminal pin in keybindings.conf — patch there too.
+HYPR_KEYBINDS="$HOME/.config/hypr/keybindings.conf"
+if [[ -f "$HYPR_KEYBINDS" ]]; then
+    sed -i -E 's|^\$(term|TERMINAL|terminal)\s*=\s*kitty\s*$|$\1 = ghostty|' "$HYPR_KEYBINDS"
 fi
 
 if [[ -f "$HYPR_CONF" ]] && ! grep -q '# arch-setup-customizations' "$HYPR_CONF"; then
@@ -760,16 +785,38 @@ if [[ -f "$HYPR_CONF" ]] && ! grep -q '# arch-setup-customizations' "$HYPR_CONF"
 # Do NOT pin `monitor = ...` lines here — the kernel-reported name for the TV is
 # DP-1 (DisplayPort-over-HDMI alt-mode), which varies by port/cable, and monitors.conf
 # is the single source of truth.
+source = ~/.config/hypr/monitors.conf
 #
 # Lid close → disable internal panel; lid open → reload hyprland.conf so monitors.conf
 # reapplies the nwg-displays-authored layout. Laptop lives under a desk most of the
 # time; closing the lid is the normal "kiosk mode" signal.
 bindl = , switch:on:Lid Switch,  exec, hyprctl keyword monitor "eDP-1, disable"
 bindl = , switch:off:Lid Switch, exec, hyprctl reload
-# Auto-start quickshell (end-4's status bar) — vanilla end-4 hyprland.conf does
-# NOT exec-once it, so the bar is missing on first login without this.
-exec-once = quickshell
+#
+# 2-in-1 touch: 3-finger swipe = workspace switch (Hyprland built-in);
+# extra touch gestures (long-press, edge swipe to toggle wvkbd) come from the
+# hyprgrass plugin installed via `hyprpm` below.
+gestures {
+    workspace_swipe = true
+    workspace_swipe_fingers = 3
+}
+#
+# Screen rotation on tablet-mode flip via iio-hyprland (AUR). Reads the IIO
+# accelerometer and emits `hyprctl keyword monitor` transforms.
+exec-once = iio-hyprland
 HYPREOF
+fi
+
+# Install hyprgrass touch-gesture plugin via hyprpm. Idempotent: hyprpm checks
+# if the plugin is already added before re-cloning.
+if command -v hyprpm >/dev/null && [[ -d "$HOME/.config/hypr" ]]; then
+    log "Ensuring hyprgrass plugin (touch gestures) is installed..."
+    hyprpm update >/dev/null 2>&1 || true
+    if ! hyprpm list 2>/dev/null | grep -q hyprgrass; then
+        hyprpm add https://github.com/horriblename/hyprgrass \
+            && hyprpm enable hyprgrass \
+            || warn "hyprgrass install failed — re-run inside a Hyprland session."
+    fi
 fi
 
 # ---------- 14. Ghostty Catppuccin ----------
@@ -902,8 +949,17 @@ check "pipewire"            "pacman -Q pipewire wireplumber"
 check "bluetooth"           "systemctl is-enabled bluetooth"
 check "fprintd"             "systemctl is-enabled fprintd"
 check "snapper config /"    "sudo test -f /etc/snapper/configs/root"
-check "dotfiles staged"     "test -d $HOME/dotfiles/dots-hyprland"
+check "HyDE staged"         "test -d $HOME/HyDE/Scripts"
+check "HyDE installed"      "test -x $HOME/.local/share/bin/theme-switch.sh || test -d $HOME/.local/lib/hyde"
 check "hyprland config"     "test -f $HOME/.config/hypr/hyprland.conf"
+check "monitors.conf src"   "grep -q 'monitors.conf' $HOME/.config/hypr/hyprland.conf"
+check "iio-sensor-proxy"    "systemctl is-enabled iio-sensor-proxy 2>/dev/null || pacman -Q iio-sensor-proxy"
+check "iio-hyprland (AUR)"  "command -v iio-hyprland"
+check "wvkbd (touch OSK)"   "command -v wvkbd-mobintl"
+check "libwacom"            "pacman -Q libwacom"
+check "remmina (RDP)"       "command -v remmina"
+check "freerdp"             "command -v xfreerdp || command -v xfreerdp3"
+check "hyprgrass plugin"    "hyprpm list 2>/dev/null | grep -q hyprgrass"
 check "bitwarden desktop"   "command -v bitwarden-desktop || command -v bitwarden"
 check "bitwarden-cli"       "command -v bw"
 check "pinutil (TPM PIN)"   "test -x /usr/bin/pinutil || command -v pinutil"

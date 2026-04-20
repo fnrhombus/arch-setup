@@ -19,15 +19,37 @@
 ## Requirements
 - [x] Fingerprint scanner support (fprintd + libfprint). **Device: Goodix `27c6:538c`** — supported only via the AUR `libfprint-goodix-53xc` package (older Dell OEM blob, pre-v0.0.11) riding on `libfprint-tod-git`. Current upstream AUR `libfprint-2-tod1-goodix` / `-v2` ship a **550A-only** blob that does NOT cover 538C. `libfprint-tod-git` must be built with `!lto` in PKGBUILD options — LTO strips ABI symbol versioning and breaks the link. `postinstall.sh` pre-flights this automatically. Enrollment on a bare TTY needs `sudo fprintd-enroll -f <finger> tom` (polkit denies unprivileged enroll without a graphical session).
 - [x] Lid close: no sleep/shutdown on AC power (logind.conf) — wired by phase-2 `chroot.sh` via `/etc/systemd/logind.conf.d/10-lid.conf` (`HandleLidSwitchExternalPower=ignore`).
-- [ ] Wacom Intuos pen tablet support
+- [ ] Wacom Intuos pen tablet support — built-in Wacom AES digitizer driven by
+  the kernel `wacom` module (in-tree linuxwacom). `libwacom` installed via
+  `postinstall.sh` for tablet metadata. Pressure/tilt expected to work under
+  Wayland; eraser-end may need a udev quirk if not auto-detected. **Verify on
+  hardware**: actual VID/PID and whether it's Wacom-AES vs Goodix on this
+  specific 7786 revision (`dmesg | grep -i -E 'wacom|goodix|hid-multitouch'`
+  after first boot).
 - [ ] Touch gestures (touchpad + tablet mode):
-  - Two-finger drag → scroll
-  - Three-finger tap → middle click
-  - Three-finger left/right swipe → back/forward
-  - Single-finger double-tap+drag → drag/drop
-- [ ] Auto-rotation (2-in-1 tablet mode, iio-sensor-proxy)
+  - Two-finger drag → scroll (libinput default, no config needed)
+  - Three-finger tap → middle click (libinput default)
+  - Three-finger left/right swipe → workspace switch (`gestures { workspace_swipe = true; workspace_swipe_fingers = 3 }` in `hyprland.conf` — wired by postinstall §13a)
+  - Single-finger long-press, edge swipes, OSK toggle → **hyprgrass** plugin (installed via `hyprpm` by postinstall)
+  - On-screen keyboard: **wvkbd** (`wvkbd-mobintl`) — de-facto OSK for Hyprland as of 2026; maliit and squeekboard render poorly under Hyprland.
+- [ ] Auto-rotation (2-in-1 tablet mode): `iio-sensor-proxy` (pacman) +
+  `iio-hyprland` (AUR) — iio-hyprland reads the IIO accelerometer and emits
+  `hyprctl keyword monitor` transforms. Wired by postinstall as `exec-once = iio-hyprland`.
+- [ ] Tablet-mode detection: kernel emits `SW_TABLET_MODE` events on a
+  `gpio-keys`/`intel-hid` input device. Bind via udev rule + script that
+  toggles the OSK and disables the keyboard/touchpad. Defer to phase-3.5.
+- [ ] Palm rejection: enable `LIBINPUT_ATTR_PALM_PRESSURE_THRESHOLD` quirk
+  (touch panel) and `input:touchpad:disable_while_typing = true` in
+  `hyprland.conf`. Defer to phase-3.5.
 - [ ] Bitwarden (self-hosted: https://hass4150.duckdns.org:7277/)
-- [ ] RDP client for accessing Windows 10 machine
+- [x] RDP client for accessing remote desktops. Primary target: Windows 10
+  (existing use case). Should also cover any modern Windows (11, Server
+  2019+) and **be capable of RDPing into a Linux machine running `xrdp`**
+  (no current use case, just nice-to-have capability — the *client* must
+  support it; the Linux server side is out of scope for this repo). Remmina
+  speaks RDP/VNC/SSH/SPICE/X2Go, so all of the above are covered without
+  swapping clients. Installed: `remmina` (GUI / connection manager) +
+  `freerdp` (RDP protocol backend) — `postinstall.sh` §1.
 - [ ] Photogrammetry (uses 3DF Zephyr on Windows; Meshroom or Metashape for Linux later)
 - [ ] Python + Jupyter notebooks
 - [ ] (nice-to-have) CursorWrap — mouse wraps around monitor edges (no native Hyprland support yet; may need custom script/plugin)
@@ -49,7 +71,24 @@
 
 ### Q3: Compositor
 - **Hyprland** — eye-candy king, GPU-accelerated animations, blur, rounding
-- Will use **end-4/illogical-impulse** dotfiles as a starting point
+- **Dotfiles: HyDE-Project/HyDE** (switched from end-4/illogical-impulse on 2026-04-20).
+  - Why HyDE: bootloader-agnostic (we keep systemd-boot — see §A), ships
+    Catppuccin-Mocha as a bundled theme, works as an overlay on existing Arch
+    + Hyprland, has a `theme-switch` CLI for one-shot theme application.
+  - Why not Omarchy (the closer fit on opinionatedness + Ghostty defaults +
+    keyboard-ninja UX): Omarchy mandates the **`limine` bootloader** via a hard
+    preflight guard, which would require redoing phase 2. Defer until/unless
+    the bootloader migration is on the table.
+  - Why not stay on end-4: the end-4 first-launch wizard requires the user to
+    answer multiple prompts and the dotfiles do not bundle a theme switcher;
+    Catppuccin Mocha alignment is manual. HyDE's `theme-switch.sh` makes the
+    theme idempotent under postinstall.
+  - HyDE clobbers `~/.config/hypr/`, `~/.config/waybar/`, etc. on install,
+    but backs the prior tree up to `~/.config/cfg_backups/<timestamp>/` first.
+    Do NOT layer HyDE over end-4 — pick one.
+  - HyDE's default terminal is **kitty**, not Ghostty. `postinstall.sh`
+    13a sed-rewrites the `$term` / `$TERMINAL` / `$terminal` variable in
+    `hyprland.conf` + `keybindings.conf` to ghostty.
 
 ### Q4: DisplayLink / External Monitor
 - **Monitor via HDMI** direct to laptop (bypasses DisplayLink video — avoids Wayland issues)
@@ -134,7 +173,12 @@
 #### C) Terminal emulator: Ghostty
 - GPU-accelerated, great defaults, Kitty graphics protocol support
 - Pairs with tmux for splits/sessions
-- **end-4 compatibility shim: also install `foot`.** end-4's first-launch wizard hardcodes its "supported terminals" list to kitty, alacritty, foot, wezterm, konsole, gnome-terminal, xterm — Ghostty is unknown to it. `foot` is the lightest Wayland-native entry in their list; it satisfies the wizard's detector while Ghostty remains the daily driver via a Super+Return remap in the end-4 Hyprland keybinds.
+- **`foot` stays installed** as a fallback / minimal Wayland-native terminal
+  for cases where Ghostty hasn't started yet (TTY-launched recovery, theme
+  reset). Originally added as an end-4 wizard shim; retained on the HyDE swap
+  because it costs ~2 MB and is a useful safety net when Ghostty config is in
+  flux. HyDE's default is **kitty** which we sed-out, so `foot` is the only
+  pre-Ghostty fallback that lives in pacman `[extra]`.
 - **Ghostty theme config gotcha**: the bundled theme file name is `Catppuccin Mocha` (capital C, literal space), not `catppuccin-mocha`. `theme = "Catppuccin Mocha"` in `~/.config/ghostty/config`.
 
 #### D) Login screen: SDDM
@@ -142,7 +186,7 @@
 
 #### E) Notifications: mako
 - Wayland-native, lightweight, matches the foot/fuzzel/swww profile of the rest of the stack.
-- **Why not swaync**: end-4's first-launch wizard only accepts `dunst` or `mako` as the notification daemon. swaync is installed-but-invisible to end-4's detector. mako is the simpler of the two accepted options; dunst is the feature-rich alternative if mako ever feels too minimal.
+- **Why not swaync**: originally chosen because end-4's wizard only accepted `dunst`/`mako`. Carried forward on the HyDE swap because mako is simpler, lighter, and HyDE has no opinion on the daemon. Dunst is the feature-rich alternative if mako ever feels too minimal.
 
 #### F) App launcher: fuzzel
 - Wayland-native, lightweight, fuzzy matching
@@ -179,42 +223,76 @@
 - Edge (`microsoft-edge-stable-bin` AUR) as default for sync continuity with Windows
 - Firefox **not installed by default** — Edge covers the daily driver need; add with `sudo pacman -S firefox` when a Wayland-native backup is useful.
 
-#### O) RDP client: Remmina
-- Full-featured GUI, connection manager, Wayland-native
-- For accessing Windows 10 machine
-- **Not installed by default** (deferred to phase-3.5 — no RDP target to validate against during a fresh install). Add with `sudo pacman -S remmina freerdp` when needed.
+#### O) RDP client: Remmina + FreeRDP
+- Full-featured GUI, connection manager, Wayland-native (`remmina`).
+- FreeRDP backend (`freerdp`) provides the actual RDP protocol implementation
+  — Remmina is the GUI shell on top.
+- For accessing Windows 10 machine. Installed by `postinstall.sh` §1.
 
 #### Q-file) File manager: yazi (primary) + nautilus (GUI fallback)
 - **yazi** — terminal file manager, keyboard-first, vim-style keybinds, Rust-native, rich previews (images/PDF/code). Fits the terminal-heavy workflow (tmux/helix/ghostty). Daily driver.
-- **nautilus** — GTK4 GUI file manager, Wayland-tested, picks up the Catppuccin GTK theme for free, minimal-friction for drag/drop, network mounts (smb://, sftp://). The deliberate polar opposite of yazi for "sit back, click around" mode. Also satisfies end-4's wizard-detected file-manager slot.
+- **nautilus** — GTK4 GUI file manager, Wayland-tested, picks up the Catppuccin GTK theme for free, minimal-friction for drag/drop, network mounts (smb://, sftp://). The deliberate polar opposite of yazi for "sit back, click around" mode.
 - **Not Dolphin/Nemo/Thunar/PCManFM**: Dolphin adds a Qt/KDE theming tax while being philosophically the same dense-power-user tool as yazi; Thunar's Wayland support is X11-first; PCManFM is a low-RAM pick we don't need; Nemo's maintenance velocity lags Nautilus.
 
 #### P) Installer password handoff: pre-hashed via mode-600 file
 - `phase-2-arch-install/install.sh` reads the root + `tom` passwords once at the top of the run, hashes them immediately with `openssl passwd -6` (SHA-512), and hands the hashes to `chroot.sh` via a mode-600 file under `/mnt/tmp/`. The plaintext values never touch disk.
 - **Caveat**: while the installer is still running, the `openssl passwd` invocation does briefly appear in `ps` (as the process argument) on the live ISO. The live environment is single-user and ephemeral, so this is acceptable — but don't run the installer on a shared/networked machine. After chroot finishes, the hash file is deleted and only the hashed values remain in `/etc/shadow`.
 
-### Q13: end-4/dots-hyprland config layout (observed)
-- **Single primary file**: `~/.config/hypr/hyprland.conf` (no `custom/` subdir on the version we cloned in April 2026).
-- **Terminal variable**: `$terminal = foot` defined at line 35. Change there to swap to Ghostty (`$terminal = ghostty`).
-- **Terminal keybind**: `Super+Q` (line 245: `bind = $mainMod, Q, exec, $terminal`), NOT Super+Return.
+### Q13: HyDE-Project/HyDE config layout (observed)
+- **Install root**: clone to `~/HyDE` (we use `~/HyDE`, the upstream-recommended path), installer at `~/HyDE/Scripts/install.sh`.
+- **Helper binaries**: HyDE drops its own scripts into `~/.local/share/bin/`
+  (`theme-switch.sh`, `Hyde.sh`) and a shared lib into `~/.local/lib/hyde/`.
+  These are the postinstall idempotency markers — if either exists, we skip
+  re-running `install.sh`.
+- **Hyprland config root**: `~/.config/hypr/` — `hyprland.conf` is the entry
+  point, but HyDE splits binds and animations into `~/.config/hypr/keybindings.conf`
+  and friends, all sourced from `hyprland.conf`.
+- **Terminal variable**: HyDE's keybinds reference a variable for the terminal
+  (commonly `$term` or `$TERMINAL`) defaulting to `kitty`. `postinstall.sh`
+  §13a sed-rewrites it to `ghostty` across both `hyprland.conf` and
+  `keybindings.conf`. If a future HyDE rev changes the variable name, the
+  pattern stops matching and the rewrite becomes a no-op — sanity check
+  `hyprctl getoption -j misc:disable_hyprland_logo` and the visible Super+Return
+  behaviour after install.
+- **Bar**: HyDE uses **Waybar** (multi-themed); no `quickshell` involved.
+- **Theme switcher**: `~/.local/share/bin/theme-switch.sh -s "Catppuccin-Mocha"`
+  (idempotent — re-run is a no-op if the theme is already active). `Ctrl+Super+T`
+  cycles through bundled themes.
+- **Backups**: every install run snapshots prior configs to `~/.config/cfg_backups/<timestamp>/`.
 - **Reload after edit**: `hyprctl reload` (no logout needed).
-- **Status bar**: `quickshell` does NOT auto-start from end-4's vanilla config. Add `exec-once = quickshell` to hyprland.conf if the bar is missing after install.
 
-### Q12: end-4/dots-hyprland runtime dependencies
+### Q12: HyDE-Project/HyDE runtime dependencies
 
-The current `end-4/dots-hyprland` repo ships a **GUI first-launch wizard that detects components but does not install them** — older versions ran a CLI `install.sh` that auto-pulled deps; that's no longer true. `postinstall.sh` must install everything end-4 expects on the host directly.
+HyDE's `Scripts/install.sh` pulls most of its own runtime deps via pacman/yay
+during install, but `postinstall.sh` pre-installs the keys ones from `[extra]`
+ahead of time so the verify block can prove them present and so the network
+churn is front-loaded.
 
-**Required packages end-4 expects (per its first-launch detector):**
-- **Authentication agent**: `hyprpolkitagent` (also accepted: `polkit-kde-agent`). **Must be activated via `systemctl --user enable --now hyprpolkitagent.service`** — the package ships the unit with preset `enabled`, but the preset does NOT auto-activate on a fresh install; `postinstall.sh` enables it explicitly.
-- **Terminal**: see §Q10-C (Ghostty as daily driver + `foot` as end-4 shim).
-- **File manager**: see §Q10-Q-file (`nautilus` fills end-4's slot; `yazi` is primary).
-- **Notification daemon**: `mako` (§Q10-E). `swaync` is not on end-4's accepted list and shows as Missing in the wizard even when installed and running.
-- **Wallpaper**: `swww`.
-- **XDG Desktop Portal**: `xdg-desktop-portal-hyprland` (installed in phase 2 pacstrap) + `xdg-desktop-portal-gtk` (installed in phase 3 postinstall as the GTK backend).
-- **Status bar / shell**: `quickshell-git` (AUR). end-4 replaced their earlier `ags`-based bar with quickshell.
-- **Application launcher**: `fuzzel` (already decided in §Q10-F, accepted by end-4).
-- **Clipboard**: `wl-clipboard` provides `wl-copy` (already in §Q10-H).
-- **Pipewire**: already in §Q10-I.
+**Packages HyDE expects (and which we explicitly install):**
+- **Authentication agent**: `hyprpolkitagent` — must be activated via
+  `systemctl --user enable --now hyprpolkitagent.service` (the unit's preset
+  is `enabled` but doesn't auto-activate on a fresh install; without it
+  Bitwarden's "Unlock with system keyring" stays grayed out).
+- **Terminal**: Ghostty (daily driver, §Q10-C). HyDE's default is **kitty**;
+  postinstall §13a sed-rewrites the `$term` / `$TERMINAL` variable.
+- **File manager**: yazi (primary) + nautilus (GUI), §Q10-Q-file.
+- **Notification daemon**: `mako` (§Q10-E).
+- **Wallpaper**: `swww` (HyDE expects it for theme switches).
+- **XDG Desktop Portal**: `xdg-desktop-portal-hyprland` (phase 2 pacstrap) +
+  `xdg-desktop-portal-gtk` (phase 3 postinstall).
+- **Application launcher**: `fuzzel` (HyDE itself defaults to rofi but accepts
+  fuzzel; we keep §Q10-F).
+- **Clipboard**: `wl-clipboard` (§Q10-H).
+- **Pipewire**: §Q10-I.
+
+**2-in-1 hardware additions (new, postinstall §1):**
+- `iio-sensor-proxy` — pacman; reads accelerometer.
+- `iio-hyprland` — AUR; bridges accelerometer → `hyprctl monitor` transforms.
+- `wvkbd` — pacman; provides `wvkbd-mobintl` on-screen keyboard for tablet mode.
+- `libwacom` — pacman; tablet metadata (pressure curves, button maps).
+- **hyprgrass** — Hyprland plugin (installed via `hyprpm add` in postinstall §13a)
+  for long-press, edge swipes, and OSK-toggle gestures beyond Hyprland's
+  built-in 3-finger workspace swipe.
 
 **The wizard's color legend**: red = not installed, green = installed but not running, blue = installed AND running. Hover on each component to see its accepted-package list. `postinstall.sh` bakes the above list into sections 1 (pacman) + 3 (yay) + 1b (systemctl --user enable hyprpolkitagent).
 
