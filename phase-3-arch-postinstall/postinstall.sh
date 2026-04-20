@@ -93,14 +93,13 @@ if ! command -v yay >/dev/null; then
 fi
 
 # ---------- 3. AUR: only what's not in extra ----------
-log "Installing AUR-exclusive apps (VSCode, Edge, pinpam-git, SDDM theme, quickshell)..."
+log "Installing AUR-exclusive apps (VSCode, Edge, pinpam-git, SDDM theme)..."
 yay -S --noconfirm --needed \
     visual-studio-code-bin \
     microsoft-edge-stable-bin \
     catppuccin-sddm-theme-mocha \
     pinpam-git \
-    sesh \
-    quickshell-git
+    sesh
 
 # ---------- 4. (no local SSH keygen — Bitwarden SSH agent holds keys) ----------
 # Keys live in the Bitwarden vault as "SSH key" items and surface via
