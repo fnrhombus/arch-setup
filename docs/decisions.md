@@ -176,6 +176,13 @@
 - `phase-2-arch-install/install.sh` reads the root + `tom` passwords once at the top of the run, hashes them immediately with `openssl passwd -6` (SHA-512), and hands the hashes to `chroot.sh` via a mode-600 file under `/mnt/tmp/`. The plaintext values never touch disk.
 - **Caveat**: while the installer is still running, the `openssl passwd` invocation does briefly appear in `ps` (as the process argument) on the live ISO. The live environment is single-user and ephemeral, so this is acceptable — but don't run the installer on a shared/networked machine. After chroot finishes, the hash file is deleted and only the hashed values remain in `/etc/shadow`.
 
+### Q13: end-4/dots-hyprland config layout (observed)
+- **Single primary file**: `~/.config/hypr/hyprland.conf` (no `custom/` subdir on the version we cloned in April 2026).
+- **Terminal variable**: `$terminal = foot` defined at line 35. Change there to swap to Ghostty (`$terminal = ghostty`).
+- **Terminal keybind**: `Super+Q` (line 245: `bind = $mainMod, Q, exec, $terminal`), NOT Super+Return.
+- **Reload after edit**: `hyprctl reload` (no logout needed).
+- **Status bar**: `quickshell` does NOT auto-start from end-4's vanilla config. Add `exec-once = quickshell` to hyprland.conf if the bar is missing after install.
+
 ### Q12: end-4/dots-hyprland runtime dependencies
 
 The current `end-4/dots-hyprland` repo ships a **GUI first-launch wizard that detects components but does not install them** — older versions ran a CLI `install.sh` that auto-pulled deps; that's no longer true. `postinstall.sh` must install everything end-4 expects on the host directly.

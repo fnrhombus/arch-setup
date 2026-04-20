@@ -63,6 +63,7 @@ This document is meant to be fed to Claude Code once you're inside Arch Linux. I
 
 ### Helix (Terminal Editor)
 - **What it is**: Modal terminal editor — select-then-act model (NOT vim keybindings)
+- **Binary on Arch**: `helix` (NOT `hx` — Arch's `extra/helix` package installs the full-name binary at `/usr/bin/helix`).
 - **Config location**: `~/.config/helix/config.toml`
 - **Why I have it**: Quick terminal edits; zero-config LSP/autocomplete
 - **Teach me**:
