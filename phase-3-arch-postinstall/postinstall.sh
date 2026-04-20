@@ -250,16 +250,15 @@ if command -v pinutil >/dev/null; then
         if [[ -t 0 ]]; then
             log "Setting up TPM-backed PIN (follow prompt; 6+ chars recommended)..."
             # tee lets the user see pinutil's prompts while we capture output
-            # for the "already has a PIN" check. PIPESTATUS[0] recovers pinutil's
-            # real exit code since tee always exits 0.
-            sudo pinutil setup 2>&1 | tee /tmp/pinutil-setup.log
-            pin_rc=${PIPESTATUS[0]}
-            if (( pin_rc == 0 )); then
+            # for the "already has a PIN" check. The `if` wrapper disables
+            # errexit (otherwise pipefail + set -e kills the script on pinutil's
+            # non-zero exit before we can check for idempotency).
+            if sudo pinutil setup 2>&1 | tee /tmp/pinutil-setup.log; then
                 log "TPM PIN set."
             elif grep -q 'already has a PIN' /tmp/pinutil-setup.log; then
                 log "TPM PIN already set — skipping (idempotent re-run)."
             else
-                warn "pinutil setup failed (rc=$pin_rc); PAM PIN unlock won't work until fixed."
+                warn "pinutil setup failed; PAM PIN unlock won't work until fixed."
             fi
         else
             warn "No TTY — skipping 'pinutil setup'. Run it manually after login: sudo pinutil setup"
