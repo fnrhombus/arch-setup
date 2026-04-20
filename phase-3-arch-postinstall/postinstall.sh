@@ -46,7 +46,7 @@ sudo pacman -Syu --noconfirm --needed \
     base-devel git curl wget openssh \
     zsh tmux helix \
     bat fd ripgrep eza lsd btop jq fzf zoxide direnv \
-    sd yq xh \
+    sd go-yq xh \
     man-db man-pages pkgfile tldr \
     wl-clipboard grim slurp \
     xdg-user-dirs pipewire pipewire-pulse pipewire-jack wireplumber \
