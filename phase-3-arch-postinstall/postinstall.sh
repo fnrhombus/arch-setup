@@ -714,9 +714,18 @@ fi
 
 # ---------- 13a. Hyprland customizations layered on top of end-4 ----------
 # end-4's setup overwrites ~/.config/hypr/hyprland.conf on every install.
-# Append our customizations idempotently — guarded by a marker comment so
-# re-runs don't keep stacking the same lines.
+# We patch + append idempotently so re-runs restore our overrides.
 HYPR_CONF="$HOME/.config/hypr/hyprland.conf"
+
+# end-4 defaults `$terminal = foot` (line 35 at time of writing). foot stays
+# installed as their first-launch-wizard shim (docs/decisions.md §Q10-C), but
+# the daily-driver terminal is Ghostty — rewrite the var so every keybind that
+# uses $terminal launches Ghostty. sed is inherently idempotent: once the line
+# already says ghostty the pattern stops matching.
+if [[ -f "$HYPR_CONF" ]]; then
+    sed -i 's|^\$terminal = foot$|$terminal = ghostty|' "$HYPR_CONF"
+fi
+
 if [[ -f "$HYPR_CONF" ]] && ! grep -q '# arch-setup-customizations' "$HYPR_CONF"; then
     log "Appending arch-setup customizations to $HYPR_CONF..."
     cat >> "$HYPR_CONF" <<'HYPREOF'
