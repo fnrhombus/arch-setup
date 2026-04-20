@@ -52,7 +52,7 @@ sudo pacman -Syu --noconfirm --needed \
     xdg-user-dirs pipewire pipewire-pulse pipewire-jack wireplumber \
     noto-fonts noto-fonts-emoji ttf-jetbrains-mono-nerd ttf-firacode-nerd \
     bitwarden bitwarden-cli \
-    ghostty fuzzel cliphist swaync satty hyprshot \
+    ghostty fuzzel cliphist mako satty hyprshot \
     foot nautilus yazi \
     hyprpolkitagent swww xdg-desktop-portal-gtk \
     mise chezmoi github-cli \
