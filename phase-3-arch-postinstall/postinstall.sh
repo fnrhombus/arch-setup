@@ -785,6 +785,12 @@ if [[ -f "$HYPR_CONF" ]] && ! grep -q '# arch-setup-customizations' "$HYPR_CONF"
 # Do NOT pin `monitor = ...` lines here — the kernel-reported name for the TV is
 # DP-1 (DisplayPort-over-HDMI alt-mode), which varies by port/cable, and monitors.conf
 # is the single source of truth.
+#
+# nwg-displays gotcha: its visual canvas defaults monitor X positions to non-zero
+# values (~2000 for the 4K rectangle) even when the rectangles look "snapped" to
+# each other in the GUI. That makes the two screens overlap only at a corner
+# pixel and the cursor only transitions there. Fix: type `0` into the X field
+# for BOTH monitors explicitly, then Apply + Save.
 source = ~/.config/hypr/monitors.conf
 #
 # Lid close → disable internal panel; lid open → reload hyprland.conf so monitors.conf
