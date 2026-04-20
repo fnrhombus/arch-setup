@@ -100,6 +100,10 @@ There is no build, lint, or test target. Work is almost entirely **editing markd
 - Markdown checkboxes (`- [ ]`) in `docs/decisions.md` track unmet requirements — tick them as work completes, don't delete them.
 - Platform-specific notes in prose should stay plain; the `[Windows]`/`[WSL]` annotation convention is for the user's global `~/.claude/CLAUDE.md`, not for this repo's content.
 
+## Working style
+
+- **Always do as much work in parallel as is reasonably possible.** Independent tool calls should go in a single message with multiple tool blocks; independent edits to different files should batch; independent research questions should fan out via parallel `Agent` calls. Do not serialize work that has no dependency. (Web/mobile Claude Code does not support a user-level `~/.claude/CLAUDE.md`, so this lives here as the project-scoped equivalent until that surface gains one.)
+
 ## Commit discipline
 
 - **Always commit on task completion.** Never leave a finished task as uncommitted work.
