@@ -135,7 +135,8 @@ fi
 # vendor firmware/driver, not covered by stock libfprint OR libfprint-git).
 # Listing them up front lets us skip the enroll→diagnose→AUR-fallback dance
 # entirely on re-runs for hardware that will never work.
-GOODIX_UNSUPPORTED_PIDS='538c|5395|533c|55b4|600c|639c'
+# 538C lives in libfprint-goodix-53xc (older Dell blob); handled below.
+GOODIX_UNSUPPORTED_PIDS='5395|55b4|600c|639c'
 if [[ -z "${SKIP_FPRINT:-}" ]]; then
     if command -v lsusb >/dev/null && lsusb | grep -qiE "27c6:($GOODIX_UNSUPPORTED_PIDS)"; then
         warn "Goodix reader ($(lsusb | grep -iE "27c6:($GOODIX_UNSUPPORTED_PIDS)" | head -1 | awk '{print $6}')) is a Match-On-Chip variant with no open-source driver."
@@ -143,6 +144,30 @@ if [[ -z "${SKIP_FPRINT:-}" ]]; then
         warn "Status reference: https://fprint.freedesktop.org/supported-devices.html"
         SKIP_FPRINT=1
     fi
+fi
+
+# Pre-install correct driver for known-mapped Goodix PIDs so the enroll-below
+# succeeds first try. 538C → libfprint-goodix-53xc (older Dell blob via TOD).
+# libfprint-tod-git fails to build with LTO (strips ABI symbol versioning),
+# so we pre-build it with !lto before letting yay pull it as a dep.
+if [[ -z "${SKIP_FPRINT:-}" ]] && command -v lsusb >/dev/null && lsusb | grep -qi '27c6:538c'; then
+    log "Goodix 538C detected — installing libfprint-goodix-53xc (older Dell blob via TOD)..."
+    if ! pacman -Q libfprint-tod-git >/dev/null 2>&1; then
+        # libfprint-tod-git replaces stock libfprint; pull stock first.
+        if pacman -Q libfprint >/dev/null 2>&1; then
+            sudo pacman -Rdd --noconfirm libfprint || warn "Could not remove stock libfprint."
+        fi
+        tmpd=$(mktemp -d) && (
+            cd "$tmpd" \
+            && yay -G libfprint-tod-git \
+            && cd libfprint-tod-git \
+            && sed -i 's|^options=(|options=(!lto |' PKGBUILD \
+            && makepkg -si --noconfirm
+        ) || warn "libfprint-tod-git build failed — fingerprint will not work."
+        rm -rf "$tmpd"
+    fi
+    yay -S --noconfirm --needed libfprint-goodix-53xc || \
+        warn "libfprint-goodix-53xc install failed — see AUR comments."
 fi
 if [[ -z "${SKIP_FPRINT:-}" ]]; then
     GOODIX_PRESENT=0
@@ -170,21 +195,28 @@ if [[ -z "${SKIP_FPRINT:-}" ]]; then
             echo "Reader vendor unknown/unrecognized — stock libfprint may still work with a retry,"
             echo "or your reader may be newer than the packaged libfprint."
         fi
-        log "Falling back to libfprint-git from AUR (covers newer PIDs for all vendors)..."
-        # libfprint-git conflicts with stock libfprint; pacman's "Remove libfprint? [y/N]"
-        # prompt defaults to N under --noconfirm, so the install aborts. Pull the
-        # stock package out first (-Rdd bypasses reverse-dep check; fprintd will
-        # briefly have no provider until libfprint-git re-provides it below).
-        # Only attempt removal if stock libfprint is actually installed AND
-        # libfprint-git isn't already taking its place (avoids "target not found"
-        # noise on re-runs where the swap already happened).
-        if pacman -Q libfprint >/dev/null 2>&1 && ! pacman -Q libfprint-git >/dev/null 2>&1; then
-            sudo pacman -Rdd --noconfirm libfprint || warn "Could not remove stock libfprint — conflict will still block install."
-        fi
-        if yay -S --noconfirm --needed libfprint-git && sudo systemctl restart fprintd; then
-            fprintd-enroll || warn "libfprint-git retry also failed — likely unsupported reader. See https://fprint.freedesktop.org/supported-devices.html"
+        # If libfprint-tod-git is already in (e.g. 538C path above), libfprint-git
+        # would conflict — skip the fallback and surface a manual diagnostic hint.
+        if pacman -Q libfprint-tod-git >/dev/null 2>&1; then
+            warn "libfprint-tod-git is installed (Goodix-specific path) — skipping libfprint-git fallback."
+            warn "Check: journalctl -u fprintd -n 50; lsusb | grep 27c6; ls /usr/lib/libfprint-2/tod-1/"
         else
-            warn "libfprint-git install failed — see https://fprint.freedesktop.org/supported-devices.html"
+            log "Falling back to libfprint-git from AUR (covers newer PIDs for all vendors)..."
+            # libfprint-git conflicts with stock libfprint; pacman's "Remove libfprint? [y/N]"
+            # prompt defaults to N under --noconfirm, so the install aborts. Pull the
+            # stock package out first (-Rdd bypasses reverse-dep check; fprintd will
+            # briefly have no provider until libfprint-git re-provides it below).
+            # Only attempt removal if stock libfprint is actually installed AND
+            # libfprint-git isn't already taking its place (avoids "target not found"
+            # noise on re-runs where the swap already happened).
+            if pacman -Q libfprint >/dev/null 2>&1 && ! pacman -Q libfprint-git >/dev/null 2>&1; then
+                sudo pacman -Rdd --noconfirm libfprint || warn "Could not remove stock libfprint — conflict will still block install."
+            fi
+            if yay -S --noconfirm --needed libfprint-git && sudo systemctl restart fprintd; then
+                fprintd-enroll || warn "libfprint-git retry also failed — likely unsupported reader. See https://fprint.freedesktop.org/supported-devices.html"
+            else
+                warn "libfprint-git install failed — see https://fprint.freedesktop.org/supported-devices.html"
+            fi
         fi
     fi
 fi
