@@ -12,6 +12,8 @@
 #   - SSH key (ed25519) if missing
 #   - sshd: hardened drop-in (key-only, no root, AllowUsers tom) + enable
 #   - Callisto pubkey (hardcoded, idempotent append to authorized_keys)
+#   - ufw firewall (default deny in, allow ssh, enable) — required because
+#     router's IPv6 filter is host-global, can't filter per port
 #   - Claude Code CLI + bash completion
 #   - Goodix-aware fingerprint enrollment (VID 27C6 detected → detailed diag on fail)
 #   - pinpam TPM-PIN + PAM wiring for sudo/polkit/hyprlock
@@ -61,6 +63,7 @@ sudo pacman -Syu --noconfirm --needed \
     hyprpolkitagent swww xdg-desktop-portal-gtk \
     iio-sensor-proxy wvkbd libwacom \
     remmina freerdp \
+    ufw \
     mise chezmoi github-cli \
     docker docker-compose docker-buildx \
     snapper snap-pac
@@ -145,6 +148,21 @@ if ! grep -qxF "$CALLISTO_PUBKEY" "$HOME/.ssh/authorized_keys"; then
     log "Adding Callisto pubkey to authorized_keys..."
     echo "$CALLISTO_PUBKEY" >> "$HOME/.ssh/authorized_keys"
 fi
+
+# ---------- 4c. ufw: host firewall (IPv4 + IPv6) ----------
+# IPv6 puts every device on a globally routable address, so the router's
+# all-or-nothing IPv6 filter for this host means anything bound to a port
+# on the laptop is exposed to the internet when IPv6 is "on" at the router.
+# ufw is the simplest IPv4+IPv6-aware firewall: rules apply to both stacks.
+# Order is load-bearing: add allow rules BEFORE `ufw --force enable` so a
+# remote re-run (over SSH) can't lock itself out. Idempotent — `ufw enable`
+# on an already-active firewall is a no-op, and `ufw allow` won't dupe.
+log "Configuring ufw (deny incoming, allow ssh) and enabling..."
+sudo ufw default deny incoming
+sudo ufw default allow outgoing
+sudo ufw allow 22/tcp comment 'sshd (Callisto + others)'
+sudo ufw --force enable
+sudo systemctl enable --now ufw.service
 
 # ---------- 5. Claude Code CLI ----------
 # Claude Code is distributed via npm (@anthropic-ai/claude-code). There's no
@@ -1006,6 +1024,8 @@ check "ssh agent wired"     "grep -q bitwarden-ssh-agent.sock $HOME/.ssh/config"
 check "sshd enabled"        "systemctl is-enabled sshd"
 check "sshd hardened conf"  "sudo test -f /etc/ssh/sshd_config.d/10-arch-setup.conf"
 check "callisto authorized" "grep -q 'thoma@callisto' $HOME/.ssh/authorized_keys"
+check "ufw enabled"         "sudo ufw status | grep -q 'Status: active'"
+check "ufw ssh allowed"     "sudo ufw status | grep -E '^22/tcp|^22 ' | grep -q ALLOW"
 check "udev usb-serial"     "test -f /etc/udev/rules.d/99-usb-serial.rules"
 check "gh-auth planter or done" "test -f $HOME/.zshrc.d/arch-first-login.zsh || test -f $HOME/.gitconfig.local"
 check "ssh-signing planter" "test -f $HOME/.zshrc.d/arch-ssh-signing.zsh || grep -q allowedSignersFile $HOME/.gitconfig.local 2>/dev/null"
