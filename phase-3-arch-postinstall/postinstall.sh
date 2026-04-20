@@ -14,6 +14,10 @@
 #   - Callisto pubkey (hardcoded, idempotent append to authorized_keys)
 #   - ufw firewall (default deny in, allow ssh, enable) — required because
 #     router's IPv6 filter is host-global, can't filter per port
+#   - metis-ddns: bash + systemd timer that keeps metis.rhombus.rocks A+AAAA
+#     in sync with this host's public IPs against Azure DNS (no maintained
+#     off-the-shelf option exists). Stubs /etc/metis-ddns.env on first run
+#     — fill in SP creds once, then enable the timer.
 #   - Claude Code CLI + bash completion
 #   - Goodix-aware fingerprint enrollment (VID 27C6 detected → detailed diag on fail)
 #   - pinpam TPM-PIN + PAM wiring for sudo/polkit/hyprlock
@@ -44,6 +48,7 @@ export XDG_CONFIG_HOME="$HOME/.config"
 export XDG_DATA_HOME="$HOME/.local/share"
 export XDG_CACHE_HOME="$HOME/.cache"
 export PATH="$HOME/.local/bin:$PATH"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$HOME"
 
 # ---------- 1. pacman: repo packages (signed, fast) ----------
@@ -163,6 +168,41 @@ sudo ufw default allow outgoing
 sudo ufw allow 22/tcp comment 'sshd (Callisto + others)'
 sudo ufw --force enable
 sudo systemctl enable --now ufw.service
+
+# ---------- 4d. metis-ddns: Azure DNS dynamic updater ----------
+# Keeps metis.rhombus.rocks A+AAAA records pointed at this host's current
+# public IPv4/IPv6. Nothing maintained off-the-shelf supports Azure DNS
+# (ddclient/inadyn lack a provider), so we ship a small bash script + systemd
+# timer + NM-dispatcher hook. See phase-3-arch-postinstall/metis-ddns/.
+#
+# The env file at /etc/metis-ddns.env (mode 600) holds the service-principal
+# credentials. We stub it on first install with the template — user must
+# fill in the actual TENANT/CLIENT/SECRET/SUBSCRIPTION/RG once via
+# `az ad sp create-for-rbac --name metis-ddns --role "DNS Zone Contributor"
+# --scopes <zone-id>` and then `sudo systemctl start metis-ddns.service`.
+DDNS_DIR="$SCRIPT_DIR/metis-ddns"
+if [[ -d "$DDNS_DIR" ]]; then
+    log "Installing metis-ddns script + systemd unit + timer + NM hook..."
+    sudo install -m 755 "$DDNS_DIR/metis-ddns"             /usr/local/bin/metis-ddns
+    sudo install -m 644 "$DDNS_DIR/metis-ddns.service"     /etc/systemd/system/metis-ddns.service
+    sudo install -m 644 "$DDNS_DIR/metis-ddns.timer"       /etc/systemd/system/metis-ddns.timer
+    sudo install -d -m 755 /etc/NetworkManager/dispatcher.d
+    sudo install -m 755 "$DDNS_DIR/90-metis-ddns"          /etc/NetworkManager/dispatcher.d/90-metis-ddns
+    sudo install -m 644 "$DDNS_DIR/metis-ddns.env.template" /etc/metis-ddns.env.template
+    if [[ ! -f /etc/metis-ddns.env ]]; then
+        sudo install -m 600 -o root -g root "$DDNS_DIR/metis-ddns.env.template" /etc/metis-ddns.env
+        warn "Stubbed /etc/metis-ddns.env — fill in service principal creds, then:"
+        warn "    sudo systemctl start metis-ddns.service && sudo journalctl -u metis-ddns -n 20"
+    fi
+    sudo install -d -m 755 /var/lib/metis-ddns
+    sudo systemctl daemon-reload
+    # Enable the timer (don't --now: env file likely empty on first pass; the
+    # timer's first tick will no-op-fail until creds are filled in, which is
+    # fine — we just don't want the FAILED state to scream at first boot).
+    sudo systemctl enable metis-ddns.timer
+else
+    warn "metis-ddns/ sidecar dir missing — Azure DDNS not installed."
+fi
 
 # ---------- 5. Claude Code CLI ----------
 # Claude Code is distributed via npm (@anthropic-ai/claude-code). There's no
@@ -658,7 +698,6 @@ ZSHEOF
 
 # Pre-ship p10k config from fnwsl so the first shell doesn't drop into the
 # `p10k configure` wizard. Sidecar file lives next to this script.
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 if [[ -f "$SCRIPT_DIR/p10k.zsh" ]]; then
     log "Installing pre-shipped ~/.p10k.zsh from fnwsl..."
     cp "$SCRIPT_DIR/p10k.zsh" "$HOME/.p10k.zsh"
@@ -1026,6 +1065,9 @@ check "sshd hardened conf"  "sudo test -f /etc/ssh/sshd_config.d/10-arch-setup.c
 check "callisto authorized" "grep -q 'thoma@callisto' $HOME/.ssh/authorized_keys"
 check "ufw enabled"         "sudo ufw status | grep -q 'Status: active'"
 check "ufw ssh allowed"     "sudo ufw status | grep -E '^22/tcp|^22 ' | grep -q ALLOW"
+check "metis-ddns binary"   "test -x /usr/local/bin/metis-ddns"
+check "metis-ddns timer"    "systemctl is-enabled metis-ddns.timer"
+check "metis-ddns env"      "sudo test -f /etc/metis-ddns.env"
 check "udev usb-serial"     "test -f /etc/udev/rules.d/99-usb-serial.rules"
 check "gh-auth planter or done" "test -f $HOME/.zshrc.d/arch-first-login.zsh || test -f $HOME/.gitconfig.local"
 check "ssh-signing planter" "test -f $HOME/.zshrc.d/arch-ssh-signing.zsh || grep -q allowedSignersFile $HOME/.gitconfig.local 2>/dev/null"
