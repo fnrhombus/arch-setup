@@ -64,6 +64,35 @@ done
 [[ "$(id -un)" == "tom" ]] || die "Run as user 'tom'."
 ping -c1 -W3 archlinux.org >/dev/null || die "No network."
 
+# --- sudo keeper ---
+# A full postinstall takes 10-20 min and fires dozens of sudo calls. If sudo
+# needs fresh auth mid-run (fingerprint/PIN/password), it silently hangs the
+# script — our Bash context has no TTY to prompt through. Keep the credential
+# cache warm by touching it every 60s for the life of this script.
+#
+# Two modes:
+#   - SUDO_ASKPASS exported + helper executable  → keeper can re-auth on its
+#     own via `sudo -A` when the cache expires. Robust to anything inside
+#     the run that clears the cache (HyDE's scripts have been observed to).
+#   - Otherwise                                    → keeper only refreshes an
+#     already-cached credential via `sudo -n -v`. A pre-run `sudo -v` is
+#     required; if the cache is ever cleared during the run, the next sudo
+#     call will hang.
+if [[ -n "${SUDO_ASKPASS:-}" ]] && [[ -x "${SUDO_ASKPASS}" ]]; then
+    sudo -A -v 2>/dev/null \
+        || die "sudo -A prime failed. Check SUDO_ASKPASS=$SUDO_ASKPASS returns the correct password."
+    sudo_refresh() { sudo -An -v 2>/dev/null || sudo -A -v 2>/dev/null; }
+else
+    sudo -n -v 2>/dev/null \
+        || die "sudo is not pre-authed. Either run 'sudo -v' in your terminal first, or export SUDO_ASKPASS pointing at a helper script that prints your password."
+    sudo_refresh() { sudo -n -v 2>/dev/null; }
+fi
+(
+    while sudo_refresh; do sleep 60; done
+) &
+SUDO_KEEPER_PID=$!
+trap 'kill "$SUDO_KEEPER_PID" 2>/dev/null || true' EXIT
+
 export HOME="/home/tom"
 export XDG_CONFIG_HOME="$HOME/.config"
 export XDG_DATA_HOME="$HOME/.local/share"
