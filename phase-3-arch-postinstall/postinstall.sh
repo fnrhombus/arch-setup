@@ -918,10 +918,16 @@ if [[ -d "$HOME/HyDE/Scripts" ]]; then
     if [[ -x "$HOME/.local/share/bin/theme-switch.sh" ]] || [[ -d "$HOME/.local/lib/hyde" ]]; then
         log "HyDE already installed (theme-switch.sh / .local/lib/hyde present) — skipping re-install."
     else
-        warn "Running HyDE install.sh INTERACTIVELY — answer prompts (skip NVIDIA: -n)."
+        log "Running HyDE install.sh (-drsn: noconfirm install + restore configs + enable services, skip NVIDIA)..."
         pushd "$HOME/HyDE/Scripts" >/dev/null
-        # -n skips NVIDIA wiring (MX250 is blacklisted; iGPU only on this box).
-        ./install.sh -n || warn "HyDE install.sh exited non-zero; review manually"
+        # HyDE's flag semantics: bare `-n` only marks nvidia as skipped and
+        # does NOTHING else. We need -d (install + noconfirm via
+        # use_default=--noconfirm), -r (restore configs), -s (enable services),
+        # -n (skip nvidia wiring — MX250 blacklisted per decisions.md §Q5).
+        # -d is used instead of -i so the whole run is non-interactive — this
+        # script is invoked from contexts (claude code, re-run loop) where
+        # pacman/yay prompts would hang.
+        ./install.sh -drsn || warn "HyDE install.sh exited non-zero; review manually"
         popd >/dev/null
     fi
 else
