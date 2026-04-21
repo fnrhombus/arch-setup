@@ -948,15 +948,27 @@ if [[ -d "$HOME/HyDE/Scripts" ]]; then
         log "HyDE already installed (theme-switch.sh / .local/lib/hyde present) — skipping re-install."
     else
         log "Running HyDE install.sh (-drsn: noconfirm install + restore configs + enable services, skip NVIDIA)..."
+        # Pre-empt HyDE's own interactive prompts — `-d` covers pacman/yay
+        # --noconfirm but NOT HyDE's own bash `read` calls:
+        #   1. install_pre.sh chaotic-AUR prompt — prompt_timer 120, default
+        #      case installs chaotic-AUR. We don't want it. Feed 'n'.
+        #   2. install_pst.sh SDDM theme prompt (Candy vs Corners) — we use
+        #      catppuccin-sddm-theme-mocha (§1 pacman list) and don't want
+        #      HyDE's themes. Pre-create backup_the_hyde_project.conf — HyDE
+        #      checks for this file and skips the whole SDDM config block.
+        #   3. install.sh end-of-run reboot prompt — empty input → no reboot.
+        sudo install -d -m 755 /etc/sddm.conf.d
+        sudo touch /etc/sddm.conf.d/backup_the_hyde_project.conf
         pushd "$HOME/HyDE/Scripts" >/dev/null
         # HyDE's flag semantics: bare `-n` only marks nvidia as skipped and
         # does NOTHING else. We need -d (install + noconfirm via
         # use_default=--noconfirm), -r (restore configs), -s (enable services),
         # -n (skip nvidia wiring — MX250 blacklisted per decisions.md §Q5).
-        # -d is used instead of -i so the whole run is non-interactive — this
-        # script is invoked from contexts (claude code, re-run loop) where
-        # pacman/yay prompts would hang.
-        ./install.sh -drsn || warn "HyDE install.sh exited non-zero; review manually"
+        # -d is used instead of -i so pacman/yay runs are non-interactive —
+        # this script is invoked from contexts (claude code, re-run loop)
+        # where interactive prompts hang.
+        printf 'n\n\n\n' | ./install.sh -drsn \
+            || warn "HyDE install.sh exited non-zero; review manually"
         popd >/dev/null
     fi
 else
