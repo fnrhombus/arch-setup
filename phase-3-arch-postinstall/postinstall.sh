@@ -24,7 +24,9 @@
 #   - Bitwarden SSH agent in ~/.ssh/config
 #   - gh identity + signing key registration (first-login planter if no token yet)
 #   - zgenom + p10k + the full fnwsl plugin set (history/completion/PATH dedup
-#     brought in from fnwsl; WSL-specific pieces dropped)
+#     brought in from fnwsl; WSL-specific pieces dropped). p10k config itself
+#     is authored by the user via `p10k configure` on first shell launch —
+#     no pre-shipped ~/.p10k.zsh.
 #   - HyDE-Project/HyDE Hyprland dotfiles + Catppuccin-Mocha theme
 #   - 2-in-1 touch: iio-sensor-proxy / iio-hyprland (rotation), wvkbd (OSK),
 #     hyprgrass plugin (touch gestures), libwacom (Wacom AES stylus)
@@ -748,14 +750,10 @@ REPORTTIME=2
 [[ -f ~/.p10k.zsh ]] && source ~/.p10k.zsh
 ZSHEOF
 
-# Pre-ship p10k config from fnwsl so the first shell doesn't drop into the
-# `p10k configure` wizard. Sidecar file lives next to this script.
-if [[ -f "$SCRIPT_DIR/p10k.zsh" ]]; then
-    log "Installing pre-shipped ~/.p10k.zsh from fnwsl..."
-    cp "$SCRIPT_DIR/p10k.zsh" "$HOME/.p10k.zsh"
-else
-    warn "p10k.zsh sidecar not found next to postinstall.sh — first shell will prompt to configure."
-fi
+# No pre-shipped ~/.p10k.zsh on purpose: first zsh launch fires `p10k configure`,
+# the interactive wizard that writes ~/.p10k.zsh based on user taste. Sourcing
+# of ~/.p10k.zsh is already wired in the .zshrc block above — once the wizard
+# finishes, subsequent shells pick the config up.
 
 log "Writing ~/.zsh_aliases..."
 cat > "$HOME/.zsh_aliases" <<'ALIASEOF'
