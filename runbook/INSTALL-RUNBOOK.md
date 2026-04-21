@@ -532,11 +532,47 @@ reboot
 ```
 If editing fstab from emergency mode is scary: add `systemd.unit=rescue.target` to the kernel command line in systemd-boot (press `e` on the Arch entry at boot, append to `options=`), which gives a full single-user shell with `/` writable.
 
-### C. BitLocker recovery prompt on next Windows boot
+### C. BitLocker recovery prompt on next Windows boot (and keeps prompting)
 
-**This is expected, not a failure.** systemd-boot installing itself to the shared EFI rewrites the PCR values the TPM sealed BitLocker against. First Windows boot after Arch install → blue "Enter recovery key" screen.
+**First prompt is expected, not a failure.** systemd-boot installing itself to the shared EFI rewrites the PCR values the TPM sealed BitLocker against. First Windows boot after Arch install → blue "Enter recovery key" screen. Type the 48-digit key (stored in Bitwarden as "Inspiron BitLocker recovery" per Phase 1 step 7) to get in.
 
-**Fix:** Type the 48-digit key (stored in Bitwarden as "Inspiron BitLocker recovery" per Phase 1 step 7). Windows unseals, re-seals to the new PCRs. Never prompts again unless the bootloader changes.
+**But Windows does NOT auto-reseal the TPM protector just because you entered the recovery key** — that path unlocks the drive but leaves the TPM protector sealed against the *old* (pre-Arch) PCRs. So the next boot, and the next, and the next will all keep prompting unless you force a re-seal.
+
+**Fix (elevated PowerShell, after you've unlocked into Windows with the recovery key):**
+
+```powershell
+# 1. Sanity-check Fast Startup is OFF (we disable it via autounattend, but confirm
+#    — resume-from-hibernate shuffles PCRs and would re-break the seal on every wake):
+powercfg /a | Select-String hybrid
+# If it shows Fast Startup as "on" or available, disable it first:
+#   powercfg /h off
+
+# 2. Suspend BitLocker until manually re-enabled. Data stays encrypted; the unlock
+#    key is stored in clear on disk temporarily. -RebootCount 0 means "stay
+#    suspended until I say so" (not "0 reboots remaining").
+manage-bde -protectors -disable C: -RebootCount 0
+
+# 3. Reboot. No BitLocker prompt this time (protection suspended).
+shutdown /r /t 0
+
+# 4. Back in Windows, re-enable. This re-seals the TPM protector against
+#    *current* PCR values (i.e. the new systemd-boot → WBM → Windows chain).
+manage-bde -protectors -enable C:
+
+# 5. Confirm: TPM protector should show as "Enabled" again.
+manage-bde -protectors -get C:
+```
+
+After that, every subsequent boot unlocks via TPM silently. The boot chain needs to stay stable for this to hold — if something later changes it (systemd-boot update rewriting its EFI binary, Windows update replacing the boot manager, firmware update changing Secure Boot state), you'll get prompted once more and have to run the same dance.
+
+**Nuclear option: turn BitLocker off.** You already have LUKS on the Linux side. If your Windows partition doesn't need encryption-at-rest (home dev laptop, not regulated-device territory), decrypting removes the entire class of problem:
+
+```powershell
+manage-bde -off C:         # background decryption, ~30-60 min for 160 GB
+manage-bde -status C:      # watch progress
+```
+
+Trade-off: stolen laptop + removed drive + NTFS reader = your Windows files are readable.
 
 ### D. Hostname shows as `Metis` on the network, not `inspiron`
 
