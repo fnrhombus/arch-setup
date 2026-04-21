@@ -1199,7 +1199,7 @@ check "bat/fd/rg/eza/lsd"   "command -v bat && command -v fd && command -v rg &&
 check "btop/jq/fzf/zoxide"  "command -v btop && command -v jq && command -v fzf && command -v zoxide"
 check "direnv/sd/yq/xh"     "command -v direnv && command -v sd && command -v yq && command -v xh"
 check "tldr/pkgfile"        "command -v tldr && command -v pkgfile"
-check "JetBrainsMono Nerd"  "fc-list | grep -qi 'JetBrainsMono Nerd Font'"
+check "JetBrainsMono Nerd"  "fc-list -q 'JetBrainsMono Nerd Font'"
 
 echo "-- mise + node + Claude CLI --"
 check "mise node@lts"       "mise exec -- node --version"
