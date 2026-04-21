@@ -89,7 +89,7 @@ sudo pacman -Syu --noconfirm --needed \
     remmina freerdp \
     ufw \
     azure-cli certbot \
-    memtest86+ \
+    memtest86+ memtest86+-efi \
     mise chezmoi github-cli \
     docker docker-compose docker-buildx \
     snapper snap-pac
@@ -117,11 +117,14 @@ systemctl --user enable --now hyprpolkitagent.service 2>/dev/null || \
     warn "hyprpolkitagent.service enable failed — Bitwarden may flag system-auth as unavailable."
 
 # ---------- 1c. memtest86+ systemd-boot loader entry ----------
-# The memtest86+ package drops its EFI binary under /boot/memtest86+/ but does
-# NOT create a systemd-boot loader entry automatically (it was a GRUB-era
-# convention). Write the entry here. Idempotent: the file either matches or
-# we overwrite it; `bootctl` picks it up on the next boot without any reload.
-MEMTEST_EFI=$(pacman -Ql memtest86+ 2>/dev/null | awk '/\.efi$/ {print $2; exit}')
+# Arch splits memtest86+ into two packages: `memtest86+` ships only the BIOS
+# binary (memtest.bin), `memtest86+-efi` ships the UEFI binary (memtest.efi).
+# Metis boots UEFI via systemd-boot, so the EFI package is the one we need
+# for a usable loader entry. We query memtest86+-efi specifically — the plain
+# package's file list has no .efi and the grep would silently skip.
+# Systemd-boot has no auto-scan for memtest86+/, so write the entry here.
+# Idempotent: tee just overwrites with identical content on re-run.
+MEMTEST_EFI=$(pacman -Ql memtest86+-efi 2>/dev/null | awk '/\.efi$/ {print $2; exit}')
 if [[ -n "$MEMTEST_EFI" ]] && sudo test -f "$MEMTEST_EFI"; then
     # Strip the /boot prefix — loader entries use ESP-relative paths.
     MEMTEST_EFI_REL="${MEMTEST_EFI#/boot}"
@@ -131,7 +134,7 @@ title   Memtest86+
 efi     ${MEMTEST_EFI_REL}
 MEMEOF
 else
-    warn "memtest86+ EFI binary not found in package file list — loader entry skipped."
+    warn "memtest86+-efi EFI binary not found — loader entry skipped. Did pacman -S memtest86+-efi succeed?"
 fi
 
 # ---------- 2. yay bootstrap ----------
