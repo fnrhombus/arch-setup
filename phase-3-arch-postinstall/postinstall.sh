@@ -651,19 +651,25 @@ AUTHEOF
 fi
 
 # ---------- 9a. fnpostinstall shell function ----------
-# Convenience wrapper for re-running postinstall from HEAD of the feature
-# branch, piped through tee so you always have a log to grep. Written to
-# a .zshrc.d fragment so it lands on $PATH via the .zshrc loop at line 576.
+# Convenience wrapper for re-running the latest postinstall from GitHub,
+# piped through tee so there's always a log to grep. Written to a
+# .zshrc.d fragment so it lands on $PATH via the .zshrc loop.
+#
+# Clones the whole repo to a tmpfs path instead of fetching just
+# postinstall.sh — earlier versions used `gh api contents/...` for a
+# single-file pull, but §4d needs the sibling `metis-ddns/` sidecar dir
+# next to postinstall.sh, which a single-file fetch doesn't supply.
+# Passes any args through (e.g. `fnpostinstall --no-verify`).
 cat > "$HOME/.zshrc.d/arch-postinstall.zsh" <<'FNEOF'
 # arch-setup: re-run the latest postinstall from GitHub, logging to /tmp.
 fnpostinstall() {
     local log="/tmp/postinstall-$(date +%Y%m%d-%H%M%S).log"
-    echo "Logging to $log"
+    local tmp
+    tmp=$(mktemp -d -t arch-setup-XXXXXX) || return 1
+    echo "Logging to $log; staging in $tmp"
     {
-        gh api 'repos/fnrhombus/arch-setup/contents/phase-3-arch-postinstall/postinstall.sh?ref=claude/fix-linux-boot-issue-9ps2s' --jq .content \
-            | base64 -d > ~/postinstall.sh \
-            && chmod +x ~/postinstall.sh \
-            && bash ~/postinstall.sh
+        git clone --depth 1 https://github.com/fnrhombus/arch-setup.git "$tmp/repo" \
+            && bash "$tmp/repo/phase-3-arch-postinstall/postinstall.sh" "$@"
     } 2>&1 | tee "$log"
 }
 FNEOF
@@ -923,12 +929,12 @@ HYPR_CONF="$HOME/.config/hypr/hyprland.conf"
 # inherently idempotent: once the line already says ghostty the pattern stops
 # matching.
 if [[ -f "$HYPR_CONF" ]]; then
-    sed -i -E 's|^\$(term|TERMINAL|terminal)\s*=\s*kitty\s*$|$\1 = ghostty|' "$HYPR_CONF"
+    sed -i -E 's#^\$(term|TERMINAL|terminal)\s*=\s*kitty\s*$#$\1 = ghostty#' "$HYPR_CONF"
 fi
 # HyDE may also keep the terminal pin in keybindings.conf — patch there too.
 HYPR_KEYBINDS="$HOME/.config/hypr/keybindings.conf"
 if [[ -f "$HYPR_KEYBINDS" ]]; then
-    sed -i -E 's|^\$(term|TERMINAL|terminal)\s*=\s*kitty\s*$|$\1 = ghostty|' "$HYPR_KEYBINDS"
+    sed -i -E 's#^\$(term|TERMINAL|terminal)\s*=\s*kitty\s*$#$\1 = ghostty#' "$HYPR_KEYBINDS"
 fi
 
 if [[ -f "$HYPR_CONF" ]] && ! grep -q '# arch-setup-customizations' "$HYPR_CONF"; then
