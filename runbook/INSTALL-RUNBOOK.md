@@ -542,9 +542,14 @@ If editing fstab from emergency mode is scary: add `systemd.unit=rescue.target` 
 
 ```powershell
 # 1. Sanity-check Fast Startup is OFF (we disable it via autounattend, but confirm
-#    — resume-from-hibernate shuffles PCRs and would re-break the seal on every wake):
-powercfg /a | Select-String hybrid
-# If it shows Fast Startup as "on" or available, disable it first:
+#    — resume-from-hibernate shuffles PCRs and would re-break the seal on every wake).
+#    Fast Startup requires hibernation; if hibernation is off, Fast Startup is off too.
+powercfg /a
+#    Look for "Hibernation has not been enabled" in the NOT-available section.
+#    DO NOT grep for "hybrid" — that matches "Hybrid Sleep", a different feature.
+#    Definitive registry check (0 = off = good, 1 = on, missing = hiberation off):
+(Get-ItemProperty 'HKLM:\SYSTEM\CurrentControlSet\Control\Session Manager\Power' -Name HiberbootEnabled -ErrorAction SilentlyContinue).HiberbootEnabled
+# If Fast Startup is on, disable it first:
 #   powercfg /h off
 
 # 2. Suspend BitLocker until manually re-enabled. Data stays encrypted; the unlock
