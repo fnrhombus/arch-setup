@@ -92,11 +92,20 @@ sudo pacman -Syu --noconfirm --needed \
     ufw \
     azure-cli certbot \
     memtest86+ memtest86+-efi \
+    smartmontools \
     mise chezmoi github-cli \
     docker docker-compose docker-buildx \
     snapper snap-pac
 
 sudo pkgfile -u
+
+# ---------- 1-smart. smartd: ongoing SMART monitoring ----------
+# The BIOS "SMART Reporting" toggle only surfaces errors at POST. smartd
+# runs continuously and logs to journald + emails root on pre-fail events.
+# Arch's default /etc/smartd.conf is a single DEVICESCAN line that covers
+# every detected drive with sensible defaults — no custom config needed
+# unless we want per-drive test schedules later.
+sudo systemctl enable --now smartd.service
 
 # ---------- 1a. docker: enable service, add tom to docker group ----------
 # `docker` group grants root-equivalent access to the daemon; that's fine on
@@ -1178,6 +1187,7 @@ check "ufw default deny in" "sudo ufw status verbose | grep -qi 'Default: deny (
 echo "-- DDNS + Let's Encrypt --"
 check "azure-cli"           "command -v az"
 check "memtest86+ entry"   "test -f /boot/loader/entries/memtest86+.conf"
+check "smartd enabled"      "systemctl is-enabled smartd.service"
 check "metis-ddns binary"   "test -x /usr/local/bin/metis-ddns"
 check "metis-ddns service"  "systemctl is-enabled metis-ddns.service 2>/dev/null || systemctl cat metis-ddns.service >/dev/null 2>&1"
 check "metis-ddns timer"    "systemctl is-enabled metis-ddns.timer"
