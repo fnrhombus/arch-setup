@@ -87,7 +87,7 @@ sudo pacman -Syu --noconfirm --needed \
     ghostty fuzzel cliphist mako satty hyprshot \
     foot nautilus yazi \
     hyprpolkitagent swww xdg-desktop-portal-gtk \
-    iio-sensor-proxy wvkbd libwacom \
+    iio-sensor-proxy libwacom \
     remmina freerdp \
     ufw \
     azure-cli certbot \
@@ -172,6 +172,7 @@ yay -S --noconfirm --needed \
     catppuccin-sddm-theme-mocha \
     pinpam-git \
     sesh \
+    wvkbd \
     iio-hyprland \
     python-certbot-dns-azure
 
