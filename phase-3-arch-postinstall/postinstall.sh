@@ -602,18 +602,22 @@ GITEOF
 fi
 SIGEOF
 
-# Phase A planter — only if gh isn't already authed
+# Phase A planter — only if gh isn't already authed.
+#
+# CRITICAL: use `git config --file` for individual keys, NOT `cat > ~/.gitconfig.local`.
+# Earlier versions did `cat >` which clobbered the whole file on every postinstall
+# re-run — wiping the [commit]/gpg.ssh signing block that Phase B below appends,
+# plus any hand-added user config. `git config --file` surgically updates user.name
+# and user.email, leaving other sections intact.
 if gh auth status &>/dev/null; then
     log "Configuring GitHub identity (gh already authed)..."
     gh_user=$(gh api user --jq '.login' 2>/dev/null) || gh_user=""
     gh_id=$(gh api user --jq '.id' 2>/dev/null) || gh_id=""
     if [[ -n "$gh_user" && -n "$gh_id" ]]; then
         gh_email="${gh_id}+${gh_user}@users.noreply.github.com"
-        cat > "$HOME/.gitconfig.local" <<GITEOF
-[user]
-    name = ${gh_user}
-    email = ${gh_email}
-GITEOF
+        touch "$HOME/.gitconfig.local"
+        git config --file "$HOME/.gitconfig.local" user.name  "$gh_user"
+        git config --file "$HOME/.gitconfig.local" user.email "$gh_email"
         echo "  Git identity: ${gh_user} <${gh_email}>"
     fi
 else
@@ -636,11 +640,11 @@ if [[ -t 0 ]]; then
     _gh_id=$(gh api user --jq '.id' 2>/dev/null) || _gh_id=""
     if [[ -n "$_gh_user" && -n "$_gh_id" ]]; then
       _gh_email="${_gh_id}+${_gh_user}@users.noreply.github.com"
-      cat > ~/.gitconfig.local <<GITEOF
-[user]
-    name = ${_gh_user}
-    email = ${_gh_email}
-GITEOF
+      # Surgical update via `git config --file` — do NOT `cat > ~/.gitconfig.local`;
+      # that would wipe the SSH-signing block Phase B appends.
+      touch ~/.gitconfig.local
+      git config --file ~/.gitconfig.local user.name  "$_gh_user"
+      git config --file ~/.gitconfig.local user.email "$_gh_email"
       echo "arch: git identity = ${_gh_user} <${_gh_email}>"
     fi
     unset _gh_user _gh_id _gh_email
