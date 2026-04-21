@@ -891,6 +891,18 @@ if [[ -x "$HOME/.local/share/bin/theme-switch.sh" ]]; then
         || warn "theme-switch.sh failed — set manually with Ctrl+Super+T."
 fi
 
+# Defang end-4 / HyDE / kitty configs that hardcode `shell fish` or similar —
+# chroot.sh creates tom with zsh as login shell (and §18 below re-asserts if
+# anything drifted), but a terminal emulator config with `shell fish` inside
+# Hyprland would still spawn fish on every launch. Neutralize any such
+# override back to the user's login shell.
+for f in "$HOME/.config/kitty/kitty.conf" "$HOME/.config/foot/foot.ini" "$HOME/.config/ghostty/config"; do
+    if [[ -f "$f" ]] && grep -qE '^\s*shell\s*=?\s*(fish|/usr/bin/fish)' "$f"; then
+        log "Removing hardcoded fish shell override in $f..."
+        sed -i -E '/^\s*shell\s*=?\s*(fish|\/usr\/bin\/fish)\s*$/d' "$f"
+    fi
+done
+
 # ---------- 13a. Hyprland customizations layered on top of HyDE ----------
 # HyDE's install.sh overwrites ~/.config/hypr/* on every run. We patch + append
 # idempotently so re-runs restore our overrides. The marker comment makes the
