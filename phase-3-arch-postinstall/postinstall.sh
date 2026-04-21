@@ -89,6 +89,7 @@ sudo pacman -Syu --noconfirm --needed \
     remmina freerdp \
     ufw \
     azure-cli certbot \
+    memtest86+ \
     mise chezmoi github-cli \
     docker docker-compose docker-buildx \
     snapper snap-pac
@@ -114,6 +115,24 @@ fi
 # logins.
 systemctl --user enable --now hyprpolkitagent.service 2>/dev/null || \
     warn "hyprpolkitagent.service enable failed — Bitwarden may flag system-auth as unavailable."
+
+# ---------- 1c. memtest86+ systemd-boot loader entry ----------
+# The memtest86+ package drops its EFI binary under /boot/memtest86+/ but does
+# NOT create a systemd-boot loader entry automatically (it was a GRUB-era
+# convention). Write the entry here. Idempotent: the file either matches or
+# we overwrite it; `bootctl` picks it up on the next boot without any reload.
+MEMTEST_EFI=$(pacman -Ql memtest86+ 2>/dev/null | awk '/\.efi$/ {print $2; exit}')
+if [[ -n "$MEMTEST_EFI" ]] && sudo test -f "$MEMTEST_EFI"; then
+    # Strip the /boot prefix — loader entries use ESP-relative paths.
+    MEMTEST_EFI_REL="${MEMTEST_EFI#/boot}"
+    log "Registering memtest86+ with systemd-boot..."
+    sudo tee /boot/loader/entries/memtest86+.conf >/dev/null <<MEMEOF
+title   Memtest86+
+efi     ${MEMTEST_EFI_REL}
+MEMEOF
+else
+    warn "memtest86+ EFI binary not found in package file list — loader entry skipped."
+fi
 
 # ---------- 2. yay bootstrap ----------
 if ! command -v yay >/dev/null; then
@@ -1145,6 +1164,7 @@ check "ufw default deny in" "sudo ufw status verbose | grep -qi 'Default: deny (
 
 echo "-- DDNS + Let's Encrypt --"
 check "azure-cli"           "command -v az"
+check "memtest86+ entry"   "test -f /boot/loader/entries/memtest86+.conf"
 check "metis-ddns binary"   "test -x /usr/local/bin/metis-ddns"
 check "metis-ddns service"  "systemctl is-enabled metis-ddns.service 2>/dev/null || systemctl cat metis-ddns.service >/dev/null 2>&1"
 check "metis-ddns timer"    "systemctl is-enabled metis-ddns.timer"
