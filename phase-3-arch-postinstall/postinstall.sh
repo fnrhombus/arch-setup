@@ -90,7 +90,7 @@ sudo pacman -Syu --noconfirm --needed \
     iio-sensor-proxy libwacom \
     remmina freerdp \
     ufw \
-    azure-cli certbot \
+    azure-cli certbot python-pipx \
     memtest86+ memtest86+-efi \
     smartmontools \
     mise chezmoi github-cli \
@@ -164,7 +164,9 @@ fi
 # build (Anthropic ships no official Linux binary). `-native` variant is the
 # community-recommended one — `-bin` has recurring ffmpeg dep issues. Lags
 # official releases; expect occasional breakage on Anthropic updates.
-log "Installing AUR-exclusive apps (VSCode, Edge, Claude desktop, pinpam-git, SDDM theme, iio-hyprland, certbot-dns-azure)..."
+log "Installing AUR-exclusive apps (VSCode, Edge, Claude desktop, pinpam-git, SDDM theme, iio-hyprland-git)..."
+# iio-hyprland is published on AUR as `iio-hyprland-git` (no tagged release).
+# certbot-dns-azure is NOT in AUR — installed via pipx inject below (step 4d).
 yay -S --noconfirm --needed \
     visual-studio-code-bin \
     microsoft-edge-stable-bin \
@@ -173,8 +175,35 @@ yay -S --noconfirm --needed \
     pinpam-git \
     sesh \
     wvkbd \
-    iio-hyprland \
-    python-certbot-dns-azure
+    iio-hyprland-git
+
+# ---------- 3a. certbot-dns-azure plugin (pipx — not packaged for Arch) ----------
+# certbot-dns-azure is PyPI-only: not in extra, not in AUR, not community-
+# repackaged. Arch's system python blocks `pip install` via PEP 668, so we
+# install certbot + the plugin into an isolated pipx venv at /opt/pipx, then
+# override certbot-renew.service to run the pipx binary so renewals see the
+# plugin. The pacman certbot package stays installed (it ships the systemd
+# units we override). /usr/local/bin/certbot wins PATH precedence over
+# /usr/bin/certbot so the interactive `sudo certbot certonly ...` call from
+# runbook §3e-ter picks up the plugin-equipped binary.
+log "Installing certbot-dns-azure plugin via pipx (not packaged for Arch)..."
+if ! sudo test -x /opt/pipx/bin/certbot; then
+    sudo install -d -m 755 /opt/pipx
+    sudo env PIPX_HOME=/opt/pipx PIPX_BIN_DIR=/opt/pipx/bin \
+        pipx install certbot
+fi
+if ! sudo test -d /opt/pipx/venvs/certbot/lib/python*/site-packages/certbot_dns_azure; then
+    sudo env PIPX_HOME=/opt/pipx PIPX_BIN_DIR=/opt/pipx/bin \
+        pipx inject certbot certbot-dns-azure
+fi
+sudo ln -sf /opt/pipx/bin/certbot /usr/local/bin/certbot
+sudo install -d /etc/systemd/system/certbot-renew.service.d
+sudo tee /etc/systemd/system/certbot-renew.service.d/override.conf >/dev/null <<'CBOVEREOF'
+[Service]
+ExecStart=
+ExecStart=/opt/pipx/bin/certbot -q renew
+CBOVEREOF
+sudo systemctl daemon-reload
 
 # ---------- 4. (no local SSH keygen — Bitwarden SSH agent holds keys) ----------
 # Keys live in the Bitwarden vault as "SSH key" items and surface via
