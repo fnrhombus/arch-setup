@@ -10,14 +10,26 @@
 #   - pacman -S everything available in extra (signed, fast)
 #   - yay bootstrap; yay -S for AUR-only tail (VSCode, Edge, pinpam-git, ...)
 #   - SSH key (ed25519) if missing
+#   - sshd: hardened drop-in (key-only, no root, AllowUsers tom) + enable
+#   - Callisto pubkey (hardcoded, idempotent append to authorized_keys)
+#   - ufw firewall (default deny in, allow ssh, enable) — required because
+#     router's IPv6 filter is host-global, can't filter per port
+#   - metis-ddns: bash + systemd timer that keeps metis.rhombus.rocks A+AAAA
+#     in sync with this host's public IPs against Azure DNS (no maintained
+#     off-the-shelf option exists). Stubs /etc/metis-ddns.env on first run
+#     — fill in SP creds once, then enable the timer.
 #   - Claude Code CLI + bash completion
 #   - Goodix-aware fingerprint enrollment (VID 27C6 detected → detailed diag on fail)
 #   - pinpam TPM-PIN + PAM wiring for sudo/polkit/hyprlock
 #   - Bitwarden SSH agent in ~/.ssh/config
 #   - gh identity + signing key registration (first-login planter if no token yet)
 #   - zgenom + p10k + the full fnwsl plugin set (history/completion/PATH dedup
-#     brought in from fnwsl; WSL-specific pieces dropped)
-#   - end-4/illogical-impulse Hyprland dotfiles
+#     brought in from fnwsl; WSL-specific pieces dropped). p10k config itself
+#     is authored by the user via `p10k configure` on first shell launch —
+#     no pre-shipped ~/.p10k.zsh.
+#   - HyDE-Project/HyDE Hyprland dotfiles + Catppuccin-Mocha theme
+#   - 2-in-1 touch: iio-sensor-proxy / iio-hyprland (rotation), wvkbd (OSK),
+#     hyprgrass plugin (touch gestures), libwacom (Wacom AES stylus)
 #   - Catppuccin Mocha across Ghostty/SDDM/tmux/Helix
 #   - Snapper baseline snapshot
 #   - USB-serial udev rules (ESP32/Pico)
@@ -30,6 +42,25 @@ log()  { printf '\033[1;32m[+]\033[0m %s\n' "$*"; }
 warn() { printf '\033[1;33m[!]\033[0m %s\n' "$*" >&2; }
 die()  { printf '\033[1;31m[✗]\033[0m %s\n' "$*" >&2; exit 1; }
 
+# CLI flags. Order-independent, no-arg.
+SKIP_VERIFY=0
+for arg in "$@"; do
+    case "$arg" in
+        --no-verify|--skip-verify) SKIP_VERIFY=1 ;;
+        -h|--help)
+            cat <<USAGE
+Usage: postinstall.sh [--no-verify]
+
+  --no-verify    Skip the verify block at the end (faster re-runs when
+                 you've just touched one section and don't want to wait
+                 for ~70 checks to fan out).
+USAGE
+            exit 0 ;;
+        *)
+            warn "unknown arg: $arg (ignoring)" ;;
+    esac
+done
+
 [[ "$(id -un)" == "tom" ]] || die "Run as user 'tom'."
 ping -c1 -W3 archlinux.org >/dev/null || die "No network."
 
@@ -38,6 +69,7 @@ export XDG_CONFIG_HOME="$HOME/.config"
 export XDG_DATA_HOME="$HOME/.local/share"
 export XDG_CACHE_HOME="$HOME/.cache"
 export PATH="$HOME/.local/bin:$PATH"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$HOME"
 
 # ---------- 1. pacman: repo packages (signed, fast) ----------
@@ -46,18 +78,34 @@ sudo pacman -Syu --noconfirm --needed \
     base-devel git curl wget openssh \
     zsh tmux helix \
     bat fd ripgrep eza lsd btop jq fzf zoxide direnv \
-    sd yq xh \
+    sd go-yq xh \
     man-db man-pages pkgfile tldr \
     wl-clipboard grim slurp \
     xdg-user-dirs pipewire pipewire-pulse pipewire-jack wireplumber \
     noto-fonts noto-fonts-emoji ttf-jetbrains-mono-nerd ttf-firacode-nerd \
     bitwarden bitwarden-cli \
-    ghostty fuzzel cliphist swaync satty hyprshot \
-    mise chezmoi github-cli sesh \
+    ghostty fuzzel cliphist mako satty hyprshot \
+    foot nautilus yazi \
+    hyprpolkitagent swww xdg-desktop-portal-gtk \
+    iio-sensor-proxy libwacom \
+    remmina freerdp \
+    ufw \
+    azure-cli certbot \
+    memtest86+ memtest86+-efi \
+    smartmontools \
+    mise chezmoi github-cli \
     docker docker-compose docker-buildx \
     snapper snap-pac
 
 sudo pkgfile -u
+
+# ---------- 1-smart. smartd: ongoing SMART monitoring ----------
+# The BIOS "SMART Reporting" toggle only surfaces errors at POST. smartd
+# runs continuously and logs to journald + emails root on pre-fail events.
+# Arch's default /etc/smartd.conf is a single DEVICESCAN line that covers
+# every detected drive with sensible defaults — no custom config needed
+# unless we want per-drive test schedules later.
+sudo systemctl enable --now smartd.service
 
 # ---------- 1a. docker: enable service, add tom to docker group ----------
 # `docker` group grants root-equivalent access to the daemon; that's fine on
@@ -68,6 +116,36 @@ sudo systemctl enable --now docker.service
 if ! id -nG tom | grep -qw docker; then
     sudo usermod -aG docker tom
     warn "Added tom to docker group — log out and back in for it to take effect."
+fi
+
+# ---------- 1b. user services ----------
+# hyprpolkitagent ships a user unit but the preset doesn't auto-activate on
+# a fresh install — apps that need PolicyKit auth (Bitwarden unlock, mount
+# prompts, etc.) silently fail until the service is registered on the
+# session D-Bus. Idempotent: --now starts it here, enable persists across
+# logins.
+systemctl --user enable --now hyprpolkitagent.service 2>/dev/null || \
+    warn "hyprpolkitagent.service enable failed — Bitwarden may flag system-auth as unavailable."
+
+# ---------- 1c. memtest86+ systemd-boot loader entry ----------
+# Arch splits memtest86+ into two packages: `memtest86+` ships only the BIOS
+# binary (memtest.bin), `memtest86+-efi` ships the UEFI binary (memtest.efi).
+# Metis boots UEFI via systemd-boot, so the EFI package is the one we need
+# for a usable loader entry. We query memtest86+-efi specifically — the plain
+# package's file list has no .efi and the grep would silently skip.
+# Systemd-boot has no auto-scan for memtest86+/, so write the entry here.
+# Idempotent: tee just overwrites with identical content on re-run.
+MEMTEST_EFI=$(pacman -Ql memtest86+-efi 2>/dev/null | awk '/\.efi$/ {print $2; exit}')
+if [[ -n "$MEMTEST_EFI" ]] && sudo test -f "$MEMTEST_EFI"; then
+    # Strip the /boot prefix — loader entries use ESP-relative paths.
+    MEMTEST_EFI_REL="${MEMTEST_EFI#/boot}"
+    log "Registering memtest86+ with systemd-boot..."
+    sudo tee /boot/loader/entries/memtest86+.conf >/dev/null <<MEMEOF
+title   Memtest86+
+efi     ${MEMTEST_EFI_REL}
+MEMEOF
+else
+    warn "memtest86+-efi EFI binary not found — loader entry skipped. Did pacman -S memtest86+-efi succeed?"
 fi
 
 # ---------- 2. yay bootstrap ----------
@@ -82,41 +160,187 @@ if ! command -v yay >/dev/null; then
 fi
 
 # ---------- 3. AUR: only what's not in extra ----------
-log "Installing AUR-exclusive apps (VSCode, Edge, pinpam-git, SDDM theme)..."
+# claude-desktop-native: unofficial repackage of Anthropic's Windows Electron
+# build (Anthropic ships no official Linux binary). `-native` variant is the
+# community-recommended one — `-bin` has recurring ffmpeg dep issues. Lags
+# official releases; expect occasional breakage on Anthropic updates.
+log "Installing AUR-exclusive apps (VSCode, Edge, Claude desktop, pinpam-git, SDDM theme, iio-hyprland, certbot-dns-azure)..."
 yay -S --noconfirm --needed \
     visual-studio-code-bin \
     microsoft-edge-stable-bin \
+    claude-desktop-native \
     catppuccin-sddm-theme-mocha \
-    pinpam-git
+    pinpam-git \
+    sesh \
+    wvkbd \
+    iio-hyprland \
+    python-certbot-dns-azure
 
 # ---------- 4. (no local SSH keygen — Bitwarden SSH agent holds keys) ----------
 # Keys live in the Bitwarden vault as "SSH key" items and surface via
 # ~/.bitwarden-ssh-agent.sock once Bitwarden desktop is running with the
 # SSH-agent toggle enabled. Public keys are readable via `ssh-add -L`.
 mkdir -p "$HOME/.ssh"; chmod 700 "$HOME/.ssh"
+touch "$HOME/.ssh/authorized_keys"; chmod 600 "$HOME/.ssh/authorized_keys"
+
+# ---------- 4a. sshd: accept incoming connections, key-only ----------
+# Hardened sshd drop-in: pubkey only, no root, no passwords, no kbd-interactive.
+log "Installing sshd hardened drop-in and enabling sshd..."
+sudo install -d -m 755 /etc/ssh/sshd_config.d
+sudo tee /etc/ssh/sshd_config.d/10-arch-setup.conf >/dev/null <<'SSHDEOF'
+# arch-setup: hardened sshd policy (key-only, no root, no passwords)
+PermitRootLogin no
+PasswordAuthentication no
+KbdInteractiveAuthentication no
+PubkeyAuthentication yes
+X11Forwarding no
+PrintMotd no
+AllowUsers tom
+SSHDEOF
+sudo systemctl enable --now sshd.service
+
+# ---------- 4b. Callisto authorized key ----------
+# Hardcoded public half of the user's "Callisto" Bitwarden vault SSH key.
+# Public keys are non-secret; private half stays in Bitwarden, surfaces via
+# the Bitwarden SSH agent socket on the originating box. Idempotent append.
+CALLISTO_PUBKEY='ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAICmgv+3Enh89mb5vutzHEgwzKitOzdrje8lQVF/bss/X thoma@callisto'
+if ! grep -qxF "$CALLISTO_PUBKEY" "$HOME/.ssh/authorized_keys"; then
+    log "Adding Callisto pubkey to authorized_keys..."
+    echo "$CALLISTO_PUBKEY" >> "$HOME/.ssh/authorized_keys"
+fi
+
+# ---------- 4c. ufw: host firewall (IPv4 + IPv6) ----------
+# IPv6 puts every device on a globally routable address, so the router's
+# all-or-nothing IPv6 filter for this host means anything bound to a port
+# on the laptop is exposed to the internet when IPv6 is "on" at the router.
+# ufw is the simplest IPv4+IPv6-aware firewall: rules apply to both stacks.
+# Order is load-bearing: add allow rules BEFORE `ufw --force enable` so a
+# remote re-run (over SSH) can't lock itself out. Idempotent — `ufw enable`
+# on an already-active firewall is a no-op, and `ufw allow` won't dupe.
+log "Configuring ufw (deny incoming, allow ssh) and enabling..."
+sudo ufw default deny incoming
+sudo ufw default allow outgoing
+sudo ufw allow 22/tcp comment 'sshd (Callisto + others)'
+sudo ufw --force enable
+sudo systemctl enable --now ufw.service
+
+# ---------- 4d. metis-ddns: Azure DNS dynamic updater ----------
+# Keeps metis.rhombus.rocks A+AAAA records pointed at this host's current
+# public IPv4/IPv6. Nothing maintained off-the-shelf supports Azure DNS
+# (ddclient/inadyn lack a provider), so we ship a small bash script + systemd
+# timer + NM-dispatcher hook. See phase-3-arch-postinstall/metis-ddns/.
+#
+# The env file at /etc/metis-ddns.env (mode 600) holds the service-principal
+# credentials. We stub it on first install with the template — user must
+# fill in the actual TENANT/CLIENT/SECRET/SUBSCRIPTION/RG once via
+# `az ad sp create-for-rbac --name metis-ddns --role "DNS Zone Contributor"
+# --scopes <zone-id>` and then `sudo systemctl start metis-ddns.service`.
+DDNS_DIR="$SCRIPT_DIR/metis-ddns"
+if [[ -d "$DDNS_DIR" ]]; then
+    log "Installing metis-ddns script + systemd unit + timer + NM hook..."
+    sudo install -m 755 "$DDNS_DIR/metis-ddns"             /usr/local/bin/metis-ddns
+    sudo install -m 644 "$DDNS_DIR/metis-ddns.service"     /etc/systemd/system/metis-ddns.service
+    sudo install -m 644 "$DDNS_DIR/metis-ddns.timer"       /etc/systemd/system/metis-ddns.timer
+    sudo install -d -m 755 /etc/NetworkManager/dispatcher.d
+    sudo install -m 755 "$DDNS_DIR/90-metis-ddns"          /etc/NetworkManager/dispatcher.d/90-metis-ddns
+    sudo install -m 644 "$DDNS_DIR/metis-ddns.env.template" /etc/metis-ddns.env.template
+    if [[ ! -f /etc/metis-ddns.env ]]; then
+        sudo install -m 600 -o root -g root "$DDNS_DIR/metis-ddns.env.template" /etc/metis-ddns.env
+        warn "Stubbed /etc/metis-ddns.env — fill in service principal creds, then:"
+        warn "    sudo systemctl start metis-ddns.service && sudo journalctl -u metis-ddns -n 20"
+    fi
+    sudo install -d -m 755 /var/lib/metis-ddns
+    # Stub Let's Encrypt credentials for the dns-azure plugin (same SP works
+    # for both DDNS record updates and dns-01 challenge TXT records).
+    sudo install -d -m 755 /etc/letsencrypt
+    sudo install -m 644 "$DDNS_DIR/letsencrypt-azure.ini.template" /etc/letsencrypt/azure.ini.template
+    if [[ ! -f /etc/letsencrypt/azure.ini ]]; then
+        sudo install -m 600 -o root -g root "$DDNS_DIR/letsencrypt-azure.ini.template" /etc/letsencrypt/azure.ini
+    fi
+    sudo systemctl daemon-reload
+    # Enable the timer (don't --now: env file likely empty on first pass; the
+    # timer's first tick will no-op-fail until creds are filled in, which is
+    # fine — we just don't want the FAILED state to scream at first boot).
+    sudo systemctl enable metis-ddns.timer
+    # Enable certbot's renewal timer too — no-op until a cert exists.
+    sudo systemctl enable certbot-renew.timer 2>/dev/null || true
+else
+    warn "metis-ddns/ sidecar dir missing — Azure DDNS not installed."
+fi
 
 # ---------- 5. Claude Code CLI ----------
 # Claude Code is distributed via npm (@anthropic-ai/claude-code). There's no
 # mise plugin named "claude-code" — that call was wrong. Route: use mise to
-# install a LTS node, then `npm install -g`. npm's prefix sits under
-# ~/.local/share/mise/installs/node/*/bin so it ends up on PATH once mise is
-# activated by .zshrc.
+# install a LTS node, then `npm install -g`. The binary lands under
+# ~/.local/share/mise/installs/node/<version>/bin/claude and is only on PATH
+# in mise-activated shells — symlink it into /usr/local/bin so `claude` works
+# from any shell, including sudo, scripts, and SDDM-launched apps.
 if ! command -v claude >/dev/null; then
     if command -v mise >/dev/null; then
         log "Installing node@lts via mise, then Claude Code via npm..."
-        mise use -g node@lts 2>&1 | tee -a /tmp/mise-node.log || warn "mise node@lts install failed — check /tmp/mise-node.log"
-        # Run npm through mise so we hit the newly-installed node even in
-        # this non-interactive shell where mise hasn't been sourced yet.
-        mise exec -- npm install -g @anthropic-ai/claude-code 2>&1 | tee -a /tmp/mise-node.log || \
-            warn "Claude Code install failed — run manually: mise use -g node@lts && npm i -g @anthropic-ai/claude-code"
+        # Bash's `cmd | tee` returns tee's exit, masking a failed install behind
+        # success. Redirect to the log file directly so the `if` sees the real
+        # exit status, then show the tail on failure.
+        if ! mise use -g node@lts >>/tmp/mise-node.log 2>&1; then
+            warn "mise node@lts install failed — tail of /tmp/mise-node.log:"
+            tail -n 10 /tmp/mise-node.log >&2 || true
+        fi
+        if ! mise exec -- npm install -g @anthropic-ai/claude-code >>/tmp/mise-node.log 2>&1; then
+            warn "Claude Code install failed — tail of /tmp/mise-node.log:"
+            tail -n 10 /tmp/mise-node.log >&2 || true
+            warn "Retry manually: mise use -g node@lts && mise exec -- npm i -g @anthropic-ai/claude-code"
+        fi
     else
         warn "mise missing; skipping Claude Code CLI install."
     fi
+fi
+# Ensure claude resolves globally (outside mise-activated shells too). Re-run
+# every time so a node version bump silently refreshes the symlink target.
+if claude_bin=$(mise which claude 2>/dev/null) && [[ -x "$claude_bin" ]]; then
+    sudo ln -sf "$claude_bin" /usr/local/bin/claude
 fi
 # Claude Code ships its own completions at runtime: `claude --print-completion zsh`
 # is wired in .zshrc below, no fragile external download needed.
 
 # ---------- 6. Fingerprint enrollment (Goodix-aware) ----------
+# Known unsupported Goodix PIDs (Match-On-Chip variants — require proprietary
+# vendor firmware/driver, not covered by stock libfprint OR libfprint-git).
+# Listing them up front lets us skip the enroll→diagnose→AUR-fallback dance
+# entirely on re-runs for hardware that will never work.
+# 538C lives in libfprint-goodix-53xc (older Dell blob); handled below.
+GOODIX_UNSUPPORTED_PIDS='5395|55b4|600c|639c'
+if [[ -z "${SKIP_FPRINT:-}" ]]; then
+    if command -v lsusb >/dev/null && lsusb | grep -qiE "27c6:($GOODIX_UNSUPPORTED_PIDS)"; then
+        warn "Goodix reader ($(lsusb | grep -iE "27c6:($GOODIX_UNSUPPORTED_PIDS)" | head -1 | awk '{print $6}')) is a Match-On-Chip variant with no open-source driver."
+        warn "Skipping fingerprint setup. Set SKIP_FPRINT=1 on re-runs to suppress this message."
+        warn "Status reference: https://fprint.freedesktop.org/supported-devices.html"
+        SKIP_FPRINT=1
+    fi
+fi
+
+# Pre-install correct driver for known-mapped Goodix PIDs so the enroll-below
+# succeeds first try. 538C → libfprint-goodix-53xc (older Dell blob via TOD).
+# libfprint-tod-git fails to build with LTO (strips ABI symbol versioning),
+# so we pre-build it with !lto before letting yay pull it as a dep.
+if [[ -z "${SKIP_FPRINT:-}" ]] && command -v lsusb >/dev/null && lsusb | grep -qi '27c6:538c'; then
+    log "Goodix 538C detected — installing libfprint-goodix-53xc (older Dell blob via TOD)..."
+    if ! pacman -Q libfprint-tod-git >/dev/null 2>&1; then
+        # libfprint-tod-git replaces stock libfprint; pull stock first.
+        if pacman -Q libfprint >/dev/null 2>&1; then
+            sudo pacman -Rdd --noconfirm libfprint || warn "Could not remove stock libfprint."
+        fi
+        tmpd=$(mktemp -d) && (
+            cd "$tmpd" \
+            && yay -G libfprint-tod-git \
+            && cd libfprint-tod-git \
+            && sed -i 's|^options=(|options=(!lto |' PKGBUILD \
+            && makepkg -si --noconfirm
+        ) || warn "libfprint-tod-git build failed — fingerprint will not work."
+        rm -rf "$tmpd"
+    fi
+    yay -S --noconfirm --needed libfprint-goodix-53xc || \
+        warn "libfprint-goodix-53xc install failed — see AUR comments."
+fi
 if [[ -z "${SKIP_FPRINT:-}" ]]; then
     GOODIX_PRESENT=0
     if command -v lsusb >/dev/null && lsusb | grep -qi '27c6:'; then
@@ -124,9 +348,27 @@ if [[ -z "${SKIP_FPRINT:-}" ]]; then
         log "Goodix fingerprint reader detected: $(lsusb | grep -i '27c6:' | head -1)"
     fi
 
-    log "Enrolling fingerprint (you'll be prompted to touch the reader ~5x)..."
-    if ! fprintd-enroll 2>&1 | tee /tmp/fprint-enroll.log; then
-        warn "fprintd-enroll failed. Diagnostic:"
+    # sudo + explicit user: bypasses polkit which denies enroll from a bare TTY
+    # (no graphical session = no active-local seat). Idempotent: skip already-enrolled
+    # fingers so re-runs don't force re-touching.
+    FINGERS_TO_ENROLL=(right-index-finger left-index-finger right-middle-finger left-middle-finger right-thumb)
+    log "Enrolling ${#FINGERS_TO_ENROLL[@]} fingerprints (~5 taps each)..."
+    fp_any_success=0
+    for finger in "${FINGERS_TO_ENROLL[@]}"; do
+        if sudo fprintd-list tom 2>/dev/null | grep -q "$finger"; then
+            log "  $finger: already enrolled — skipping."
+            fp_any_success=1
+            continue
+        fi
+        log "  $finger: touch power button ~5 times..."
+        if sudo fprintd-enroll -f "$finger" tom 2>&1 | tee /tmp/fprint-enroll.log; then
+            fp_any_success=1
+        else
+            warn "  $finger: enroll failed (rc=${PIPESTATUS[0]})."
+        fi
+    done
+    if (( ! fp_any_success )); then
+        warn "fprintd-enroll failed for all fingers. Diagnostic:"
         echo "----- lsusb (full) -----"
         lsusb 2>&1 || true
         echo "----- fingerprint candidates (Goodix/Validity/Synaptics/Elan/AuthenTec) -----"
@@ -143,15 +385,28 @@ if [[ -z "${SKIP_FPRINT:-}" ]]; then
             echo "Reader vendor unknown/unrecognized — stock libfprint may still work with a retry,"
             echo "or your reader may be newer than the packaged libfprint."
         fi
-        echo "Fallback: install libfprint-git from AUR and retry. Covers newer PIDs for all vendors."
-        read -rp "Install libfprint-git now and retry fprintd-enroll? [y/N] " ans
-        if [[ "$ans" == "y" || "$ans" == "Y" ]]; then
-            if yay -S --noconfirm --needed libfprint-git && sudo systemctl restart fprintd; then
-                fprintd-enroll || warn "libfprint-git retry also failed."
-            else
-                warn "libfprint-git install failed."
+        # If libfprint-tod-git is already in (e.g. 538C path above), libfprint-git
+        # would conflict — skip the fallback and surface a manual diagnostic hint.
+        if pacman -Q libfprint-tod-git >/dev/null 2>&1; then
+            warn "libfprint-tod-git is installed (Goodix-specific path) — skipping libfprint-git fallback."
+            warn "Check: journalctl -u fprintd -n 50; lsusb | grep 27c6; ls /usr/lib/libfprint-2/tod-1/"
+        else
+            log "Falling back to libfprint-git from AUR (covers newer PIDs for all vendors)..."
+            # libfprint-git conflicts with stock libfprint; pacman's "Remove libfprint? [y/N]"
+            # prompt defaults to N under --noconfirm, so the install aborts. Pull the
+            # stock package out first (-Rdd bypasses reverse-dep check; fprintd will
+            # briefly have no provider until libfprint-git re-provides it below).
+            # Only attempt removal if stock libfprint is actually installed AND
+            # libfprint-git isn't already taking its place (avoids "target not found"
+            # noise on re-runs where the swap already happened).
+            if pacman -Q libfprint >/dev/null 2>&1 && ! pacman -Q libfprint-git >/dev/null 2>&1; then
+                sudo pacman -Rdd --noconfirm libfprint || warn "Could not remove stock libfprint — conflict will still block install."
             fi
-            echo "Supported-device reference: https://fprint.freedesktop.org/supported-devices.html"
+            if yay -S --noconfirm --needed libfprint-git && sudo systemctl restart fprintd; then
+                sudo fprintd-enroll -f right-index-finger tom || warn "libfprint-git retry also failed — likely unsupported reader. See https://fprint.freedesktop.org/supported-devices.html"
+            else
+                warn "libfprint-git install failed — see https://fprint.freedesktop.org/supported-devices.html"
+            fi
         fi
     fi
 fi
@@ -166,7 +421,17 @@ if command -v pinutil >/dev/null; then
         # it'd block forever with no way to type. Skip and warn instead.
         if [[ -t 0 ]]; then
             log "Setting up TPM-backed PIN (follow prompt; 6+ chars recommended)..."
-            sudo pinutil setup || warn "pinutil setup failed; skipping PIN wiring."
+            # tee lets the user see pinutil's prompts while we capture output
+            # for the "already has a PIN" check. The `if` wrapper disables
+            # errexit (otherwise pipefail + set -e kills the script on pinutil's
+            # non-zero exit before we can check for idempotency).
+            if sudo pinutil setup 2>&1 | tee /tmp/pinutil-setup.log; then
+                log "TPM PIN set."
+            elif grep -q 'already has a PIN' /tmp/pinutil-setup.log; then
+                log "TPM PIN already set — skipping (idempotent re-run)."
+            else
+                warn "pinutil setup failed; PAM PIN unlock won't work until fixed."
+            fi
         else
             warn "No TTY — skipping 'pinutil setup'. Run it manually after login: sudo pinutil setup"
         fi
@@ -385,6 +650,24 @@ fi
 AUTHEOF
 fi
 
+# ---------- 9a. fnpostinstall shell function ----------
+# Convenience wrapper for re-running postinstall from HEAD of the feature
+# branch, piped through tee so you always have a log to grep. Written to
+# a .zshrc.d fragment so it lands on $PATH via the .zshrc loop at line 576.
+cat > "$HOME/.zshrc.d/arch-postinstall.zsh" <<'FNEOF'
+# arch-setup: re-run the latest postinstall from GitHub, logging to /tmp.
+fnpostinstall() {
+    local log="/tmp/postinstall-$(date +%Y%m%d-%H%M%S).log"
+    echo "Logging to $log"
+    {
+        gh api 'repos/fnrhombus/arch-setup/contents/phase-3-arch-postinstall/postinstall.sh?ref=claude/fix-linux-boot-issue-9ps2s' --jq .content \
+            | base64 -d > ~/postinstall.sh \
+            && chmod +x ~/postinstall.sh \
+            && bash ~/postinstall.sh
+    } 2>&1 | tee "$log"
+}
+FNEOF
+
 # ---------- 10. zgenom + zsh config (enriched from fnwsl) ----------
 if [[ ! -d "$HOME/.zgenom" ]]; then
     log "Cloning zgenom..."
@@ -477,15 +760,10 @@ REPORTTIME=2
 [[ -f ~/.p10k.zsh ]] && source ~/.p10k.zsh
 ZSHEOF
 
-# Pre-ship p10k config from fnwsl so the first shell doesn't drop into the
-# `p10k configure` wizard. Sidecar file lives next to this script.
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-if [[ -f "$SCRIPT_DIR/p10k.zsh" ]]; then
-    log "Installing pre-shipped ~/.p10k.zsh from fnwsl..."
-    cp "$SCRIPT_DIR/p10k.zsh" "$HOME/.p10k.zsh"
-else
-    warn "p10k.zsh sidecar not found next to postinstall.sh — first shell will prompt to configure."
-fi
+# No pre-shipped ~/.p10k.zsh on purpose: first zsh launch fires `p10k configure`,
+# the interactive wizard that writes ~/.p10k.zsh based on user taste. Sourcing
+# of ~/.p10k.zsh is already wired in the .zshrc block above — once the wizard
+# finishes, subsequent shells pick the config up.
 
 log "Writing ~/.zsh_aliases..."
 cat > "$HOME/.zsh_aliases" <<'ALIASEOF'
@@ -567,34 +845,142 @@ select = "underline"
 render = true
 HXEOF
 
-# ---------- 13. Hyprland dotfiles (end-4/illogical-impulse) ----------
-# Clone fresh at run time — we get the latest dots, the repo stays lean, and
-# phase 2 doesn't have to carry a snapshot on the USB. GIT_TEMPLATE_DIR="" is
-# the wsl-setup-lessons.md mitigation for stale user-dir template hooks.
-if [[ ! -d "$HOME/dotfiles/dots-hyprland" ]]; then
-    log "Cloning end-4/dots-hyprland..."
-    mkdir -p "$HOME/dotfiles"
-    GIT_TEMPLATE_DIR="" git clone --depth 1 https://github.com/end-4/dots-hyprland.git \
-        "$HOME/dotfiles/dots-hyprland" \
-        || warn "dots-hyprland clone failed — network? Retry manually later: \
-GIT_TEMPLATE_DIR=\"\" git clone --depth 1 https://github.com/end-4/dots-hyprland.git ~/dotfiles/dots-hyprland"
+# ---------- 13. Hyprland dotfiles (HyDE-Project/HyDE) ----------
+# Switched away from end-4/illogical-impulse to HyDE on 2026-04-20 (decisions.md
+# §Q10/§Q14): HyDE is bootloader-agnostic (we keep systemd-boot), ships
+# Catppuccin-Mocha as a bundled theme, doesn't require a fresh-install boot
+# (works as an overlay on existing Arch + Hyprland), and has a `theme-switch`
+# CLI for one-shot theme application. Trade-off vs Omarchy: Omarchy is a closer
+# fit (Ghostty default + opinionated keyboard-ninja UX) but mandates the
+# `limine` bootloader — out of scope until/unless we redo phase 2.
+#
+# HyDE clobbers ~/.config/hypr/, ~/.config/waybar/, ~/.config/rofi/, etc.
+# It backs the prior tree up to ~/.config/cfg_backups/<timestamp>/ before
+# overwriting. Do NOT layer HyDE on top of end-4 — pick one and commit; if
+# end-4 was previously installed, this script's HyDE install will replace it
+# (the backup is your safety net).
+#
+# Clone fresh at run time so the dots stay current and the repo stays lean.
+# GIT_TEMPLATE_DIR="" is the wsl-setup-lessons.md mitigation for stale
+# user-dir template hooks.
+if [[ ! -d "$HOME/HyDE" ]]; then
+    log "Cloning HyDE-Project/HyDE..."
+    GIT_TEMPLATE_DIR="" git clone --depth 1 https://github.com/HyDE-Project/HyDE.git \
+        "$HOME/HyDE" \
+        || warn "HyDE clone failed — network? Retry manually later: \
+GIT_TEMPLATE_DIR=\"\" git clone --depth 1 https://github.com/HyDE-Project/HyDE.git ~/HyDE"
 fi
 
-if [[ -d "$HOME/dotfiles/dots-hyprland" ]]; then
-    log "Installing end-4/dots-hyprland..."
-    pushd "$HOME/dotfiles/dots-hyprland" >/dev/null
-    if [[ -x ./install.sh ]]; then
-        warn "Running end-4 installer INTERACTIVELY — answer prompts."
-        ./install.sh || warn "end-4 installer exited non-zero; review manually"
+if [[ -d "$HOME/HyDE/Scripts" ]]; then
+    # Idempotency guard: HyDE drops a marker into ~/.local/share/bin/ on first
+    # successful install (theme-switch.sh, Hyde.sh helpers). Skip re-run if
+    # those exist — re-running install.sh would re-clobber configs and bury
+    # the most-recent backup behind a useless overwrite-of-an-overwrite.
+    if [[ -x "$HOME/.local/share/bin/theme-switch.sh" ]] || [[ -d "$HOME/.local/lib/hyde" ]]; then
+        log "HyDE already installed (theme-switch.sh / .local/lib/hyde present) — skipping re-install."
     else
-        warn "No install.sh in dots-hyprland; copying ./.config/* manually."
-        cp -rn .config/* "$HOME/.config/" 2>/dev/null || true
+        warn "Running HyDE install.sh INTERACTIVELY — answer prompts (skip NVIDIA: -n)."
+        pushd "$HOME/HyDE/Scripts" >/dev/null
+        # -n skips NVIDIA wiring (MX250 is blacklisted; iGPU only on this box).
+        ./install.sh -n || warn "HyDE install.sh exited non-zero; review manually"
+        popd >/dev/null
     fi
-    popd >/dev/null
 else
-    warn "Dotfiles not available at ~/dotfiles/dots-hyprland — Hyprland config skipped."
-    warn "  Fix: GIT_TEMPLATE_DIR=\"\" git clone --depth 1 https://github.com/end-4/dots-hyprland.git ~/dotfiles/dots-hyprland"
+    warn "HyDE not available at ~/HyDE/Scripts — Hyprland config skipped."
+    warn "  Fix: GIT_TEMPLATE_DIR=\"\" git clone --depth 1 https://github.com/HyDE-Project/HyDE.git ~/HyDE"
     warn "       then re-run this script."
+fi
+
+# Force Catppuccin-Mocha theme. HyDE ships Catppuccin-Mocha in its bundled
+# theme list; theme-switch.sh is idempotent (no-op if already set).
+if [[ -x "$HOME/.local/share/bin/theme-switch.sh" ]]; then
+    log "Setting HyDE theme to Catppuccin-Mocha..."
+    "$HOME/.local/share/bin/theme-switch.sh" -s "Catppuccin-Mocha" \
+        || warn "theme-switch.sh failed — set manually with Ctrl+Super+T."
+fi
+
+# Defang end-4 / HyDE / kitty configs that hardcode `shell fish` or similar —
+# chroot.sh creates tom with zsh as login shell (and §18 below re-asserts if
+# anything drifted), but a terminal emulator config with `shell fish` inside
+# Hyprland would still spawn fish on every launch. Neutralize any such
+# override back to the user's login shell.
+for f in "$HOME/.config/kitty/kitty.conf" "$HOME/.config/foot/foot.ini" "$HOME/.config/ghostty/config"; do
+    if [[ -f "$f" ]] && grep -qE '^\s*shell\s*=?\s*(fish|/usr/bin/fish)' "$f"; then
+        log "Removing hardcoded fish shell override in $f..."
+        sed -i -E '/^\s*shell\s*=?\s*(fish|\/usr\/bin\/fish)\s*$/d' "$f"
+    fi
+done
+
+# ---------- 13a. Hyprland customizations layered on top of HyDE ----------
+# HyDE's install.sh overwrites ~/.config/hypr/* on every run. We patch + append
+# idempotently so re-runs restore our overrides. The marker comment makes the
+# append a one-shot.
+HYPR_CONF="$HOME/.config/hypr/hyprland.conf"
+
+# HyDE defaults the terminal var (`$term` or `$TERMINAL`) to kitty. The
+# daily-driver terminal is Ghostty (decisions.md §Q10-C). Rewrite both common
+# spellings so every keybind that uses the var launches Ghostty. sed is
+# inherently idempotent: once the line already says ghostty the pattern stops
+# matching.
+if [[ -f "$HYPR_CONF" ]]; then
+    sed -i -E 's|^\$(term|TERMINAL|terminal)\s*=\s*kitty\s*$|$\1 = ghostty|' "$HYPR_CONF"
+fi
+# HyDE may also keep the terminal pin in keybindings.conf — patch there too.
+HYPR_KEYBINDS="$HOME/.config/hypr/keybindings.conf"
+if [[ -f "$HYPR_KEYBINDS" ]]; then
+    sed -i -E 's|^\$(term|TERMINAL|terminal)\s*=\s*kitty\s*$|$\1 = ghostty|' "$HYPR_KEYBINDS"
+fi
+
+if [[ -f "$HYPR_CONF" ]] && ! grep -q '# arch-setup-customizations' "$HYPR_CONF"; then
+    log "Appending arch-setup customizations to $HYPR_CONF..."
+    cat >> "$HYPR_CONF" <<'HYPREOF'
+
+# arch-setup-customizations (do not remove this marker — postinstall.sh skips re-append on its presence)
+# Monitor layout is authored via `nwg-displays` → writes ~/.config/hypr/monitors.conf,
+# which hyprland.conf sources. Intended layout: Vizio V505-G9 (4K 50", DP-1) at
+# (0,0) scale 1.5 → logical 2560x1440; Dell Inspiron 7786 internal panel (eDP-1)
+# at (0, 1440) scale 1 → left edges aligned, laptop directly below the TV.
+# Do NOT pin `monitor = ...` lines here — the kernel-reported name for the TV is
+# DP-1 (DisplayPort-over-HDMI alt-mode), which varies by port/cable, and monitors.conf
+# is the single source of truth.
+#
+# nwg-displays gotcha: its visual canvas defaults monitor X positions to non-zero
+# values (~2000 for the 4K rectangle) even when the rectangles look "snapped" to
+# each other in the GUI. That makes the two screens overlap only at a corner
+# pixel and the cursor only transitions there. Fix: type `0` into the X field
+# for BOTH monitors explicitly, then Apply + Save.
+source = ~/.config/hypr/monitors.conf
+#
+# Lid close → disable internal panel; lid open → reload hyprland.conf so monitors.conf
+# reapplies the nwg-displays-authored layout. Laptop lives under a desk most of the
+# time; closing the lid is the normal "kiosk mode" signal.
+bindl = , switch:on:Lid Switch,  exec, hyprctl keyword monitor "eDP-1, disable"
+bindl = , switch:off:Lid Switch, exec, hyprctl reload
+#
+# 2-in-1 touch: 3-finger swipe = workspace switch (Hyprland built-in);
+# extra touch gestures (long-press, edge swipe to toggle wvkbd) come from the
+# hyprgrass plugin installed via `hyprpm` below.
+gestures {
+    workspace_swipe = true
+    workspace_swipe_fingers = 3
+}
+#
+# Screen rotation on tablet-mode flip via iio-hyprland (AUR). Reads the IIO
+# accelerometer and emits `hyprctl keyword monitor` transforms.
+exec-once = iio-hyprland
+HYPREOF
+fi
+
+# Install hyprgrass touch-gesture plugin via hyprpm. Idempotent: hyprpm checks
+# if the plugin is already added before re-cloning.
+if command -v hyprpm >/dev/null && [[ -d "$HOME/.config/hypr" ]]; then
+    log "Ensuring hyprgrass plugin (touch gestures) is installed..."
+    hyprpm update >/dev/null 2>&1 || true
+    if ! hyprpm list 2>/dev/null | grep -q hyprgrass; then
+        hyprpm add https://github.com/horriblename/hyprgrass \
+            && hyprpm enable hyprgrass \
+            || warn "hyprgrass install failed — re-run inside a Hyprland session."
+    fi
 fi
 
 # ---------- 14. Ghostty Catppuccin ----------
@@ -603,7 +989,7 @@ mkdir -p "$HOME/.config/ghostty"
 cat > "$HOME/.config/ghostty/config" <<'GSEOF'
 font-family = "JetBrainsMono Nerd Font"
 font-size = 12
-theme = "catppuccin-mocha"
+theme = "Catppuccin Mocha"
 cursor-style = block
 cursor-style-blink = false
 window-decoration = false
@@ -628,18 +1014,31 @@ fi
 if command -v snapper >/dev/null && [[ ! -f /etc/snapper/configs/root ]]; then
     log "Writing snapper config for / (handmade, avoids .snapshots conflict)..."
     sudo install -d -m 750 /etc/snapper/configs
-    sudo cp /etc/snapper/config-templates/default /etc/snapper/configs/root
-    sudo sed -i 's|^SUBVOLUME=.*|SUBVOLUME="/"|' /etc/snapper/configs/root
-    sudo sed -i 's|^ALLOW_USERS=.*|ALLOW_USERS="tom"|' /etc/snapper/configs/root
-    # Register the config name so `snapper list-configs` sees it.
-    if ! grep -q '^SNAPPER_CONFIGS=.*root' /etc/conf.d/snapper 2>/dev/null; then
-        echo 'SNAPPER_CONFIGS="root"' | sudo tee -a /etc/conf.d/snapper >/dev/null
+    # snapper moved its default template from /etc/ to /usr/share/ in recent
+    # releases. Probe both so this works on old and new package versions.
+    snapper_tmpl=""
+    for candidate in /usr/share/snapper/config-templates/default /etc/snapper/config-templates/default; do
+        if [[ -f "$candidate" ]]; then snapper_tmpl="$candidate"; break; fi
+    done
+    if [[ -z "$snapper_tmpl" ]]; then
+        warn "snapper installed but no default template found — skipping config."
+    else
+        sudo cp "$snapper_tmpl" /etc/snapper/configs/root
+        sudo sed -i 's|^SUBVOLUME=.*|SUBVOLUME="/"|' /etc/snapper/configs/root
+        sudo sed -i 's|^ALLOW_USERS=.*|ALLOW_USERS="tom"|' /etc/snapper/configs/root
+        # Register the config name so `snapper list-configs` sees it.
+        if ! grep -q '^SNAPPER_CONFIGS=.*root' /etc/conf.d/snapper 2>/dev/null; then
+            echo 'SNAPPER_CONFIGS="root"' | sudo tee -a /etc/conf.d/snapper >/dev/null
+        fi
+        sudo chown -R :tom /.snapshots 2>/dev/null || true
+        sudo chmod 750 /.snapshots
+        # Baseline snapshot — safe now that config exists and .snapshots is writable.
+        # --no-dbus bypasses snapperd (which caches config list at startup and
+        # doesn't see our hand-written /etc/snapper/configs/root without a
+        # restart). Reading config files directly makes `-c root` resolve.
+        sudo snapper --no-dbus -c root create --description "clean install postinstall baseline" || \
+            warn "snapper baseline failed — config is in place but no snapshot taken."
     fi
-    sudo chown -R :tom /.snapshots 2>/dev/null || true
-    sudo chmod 750 /.snapshots
-    # Baseline snapshot — safe now that config exists and .snapshots is writable.
-    sudo snapper -c root create --description "clean install postinstall baseline" || \
-        warn "snapper baseline failed — config is in place but no snapshot taken."
 fi
 
 # ---------- 17. USB-serial udev rules (ESP32 / Pico / FTDI / CH340) ----------
@@ -673,62 +1072,222 @@ if [[ "$CURRENT_SHELL" != "$(which zsh)" ]]; then
 fi
 
 # ---------- 19. verify ----------
+if (( SKIP_VERIFY == 1 )); then
+    log "Skipping verify (--no-verify). Re-run without the flag for the full sweep."
+    echo
+    echo "Log out and back in (or reboot) to start Hyprland via SDDM."
+    exit 0
+fi
 echo
 echo "=== Verify ==="
+# Clear shell's command hash cache so binaries installed during this very run
+# (e.g. pinutil from pinpam-git) resolve via `command -v` without a shell restart.
+hash -r 2>/dev/null || true
+VERIFY_PASS=0
+VERIFY_FAIL=0
+VERIFY_FAILED_NAMES=()
 check() {
     local name="$1"; local cmd="$2"
     if eval "$cmd" >/dev/null 2>&1; then
         printf '  \033[1;32mOK\033[0m    %s\n' "$name"
+        VERIFY_PASS=$((VERIFY_PASS+1))
     else
         printf '  \033[1;31mFAIL\033[0m  %s\n' "$name"
+        VERIFY_FAIL=$((VERIFY_FAIL+1))
+        VERIFY_FAILED_NAMES+=("$name")
     fi
 }
 
+echo "-- shell + core CLI --"
 check "zsh"                 "command -v zsh"
 check "tmux"                "command -v tmux"
-check "helix (hx)"          "command -v hx"
+check "helix"               "command -v helix || command -v hx"
 check "yay"                 "command -v yay"
 check "mise"                "command -v mise"
 check "chezmoi"             "command -v chezmoi"
 check "gh (github-cli)"     "command -v gh"
+check "sesh"                "command -v sesh"
 check "zgenom"              "test -d $HOME/.zgenom"
-check "p10k"                "test -d $HOME/.zgenom/sources/romkatv/powerlevel10k-master"
-check "bat / fd / rg / eza" "command -v bat && command -v fd && command -v rg && command -v eza"
+check "p10k"                "test -d $HOME/.zgenom/romkatv"
+check "bat/fd/rg/eza/lsd"   "command -v bat && command -v fd && command -v rg && command -v eza && command -v lsd"
+check "btop/jq/fzf/zoxide"  "command -v btop && command -v jq && command -v fzf && command -v zoxide"
+check "direnv/sd/yq/xh"     "command -v direnv && command -v sd && command -v yq && command -v xh"
+check "tldr/pkgfile"        "command -v tldr && command -v pkgfile"
+check "JetBrainsMono Nerd"  "fc-list | grep -qi 'JetBrainsMono Nerd Font'"
+
+echo "-- mise + node + Claude CLI --"
 check "mise node@lts"       "mise exec -- node --version"
-check "claude (CLI)"        "mise exec -- command -v claude || command -v claude"
+check "claude (CLI)"        "command -v claude"
+
+echo "-- desktop apps --"
 check "vscode"              "command -v code"
 check "edge"                "command -v microsoft-edge-stable"
+check "claude-desktop"      "command -v claude-desktop"
+check "bitwarden desktop"   "command -v bitwarden-desktop || command -v bitwarden"
+check "bitwarden-cli"       "command -v bw"
+check "remmina (RDP)"       "command -v remmina"
+check "freerdp"             "command -v xfreerdp || command -v xfreerdp3"
+check "nautilus"            "command -v nautilus"
+check "yazi"                "command -v yazi"
+
+echo "-- terminal stack --"
 check "ghostty"             "command -v ghostty"
+check "foot (fallback)"     "command -v foot"
+check "ghostty config"      "test -f $HOME/.config/ghostty/config && grep -q 'Catppuccin Mocha' $HOME/.config/ghostty/config"
+
+echo "-- Hyprland / HyDE --"
+check "HyDE staged"         "test -d $HOME/HyDE/Scripts"
+check "HyDE installed"      "test -x $HOME/.local/share/bin/theme-switch.sh || test -d $HOME/.local/lib/hyde"
+check "hyprland config"     "test -f $HOME/.config/hypr/hyprland.conf"
+check "arch-setup customs"  "grep -q 'arch-setup-customizations' $HOME/.config/hypr/hyprland.conf"
+check "monitors.conf src"   "grep -q 'monitors.conf' $HOME/.config/hypr/hyprland.conf"
 check "fuzzel"              "command -v fuzzel"
 check "cliphist"            "command -v cliphist"
-check "swaync"              "command -v swaync"
+check "mako"                "command -v makoctl"
 check "satty"               "command -v satty"
+check "swww"                "command -v swww"
+check "hyprshot"            "command -v hyprshot"
 check "wl-copy"             "command -v wl-copy"
+check "xdg-portal-gtk"      "pacman -Q xdg-desktop-portal-gtk"
+check "hyprpolkitagent svc" "systemctl --user is-enabled hyprpolkitagent.service 2>/dev/null"
+
+echo "-- 2-in-1 hardware --"
+check "iio-sensor-proxy"    "pacman -Q iio-sensor-proxy"
+check "iio-hyprland (AUR)"  "command -v iio-hyprland"
+check "wvkbd (touch OSK)"   "command -v wvkbd-mobintl"
+check "libwacom"            "pacman -Q libwacom"
+check "hyprgrass plugin"    "hyprpm list 2>/dev/null | grep -q hyprgrass"
+
+echo "-- session / login / display --"
 check "NetworkManager"      "systemctl is-enabled NetworkManager"
 check "sddm"                "systemctl is-enabled sddm"
-check "pipewire"            "systemctl --user is-enabled pipewire"
+check "sddm catppuccin"     "pacman -Q catppuccin-sddm-theme-mocha"
+check "pipewire"            "pacman -Q pipewire wireplumber"
 check "bluetooth"           "systemctl is-enabled bluetooth"
-check "fprintd"             "systemctl is-enabled fprintd"
-check "snapper config /"    "test -f /etc/snapper/configs/root"
-check "dotfiles staged"     "test -d $HOME/dotfiles/dots-hyprland"
-check "hyprland config"     "test -f $HOME/.config/hypr/hyprland.conf"
-check "bitwarden desktop"   "command -v bitwarden"
-check "bitwarden-cli"       "command -v bw"
-check "pinutil (TPM PIN)"   "command -v pinutil"
+
+echo "-- secrets / auth --"
+check "fprintd enabled"     "systemctl is-enabled fprintd"
+check "fprintd enrolled"    "fprintd-list tom 2>/dev/null | grep -q 'Fingerprints for user tom'"
+check "pinutil (TPM PIN)"   "test -x /usr/bin/pinutil || command -v pinutil"
 check "pinpam in sudo"      "grep -q pam_pinpam /etc/pam.d/sudo"
 check "LUKS root TPM2"      "sudo systemd-cryptenroll /dev/disk/by-partlabel/ArchRoot 2>/dev/null | awk 'NR>1 && \$2==\"tpm2\"{f=1} END{exit !f}'"
-check "cryptvar keyfile"    "test -f /etc/cryptsetup-keys.d/cryptvar.key"
-check "fprintd enrolled"    "fprintd-list tom 2>/dev/null | grep -q 'Fingerprints for user tom'"
+check "cryptvar keyfile"    "sudo test -f /etc/cryptsetup-keys.d/cryptvar.key"
 check "ssh agent wired"     "grep -q bitwarden-ssh-agent.sock $HOME/.ssh/config"
+
+echo "-- inbound network --"
+check "sshd enabled"        "systemctl is-enabled sshd"
+check "sshd listening :22"  "ss -tlnH 'sport = 22' | grep -q :22"
+check "sshd PasswordAuth=no" "sudo sshd -T 2>/dev/null | grep -qi '^passwordauthentication no'"
+check "sshd PermitRoot=no"  "sudo sshd -T 2>/dev/null | grep -qi '^permitrootlogin no'"
+check "sshd hardened conf"  "sudo test -f /etc/ssh/sshd_config.d/10-arch-setup.conf"
+check "callisto authorized" "grep -q 'thoma@callisto' $HOME/.ssh/authorized_keys"
+check "ufw enabled"         "sudo ufw status | grep -q 'Status: active'"
+check "ufw ssh allowed"     "sudo ufw status | grep -E '^22/tcp|^22 ' | grep -q ALLOW"
+check "ufw default deny in" "sudo ufw status verbose | grep -qi 'Default: deny (incoming)'"
+
+echo "-- DDNS + Let's Encrypt --"
+check "azure-cli"           "command -v az"
+check "memtest86+ entry"   "test -f /boot/loader/entries/memtest86+.conf"
+check "smartd enabled"      "systemctl is-enabled smartd.service"
+check "metis-ddns binary"   "test -x /usr/local/bin/metis-ddns"
+check "metis-ddns service"  "systemctl is-enabled metis-ddns.service 2>/dev/null || systemctl cat metis-ddns.service >/dev/null 2>&1"
+check "metis-ddns timer"    "systemctl is-enabled metis-ddns.timer"
+check "metis-ddns NM hook"  "test -x /etc/NetworkManager/dispatcher.d/90-metis-ddns"
+check "metis-ddns env"      "sudo test -f /etc/metis-ddns.env"
+check "metis-ddns env filled" "sudo grep -qE '^AZ_TENANT_ID=.+' /etc/metis-ddns.env"
+check "metis-ddns last run OK" "sudo systemctl status metis-ddns.service 2>/dev/null | grep -q 'status=0/SUCCESS' || ! sudo test -f /etc/metis-ddns.env || ! sudo grep -qE '^AZ_TENANT_ID=.+' /etc/metis-ddns.env"
+check "certbot"             "command -v certbot"
+check "certbot azure plugin" "pacman -Qq python-certbot-dns-azure 2>/dev/null || pip show certbot-dns-azure >/dev/null 2>&1"
+check "LE cert (if issued)" "! test -d /etc/letsencrypt/live/metis.rhombus.rocks || sudo test -f /etc/letsencrypt/live/metis.rhombus.rocks/fullchain.pem"
+
+echo "-- snapshots / udev / planters --"
+check "snapper config /"    "sudo test -f /etc/snapper/configs/root"
 check "udev usb-serial"     "test -f /etc/udev/rules.d/99-usb-serial.rules"
 check "gh-auth planter or done" "test -f $HOME/.zshrc.d/arch-first-login.zsh || test -f $HOME/.gitconfig.local"
 check "ssh-signing planter" "test -f $HOME/.zshrc.d/arch-ssh-signing.zsh || grep -q allowedSignersFile $HOME/.gitconfig.local 2>/dev/null"
+check "fnpostinstall fn"    "test -f $HOME/.zshrc.d/arch-postinstall.zsh"
+
+# Summary panel
+echo
+if (( VERIFY_FAIL == 0 )); then
+    printf '\033[1;32m=== %d/%d checks passed — clean run ===\033[0m\n' "$VERIFY_PASS" "$((VERIFY_PASS + VERIFY_FAIL))"
+else
+    printf '\033[1;31m=== %d FAIL / %d total ===\033[0m\n' "$VERIFY_FAIL" "$((VERIFY_PASS + VERIFY_FAIL))"
+    echo "Failed checks:"
+    for n in "${VERIFY_FAILED_NAMES[@]}"; do
+        printf '  - %s\n' "$n"
+    done
+fi
 
 echo
-echo "Log out and back in (or reboot) to start Hyprland via SDDM."
-echo "Then, one-time Bitwarden setup:"
-echo "  1. Launch Bitwarden desktop, log in once with your master password."
-echo "  2. Settings -> Security -> enable 'Unlock with system keyring'."
-echo "  3. Settings -> SSH agent -> enable. Import your keys as SSH key vault items."
-echo "After that, vault + agent + sudo-PIN + fingerprint all unlock via your login."
-echo "If the first-login planter ran, gh + git identity are already wired."
+cat <<'POSTINSTALL_OUTRO'
+====================================================================
+  ONE-TIME ACTIONS (only matter the first time you run this)
+====================================================================
+
+[1] Reboot or log out → log back in via SDDM to start Hyprland.
+
+[2] Bitwarden desktop:
+      - Launch, log in once with your master password.
+      - Settings → Security → enable "Unlock with system keyring".
+      - Settings → SSH agent → enable. Import keys as "SSH key" items.
+    After that, vault + agent + sudo-PIN + fingerprint all unlock via login.
+
+[3] gh + git identity:
+      Already wired if the first-login planter ran (see ~/.gitconfig.local).
+      Otherwise: open a new terminal and `gh auth login` once.
+
+[4] Azure DDNS (metis.rhombus.rocks):
+      One-time service principal setup (run on this laptop or any machine
+      with the az CLI — `az` is now installed locally either way):
+
+        az login
+        SUB=$(az account show --query id -o tsv)
+        RG=<resource-group-with-the-DNS-zone>      # fnrhombus knows this
+        ZONE_ID=$(az network dns zone show -g "$RG" -n rhombus.rocks --query id -o tsv)
+        az ad sp create-for-rbac \
+            --name metis-ddns \
+            --role "DNS Zone Contributor" \
+            --scopes "$ZONE_ID" \
+            --years 2
+
+      Paste the output into /etc/metis-ddns.env  (mode 600, root):
+        AZ_TENANT_ID=<tenant>
+        AZ_CLIENT_ID=<appId>
+        AZ_CLIENT_SECRET=<password>
+        AZ_SUBSCRIPTION_ID=<SUB>
+        AZ_RESOURCE_GROUP=<RG>
+        # zone + record already set; DDNS_DISABLE_IPV4=1 is the default
+        # (router blocks v4 anyway). Flip to 0 if you ever expose v4.
+
+      Then:
+        sudo systemctl start metis-ddns.service
+        sudo journalctl -u metis-ddns -n 20
+      First call may 403 (role propagation, ~30s–5min) — just retry.
+      The timer + NetworkManager hook take over after first success.
+
+[5] Let's Encrypt cert for metis.rhombus.rocks (after step 4 succeeds):
+      Mirror the same SP creds into /etc/letsencrypt/azure.ini using its
+      INI keys (template already in place), then:
+
+        sudo certbot certonly \
+            --authenticator dns-azure \
+            --dns-azure-credentials /etc/letsencrypt/azure.ini \
+            --dns-azure-propagation-seconds 60 \
+            -d metis.rhombus.rocks \
+            --agree-tos -m <your-email> --no-eff-email
+
+      certbot-renew.timer is already enabled — it'll renew within 30d
+      of expiry, twice daily, with no further action.
+
+[6] Firewall:
+      Already on (default deny in, allow out, 22/tcp ALLOW for ssh).
+        sudo ufw status verbose          # confirm
+        sudo ufw allow <port>/tcp        # add a rule
+        sudo ufw delete allow <port>/tcp # remove
+      Rules apply to BOTH IPv4 and IPv6 — ufw is dual-stack.
+
+See runbook/INSTALL-RUNBOOK.md (printed PDF) for the same instructions
+in case this output scrolls off.
+====================================================================
+POSTINSTALL_OUTRO

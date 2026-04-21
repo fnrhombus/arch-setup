@@ -18,7 +18,7 @@ This repo's deliverables map to these phases. [docs/decisions.md](docs/decisions
 | 0.5 | CLI-stack shakedown (optional) | `archlinux` WSL distro on the user's current machine | [wsl-setup.sh](wsl-setup.sh) → [wsl-cli-test.sh](wsl-cli-test.sh) |
 | 1 | Windows install | Ventoy USB → Windows Setup | [autounattend.xml](autounattend.xml) + [ventoy/ventoy.json](ventoy/ventoy.json) |
 | 2 | Arch bare-metal install | Ventoy USB → Arch live ISO | [phase-2-arch-install/install.sh](phase-2-arch-install/install.sh) → [phase-2-arch-install/chroot.sh](phase-2-arch-install/chroot.sh) |
-| 3 | Arch post-install / teaching | Booted Arch, logged in as `tom` | [phase-3-arch-postinstall/postinstall.sh](phase-3-arch-postinstall/postinstall.sh) (+ `p10k.zsh` sidecar). [runbook/phase-3-handoff.md](runbook/phase-3-handoff.md) briefs the next Claude session. |
+| 3 | Arch post-install / teaching | Booted Arch, logged in as `tom` | [phase-3-arch-postinstall/postinstall.sh](phase-3-arch-postinstall/postinstall.sh). [runbook/phase-3-handoff.md](runbook/phase-3-handoff.md) briefs the next Claude session. |
 | 3.5 | 2-in-1 hardware wiring (deferred) | Booted Arch | [runbook/phase-3.5-hardware-handoff.md](runbook/phase-3.5-hardware-handoff.md) |
 | 6 | Reclaim space for Windows (future) | Arch live USB or recovery partition | [phase-6-grow-windows.sh](phase-6-grow-windows.sh) |
 
@@ -70,7 +70,7 @@ Everything else at the repo root is a deliverable the install itself consumes (s
 
 ### Phase 3 — Arch post-install
 - [phase-3-arch-postinstall/postinstall.sh](phase-3-arch-postinstall/postinstall.sh) — First-boot script run as `tom`. Installs yay, AUR packages (VSCode, Edge), zgenom + plugins, chezmoi, fprintd enrollment, etc.
-- [phase-3-arch-postinstall/p10k.zsh](phase-3-arch-postinstall/p10k.zsh) — Pre-shipped powerlevel10k config lifted from the `fnwsl` setup — prevents the first shell from dropping into the p10k configure wizard. Copied to `~/.p10k.zsh` by postinstall.sh.
+- **No pre-shipped `p10k.zsh` sidecar** — removed 2026-04-21 per user preference. `~/.p10k.zsh` is now authored by `p10k configure` on first zsh launch. The sidecar file was previously lifted from the `fnwsl` setup; history in git if the answer changes.
 
 ### Phase 6 — reclaim space for Windows (optional, future)
 - [phase-6-grow-windows.sh](phase-6-grow-windows.sh) — Run from the Arch live environment (USB **or** the Netac recovery partition). Shrinks the btrfs partition by doing `btrfs device add` → `btrfs device remove` onto a new partition at the tail of the Samsung, which moves the free space to be adjacent to Windows so Disk Management's Extend Volume works. Has an EXIT trap that prints explicit recovery recipes if the migration fails mid-flight.
@@ -90,7 +90,7 @@ There is no build, lint, or test target. Work is almost entirely **editing markd
 ## Context that should influence every edit
 
 - **The target machine cannot use NVIDIA under Wayland.** MX250 requires nvidia-470xx, which lacks GBM. Any suggestion involving Optimus/nvidia on this hardware is wrong — Intel UHD 620 only, external monitor via HDMI (wired to iGPU), NVIDIA modules blacklisted.
-- **User does not enjoy config tweaking.** Choose opinionated defaults with sane upgrade paths. The `end-4/illogical-impulse` Hyprland dotfiles are the baseline — don't suggest building Hyprland config from scratch.
+- **User does not enjoy config tweaking.** Choose opinionated defaults with sane upgrade paths. The `HyDE-Project/HyDE` Hyprland dotfiles are the baseline (switched from end-4/illogical-impulse on 2026-04-20 — see `docs/decisions.md` §Q3); don't suggest building Hyprland config from scratch. Omarchy is a closer fit but requires the limine bootloader (out of scope until/unless we redo phase 2).
 - **tmux is required, not optional.** It's there for Claude Code's worktree workflow (Zellij is not supported). Prefix is `Ctrl+a`, carried from the prior `fnwsl` setup.
 - **Dotfiles will be managed by `chezmoi`** eventually — don't propose `stow` or plain symlinks.
 - **Shell stack is locked:** zsh + zgenom + powerlevel10k + the plugin list in `wsl-cli-test.sh`. Mirror any plugin change across both the `.zshrc` block *and* the pre-build block at the bottom of that script, or the zgenom cache will be stale on first login.
@@ -99,6 +99,10 @@ There is no build, lint, or test target. Work is almost entirely **editing markd
 
 - Markdown checkboxes (`- [ ]`) in `docs/decisions.md` track unmet requirements — tick them as work completes, don't delete them.
 - Platform-specific notes in prose should stay plain; the `[Windows]`/`[WSL]` annotation convention is for the user's global `~/.claude/CLAUDE.md`, not for this repo's content.
+
+## Working style
+
+- **Always do as much work in parallel as is reasonably possible.** Independent tool calls should go in a single message with multiple tool blocks; independent edits to different files should batch; independent research questions should fan out via parallel `Agent` calls. Do not serialize work that has no dependency. (Web/mobile Claude Code does not support a user-level `~/.claude/CLAUDE.md`, so this lives here as the project-scoped equivalent until that surface gains one.)
 
 ## Commit discipline
 

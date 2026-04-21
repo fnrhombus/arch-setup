@@ -90,6 +90,23 @@ The inline PowerShell safety check in `autounattend.xml` aborted because either 
 2. Ventoy menu → pick **`archlinux-x86_64.iso`** → "Boot in normal mode". (The filename is always the undated symlink — `fetch-assets.ps1` mirrors that, not a dated release.)
 3. At the Arch ISO menu, pick **"Arch Linux install medium (x86_64, UEFI)"**. You land at a root shell.
 
+**If step 3 fails with `ERROR: Failed to mount '/dev/loop0'` + `EXT4-fs: VFS: Can't find ext4 filesystem`:** archiso copied the rootfs image to RAM but couldn't loop-mount it. Two causes, try in order:
+
+1. **Ventoy ISO-virtualization hiccup** (tried first because it's a 30-second retry). Reboot, Ventoy menu, arrow onto `archlinux-x86_64.iso`, press **`d`** to toggle Memdisk mode (status indicator appears next to the filename), then Enter. Memdisk loads the whole ISO into RAM before boot, bypassing Ventoy's loopback layer. The 7786's 16 GB RAM easily absorbs the 1.3 GB ISO.
+
+2. **Corrupt ISO on the USB.** If Memdisk mode fails with the same error, the ISO file itself is bad (download or robocopy corrupted it — `fetch-assets.ps1` and `stage-usb.ps1` both SHA256-verify post-op now, but older sticks may predate that). Go back to the dev machine:
+
+   ```powershell
+   # Replace V: with the Ventoy data drive letter
+   CertUtil -hashfile V:\archlinux-x86_64.iso SHA256
+   Get-Content V:\archlinux-sha256sums.txt | Select-String archlinux-x86_64.iso
+   ```
+   If the two hashes don't match, re-download + re-stage:
+   ```powershell
+   pnpm restore:force   # re-downloads + verifies the Arch ISO
+   pnpm stage:force     # re-copies + verifies on the USB
+   ```
+
 ### 2b. Network
 
 - **Ethernet via USB-C dock is the primary path** — plug it in before booting. `install.sh` pings `archlinux.org`; if ethernet is up, it skips Wi-Fi entirely.
@@ -271,6 +288,96 @@ sudo reboot
 
 After the re-login: Bitwarden auto-unlocks (via gnome-keyring), and `ssh-add -l` lists your keys with no prompt.
 
+### 3e-bis. Azure DDNS one-time setup (`metis.rhombus.rocks`)
+
+`postinstall.sh` installs the `metis-ddns` script + systemd timer + NetworkManager dispatcher hook + the `az` CLI, and stubs `/etc/metis-ddns.env` from a template. **You still have to fill in the service-principal credentials once.**
+
+On this laptop (or any machine with `az` CLI):
+
+```bash
+az login                                 # device-code flow, opens browser
+SUB=$(az account show --query id -o tsv)
+RG=<your-DNS-resource-group>             # the one containing rhombus.rocks
+ZONE_ID=$(az network dns zone show -g "$RG" -n rhombus.rocks --query id -o tsv)
+az ad sp create-for-rbac \
+    --name metis-ddns \
+    --role "DNS Zone Contributor" \
+    --scopes "$ZONE_ID" \
+    --years 2
+```
+
+Last command prints `appId`, `password`, `tenant`. Paste them into `/etc/metis-ddns.env` (mode 600, root-owned — `sudoedit /etc/metis-ddns.env`):
+
+```ini
+AZ_TENANT_ID=<tenant>
+AZ_CLIENT_ID=<appId>
+AZ_CLIENT_SECRET=<password>
+AZ_SUBSCRIPTION_ID=<SUB>
+AZ_RESOURCE_GROUP=<RG>
+AZ_DNS_ZONE=rhombus.rocks
+AZ_DNS_RECORD=metis
+DDNS_DISABLE_IPV4=1                      # IPv6-only — flip to 0 if you ever expose v4
+```
+
+Kick the first run:
+
+```bash
+sudo systemctl start metis-ddns.service
+sudo journalctl -u metis-ddns -n 30
+```
+
+First call may 403 with "AuthorizationFailed" — Azure role assignments propagate in 30s–5min. Wait, retry. After first success, the timer + NM hook take over and you don't think about it again until the SP secret expires in 2 years.
+
+**Verify from the outside** (any machine, even your phone):
+
+```bash
+dig AAAA metis.rhombus.rocks +short
+```
+
+Should return your laptop's current public IPv6 address.
+
+### 3e-ter. Let's Encrypt cert for `metis.rhombus.rocks`
+
+Only useful **after step 3e-bis succeeds** (DNS must resolve before the dns-01 challenge will).
+
+`postinstall.sh` installs `certbot` + the `certbot-dns-azure` plugin and stubs `/etc/letsencrypt/azure.ini` from a template. Same SP that DDNS uses works here — `DNS Zone Contributor` already lets it write the TXT challenge records.
+
+Mirror the SP creds into `/etc/letsencrypt/azure.ini` (the keys differ from the DDNS env file because certbot's plugin uses its own INI scheme):
+
+```ini
+dns_azure_environment = "AzurePublicCloud"
+dns_azure_tenant_id = <tenant>
+dns_azure_subscription_id = <SUB>
+dns_azure_resource_group = <RG>
+dns_azure_sp_client_id = <appId>
+dns_azure_sp_client_secret = <password>
+```
+
+Issue the cert (one-time):
+
+```bash
+sudo certbot certonly \
+    --authenticator dns-azure \
+    --dns-azure-credentials /etc/letsencrypt/azure.ini \
+    --dns-azure-propagation-seconds 60 \
+    -d metis.rhombus.rocks \
+    --agree-tos -m <your-email> --no-eff-email
+```
+
+Cert lands at `/etc/letsencrypt/live/metis.rhombus.rocks/{fullchain,privkey}.pem`. `certbot-renew.timer` is already enabled by postinstall — it'll renew within 30d of expiry, twice daily, with no further action.
+
+### 3e-quater. Firewall — confirm and tweak
+
+`postinstall.sh` enables `ufw` with default-deny incoming, default-allow outgoing, and `22/tcp ALLOW` for SSH (Callisto pubkey already in `~/.ssh/authorized_keys`). Rules apply to **both IPv4 and IPv6** — ufw is dual-stack out of the box.
+
+```bash
+sudo ufw status verbose                  # confirm "Status: active", "Default: deny (incoming)"
+sudo ufw allow <port>/tcp                # add a rule
+sudo ufw delete allow <port>/tcp         # remove a rule
+```
+
+Why this matters: your router can globally enable/disable IPv6 TCP to Metis but can't filter per port. With IPv6 there's no NAT — every device gets a publicly routable address, so anything bound to a port on the laptop is exposed when the router-side toggle is on. ufw is the per-port gate on the host side.
+
 ### 3f. Sanity checks
 
 ```bash
@@ -425,11 +532,52 @@ reboot
 ```
 If editing fstab from emergency mode is scary: add `systemd.unit=rescue.target` to the kernel command line in systemd-boot (press `e` on the Arch entry at boot, append to `options=`), which gives a full single-user shell with `/` writable.
 
-### C. BitLocker recovery prompt on next Windows boot
+### C. BitLocker recovery prompt on next Windows boot (and keeps prompting)
 
-**This is expected, not a failure.** systemd-boot installing itself to the shared EFI rewrites the PCR values the TPM sealed BitLocker against. First Windows boot after Arch install → blue "Enter recovery key" screen.
+**First prompt is expected, not a failure.** systemd-boot installing itself to the shared EFI rewrites the PCR values the TPM sealed BitLocker against. First Windows boot after Arch install → blue "Enter recovery key" screen. Type the 48-digit key (stored in Bitwarden as "Inspiron BitLocker recovery" per Phase 1 step 7) to get in.
 
-**Fix:** Type the 48-digit key (stored in Bitwarden as "Inspiron BitLocker recovery" per Phase 1 step 7). Windows unseals, re-seals to the new PCRs. Never prompts again unless the bootloader changes.
+**But Windows does NOT auto-reseal the TPM protector just because you entered the recovery key** — that path unlocks the drive but leaves the TPM protector sealed against the *old* (pre-Arch) PCRs. So the next boot, and the next, and the next will all keep prompting unless you force a re-seal.
+
+**Fix (elevated PowerShell, after you've unlocked into Windows with the recovery key):**
+
+```powershell
+# 1. Sanity-check Fast Startup is OFF (we disable it via autounattend, but confirm
+#    — resume-from-hibernate shuffles PCRs and would re-break the seal on every wake).
+#    Fast Startup requires hibernation; if hibernation is off, Fast Startup is off too.
+powercfg /a
+#    Look for "Hibernation has not been enabled" in the NOT-available section.
+#    DO NOT grep for "hybrid" — that matches "Hybrid Sleep", a different feature.
+#    Definitive registry check (0 = off = good, 1 = on, missing = hiberation off):
+(Get-ItemProperty 'HKLM:\SYSTEM\CurrentControlSet\Control\Session Manager\Power' -Name HiberbootEnabled -ErrorAction SilentlyContinue).HiberbootEnabled
+# If Fast Startup is on, disable it first:
+#   powercfg /h off
+
+# 2. Suspend BitLocker until manually re-enabled. Data stays encrypted; the unlock
+#    key is stored in clear on disk temporarily. -RebootCount 0 means "stay
+#    suspended until I say so" (not "0 reboots remaining").
+manage-bde -protectors -disable C: -RebootCount 0
+
+# 3. Reboot. No BitLocker prompt this time (protection suspended).
+shutdown /r /t 0
+
+# 4. Back in Windows, re-enable. This re-seals the TPM protector against
+#    *current* PCR values (i.e. the new systemd-boot → WBM → Windows chain).
+manage-bde -protectors -enable C:
+
+# 5. Confirm: TPM protector should show as "Enabled" again.
+manage-bde -protectors -get C:
+```
+
+After that, every subsequent boot unlocks via TPM silently. The boot chain needs to stay stable for this to hold — if something later changes it (systemd-boot update rewriting its EFI binary, Windows update replacing the boot manager, firmware update changing Secure Boot state), you'll get prompted once more and have to run the same dance.
+
+**Nuclear option: turn BitLocker off.** You already have LUKS on the Linux side. If your Windows partition doesn't need encryption-at-rest (home dev laptop, not regulated-device territory), decrypting removes the entire class of problem:
+
+```powershell
+manage-bde -off C:         # background decryption, ~30-60 min for 160 GB
+manage-bde -status C:      # watch progress
+```
+
+Trade-off: stolen laptop + removed drive + NTFS reader = your Windows files are readable.
 
 ### D. Hostname shows as `Metis` on the network, not `inspiron`
 

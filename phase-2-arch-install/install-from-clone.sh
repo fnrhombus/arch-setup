@@ -1,29 +1,23 @@
 #!/usr/bin/env bash
-# phase-2-arch-install/install.sh
+# phase-2-arch-install/install-from-clone.sh
 #
-# Run from the Arch live environment (boot the ISO from Ventoy, pick
-# the "archlinux-*x86_64.iso" entry — filename rolls monthly). This script reads every decision
-# from decisions.md §Q9 and lays down Arch on:
-#   - Samsung 512 GB SSD : LUKS2 + btrfs in the trailing ~316 GB unallocated space
-#                          (EFI/MSR/Windows partitions are left untouched)
-#   - Netac 128 GB SSD   : recovery ISO (1.5 GB, unencrypted) + LUKS2 swap (16 GB,
-#                          random key per boot) + LUKS2 ext4 (~110 GB, keyfile-unlocked)
+# Variant of install.sh for when the repo is already cloned locally
+# (e.g. /tmp/arch-setup) inside the Arch live environment — no Ventoy
+# USB mount required. All source files (chroot.sh, phase-3 scripts) are
+# read from the clone directory.
 #
-# Full-disk encryption per decisions.md §Q11 — parity with Windows BitLocker.
-# One passphrase unlocks both LUKS volumes at install; post-install phase 3
-# enrolls TPM2 so boot becomes silent (passphrase stays as recovery fallback).
-#
-# All disk operations are size-gated: the script aborts if the expected
-# disks are absent or if anything looks off. Never silently clobbers.
+# Trade-off: the recovery-partition step (dd the Arch ISO onto Netac)
+# is SKIPPED, since the cloned repo doesn't carry the ISO (gitignored).
+# Write the recovery ISO manually later if you want it:
+#   sudo dd if=/path/to/archlinux-x86_64.iso of=<NETAC_RECOVERY> bs=4M conv=fsync
 #
 # Usage:
-#   iwctl                                  # connect wifi (station wlan0 connect <ssid>)
-#   bash /run/ventoy/phase-2-arch-install/install.sh
+#   pacman -Sy --noconfirm git
+#   git clone -b <branch> https://github.com/fnrhombus/arch-setup /tmp/arch-setup
+#   iwctl                                  # connect wifi if no ethernet
+#   bash /tmp/arch-setup/phase-2-arch-install/install-from-clone.sh
 #
-# The script self-mounts the Ventoy data partition at /run/ventoy on start
-# (see section 0.5). You do not need to mount it yourself — the obvious
-# `mount /dev/disk/by-label/Ventoy` fails with "Can't open blockdev" because
-# Ventoy holds the USB disk exclusively via dm-linear for ISO serving.
+# See install.sh for the USB-mounting variant used off a Ventoy stick.
 
 set -euo pipefail
 
@@ -106,66 +100,15 @@ confirm() {
 command -v pacstrap >/dev/null          || die "pacstrap missing — not in Arch live env?"
 command -v cryptsetup >/dev/null        || die "cryptsetup missing — not in Arch live env? (FDE requires it)"
 
-# ---------- 0.5 Ventoy data partition ----------
-# Ventoy boots the Arch ISO via a dm-linear target on /dev/sdX. While that
-# parent disk can still be read (dm is a passthrough, not an exclusive
-# claim), the kernel-synthesised partition node /dev/sdX1 is held busy by
-# archiso's probe hooks — so `mount /dev/sdX1` and even
-# `dmsetup create ... linear /dev/sdX1 0` both fail with "Device or
-# resource busy".
-#
-# The documented workaround (https://www.ventoy.net/en/doc_compatible_mount.html)
-# is to build a fresh dm-linear against the parent disk at partition 1's
-# sector offset, and mount *that* mapper device.
-VENTOY_MNT=/run/ventoy
-if ! mountpoint -q "$VENTOY_MNT"; then
-    # Find the USB disk. Prefer the "ventoy" dm target (present on the
-    # initial boot), but if the stick was unplugged + replugged the target
-    # is orphaned; fall back to blkid-by-label, then any USB-TRAN disk.
-    # Every fallback is wrapped in `|| true` so set -e doesn't kill us
-    # inside the command substitution before we can diagnose.
-    VENTOY_DISK=$(dmsetup deps -o devname ventoy 2>/dev/null \
-        | grep -oE '[sv]d[a-z]+|nvme[0-9]+n[0-9]+' | head -n1 || true)
-
-    if [[ -z "$VENTOY_DISK" ]]; then
-        # blkid -L Ventoy prints e.g. /dev/sdb1; PKNAME strips to the parent disk.
-        PART_NODE=$(blkid -L Ventoy 2>/dev/null || true)
-        if [[ -n "$PART_NODE" ]]; then
-            VENTOY_DISK=$(lsblk -ndo PKNAME "$PART_NODE" 2>/dev/null || true)
-        fi
-    fi
-
-    if [[ -z "$VENTOY_DISK" ]]; then
-        VENTOY_DISK=$(lsblk -ndo NAME,TRAN 2>/dev/null \
-            | awk '$2=="usb"{print $1; exit}' || true)
-    fi
-
-    [[ -n "$VENTOY_DISK" ]] || die "Could not locate the Ventoy USB disk (tried dmsetup/blkid/lsblk). Is the stick plugged in?"
-
-    # NVMe partitions are nvme0n1 → nvme0n1p1; SATA/USB are sdX → sdX1.
-    # Only used as the dm mapper name — we target /dev/$VENTOY_DISK below.
-    if [[ "$VENTOY_DISK" == nvme* ]]; then VENTOY_PART="${VENTOY_DISK}p1"
-    else                                   VENTOY_PART="${VENTOY_DISK}1"
-    fi
-
-    # Create the passthrough against the parent disk + partition 1 offset
-    # (idempotent across retries).
-    if [[ ! -e "/dev/mapper/$VENTOY_PART" ]]; then
-        PART_START=$(partx -g -o START "/dev/$VENTOY_DISK" | head -n1 | awk '{print $1}')
-        PART_SIZE=$(partx  -g -o SECTORS "/dev/$VENTOY_DISK" | head -n1 | awk '{print $1}')
-        [[ "$PART_START" =~ ^[0-9]+$ && "$PART_SIZE" =~ ^[0-9]+$ ]] \
-            || die "Could not read partition 1 geometry from /dev/$VENTOY_DISK."
-        echo "0 $PART_SIZE linear /dev/$VENTOY_DISK $PART_START" | dmsetup create "$VENTOY_PART" \
-            || die "dmsetup create $VENTOY_PART failed."
-    fi
-
-    mkdir -p "$VENTOY_MNT"
-    mount -o ro "/dev/mapper/$VENTOY_PART" "$VENTOY_MNT" \
-        || die "Failed to mount /dev/mapper/$VENTOY_PART at $VENTOY_MNT."
-    log "Ventoy data partition mounted at $VENTOY_MNT (ro, via dm passthrough)."
-fi
+# ---------- 0.5 repo root (clone variant) ----------
+# Read source files from the script's own parent directory instead of the
+# Ventoy USB. $VENTOY_MNT is retained as the variable name so the rest of
+# the script (chroot.sh copy, phase-3 staging) is unchanged from install.sh.
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+VENTOY_MNT="$(dirname "$SCRIPT_DIR")"
+log "Using local clone at $VENTOY_MNT (no USB mount)."
 [[ -f "$VENTOY_MNT/phase-2-arch-install/chroot.sh" ]] \
-    || die "$VENTOY_MNT is mounted but chroot.sh is missing — wrong USB stick?"
+    || die "$VENTOY_MNT/phase-2-arch-install/chroot.sh missing — is this really a clone of the repo?"
 
 # ---------- 1. locate disks by size ----------
 # decisions.md §Q9: Samsung 512 GB nominal (~476 GiB actual), Netac 128 GB nominal (~119 GiB actual).
@@ -467,18 +410,12 @@ rm -f /mnt/root/.pw /mnt/root/.luks
 # Passphrase was only needed for luksFormat + luksAddKey; scrub from memory.
 unset LUKS_PW
 
-# ---------- 12. recovery partition ----------
-log "Writing Arch ISO to recovery partition $NETAC_RECOVERY..."
-ARCH_ISO=$(ls "$VENTOY_MNT"/archlinux-*.iso 2>/dev/null | head -1 || true)
-[[ -n "$ARCH_ISO" && -f "$ARCH_ISO" ]] || die "No Arch ISO found on Ventoy."
-# Size-gate: NETAC_RECOVERY is 1536 MiB. A larger ISO would dd past the
-# partition boundary into NETAC_SWAP with no error, silently corrupting swap.
-ISO_BYTES=$(stat -c%s "$ARCH_ISO")
-PART_BYTES=$(blockdev --getsize64 "$NETAC_RECOVERY")
-if (( ISO_BYTES > PART_BYTES )); then
-    die "Arch ISO ($ISO_BYTES bytes) is larger than recovery partition ($PART_BYTES bytes). Resize NETAC_RECOVERY in install.sh or use a smaller ISO."
-fi
-dd if="$ARCH_ISO" of="$NETAC_RECOVERY" bs=4M status=progress conv=fsync
+# ---------- 12. recovery partition (SKIPPED in clone variant) ----------
+# The repo clone doesn't carry the Arch ISO (gitignored). Leaving
+# NETAC_RECOVERY empty is safe — systemd-boot entry for recovery will
+# just fail to boot until you populate it. To fill it later:
+#   sudo dd if=/path/to/archlinux-x86_64.iso of=$NETAC_RECOVERY bs=4M conv=fsync
+warn "Skipping recovery-partition ISO write — clone variant. Populate $NETAC_RECOVERY manually later."
 
 # ---------- 13. post-install hook ----------
 # Stage phase-3 script where the user can run it after first login.
