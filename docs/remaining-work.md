@@ -30,30 +30,16 @@ Ordered snapshot of what's still open across the arch-setup repo as of 2026-04-2
 
 ## `staged-azure-ddns/` → `fnrhombus/azure-ddns` split-out
 
-The `staged-azure-ddns/` directory in this repo is the shape of the future standalone repo. User asked to keep it private initially (AUR / public release after one-user success).
+The `staged-azure-ddns/` directory in this repo is the shape of the future standalone repo. **Its own dedicated handoff for the new-repo Claude session lives at [`staged-azure-ddns/HANDOFF.md`](../staged-azure-ddns/HANDOFF.md)** — that doc is self-contained and briefs a cold-start session on everything it needs to do (verify PKGBUILD, tag v0.1.0, AUR submission, known gaps, design choices to preserve).
+
+User asked to keep the new repo private initially (AUR / public release after one-user success).
 
 **I (Claude on Claude-Code-on-the-web) cannot create the repo** — my GitHub MCP tools are scoped to `fnrhombus/arch-setup` only. The user (or a Claude Code session with broader scope) needs to do the create step.
 
 - [ ] Create private repo `fnrhombus/azure-ddns` on GitHub.
-- [ ] Copy `staged-azure-ddns/*` to the new repo's root (keep directory structure — `bin/`, `systemd/`, `dispatcher.d/`, top-level `README.md` / `LICENSE` / `PKGBUILD` / `azure-ddns.env.template`).
-- [ ] Tag `v0.1.0` for the PKGBUILD's source URL to resolve.
-- [ ] Test the PKGBUILD in a fresh Arch container or VM:
-  ```
-  makepkg -si
-  sudo systemctl start azure-ddns.service
-  ```
-  on a fake SP (or a throwaway Azure subscription with a test zone). Confirms install paths, file modes, dep closure.
-- [ ] Replace `arch-setup/phase-3-arch-postinstall/metis-ddns/` with a submodule pointing at the new repo, OR keep it as-is and sync manually on changes.
-- [ ] Flip the new repo to public once the AUR package lands and at least one external user reports success.
-- [ ] Submit `azure-ddns` to AUR. PKGBUILD is ready (source URL tied to the GitHub release tag). `namcap PKGBUILD` first to catch obvious lint.
-- [ ] (Optional) Post a brief intro on r/AZURE or r/archlinux for discovery.
-
-### Known gaps in the staged shape (capture as GitHub issues after repo creation)
-
-- [ ] Multi-record-per-host: would need `azure-ddns@.service` templated unit + per-instance `/etc/azure-ddns/<instance>.env`. Current design is single-record. User doesn't need this yet; file the issue.
-- [ ] No `--dry-run` / `--test` flag. Useful for validating config without minting a token.
-- [ ] No MX / TXT / CNAME record types. User asked only for A+AAAA; record scope is fine for MVP.
-- [ ] PKGBUILD assumes release tarball. Could add a `-git` variant that builds from HEAD.
+- [ ] Copy `staged-azure-ddns/*` to the new repo's root (keep directory structure).
+- [ ] Hand the new session `staged-azure-ddns/HANDOFF.md` — it takes over from there.
+- [ ] Once the new repo is live, replace `arch-setup/phase-3-arch-postinstall/metis-ddns/` with a submodule pointing at it, or keep it as-is and sync manually on changes.
 
 ## Repo hygiene
 
