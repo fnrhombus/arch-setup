@@ -72,6 +72,10 @@ WORK_DIR="$REPO_ROOT/phase-1-iso/work"
 [[ -d "$PROFILE_DIR" ]] || die "Profile dir missing: $PROFILE_DIR"
 [[ -f "$PROFILE_DIR/profiledef.sh" ]] || die "profiledef.sh missing in $PROFILE_DIR"
 
+# rsync is used to stage the payload. It's in base-devel on Arch; on a
+# fresh WSL distro it may need `pacman -S rsync` up front.
+command -v rsync >/dev/null || die "rsync not found on host — install with: sudo pacman -S rsync"
+
 mkdir -p "$OUT_DIR"
 
 # ---------- payload staging ----------
