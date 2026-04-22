@@ -365,3 +365,123 @@ Script-level impact:
 
 Not in scope of this memo: UKI migration. That's a separate follow-on
 once Secure Boot + limine are proven on real hardware.
+
+---
+
+## 4. Authentication stacks (PIN / password / fingerprint)
+
+Three auth methods are in play:
+- **Password** — `pam_unix.so` reading `/etc/shadow`.
+- **PIN** — `pam_pinpam.so` from the `pinpam-git` AUR package. PIN is
+  stored in TPM NVRAM (not `/etc/shadow`); the TPM enforces the attempt
+  counter in hardware (§5 of pinpam's SECURITY.md). Returns
+  `AUTHINFO_UNAVAIL` when no PIN is set, so `sufficient` falls through
+  cleanly on first boot before `pinutil setup` has been run.
+- **Fingerprint** — `pam_fprintd.so` driving fprintd over D-Bus. Goodix
+  538C reader on `libfprint-tod-git`. Has `max-tries=` and `timeout=`
+  module options — `timeout=-1` means "always active," positive values
+  give up after N seconds ([`man pam_fprintd`]).
+
+### The hardware constraint that drives every stack
+
+The laptop spends 90% of its life under the user's desk. The fingerprint
+reader (power button on the Dell 7786) is **only reachable at cold boot**,
+before the laptop goes under the desk. Once docked:
+
+- hyprlock wakes → hand can't reach the reader → a blocking finger prompt
+  is unusable.
+- sudo prompts → same problem; forcing the user to Ctrl+C past a finger
+  prompt to reach a PIN field is broken UX.
+
+Therefore fingerprint is offered at exactly one surface: SDDM cold-boot.
+The other two surfaces (sudo, hyprlock) must NEVER present a fingerprint
+prompt, even as a dismissable option — no fprintd in those stacks.
+
+### Target stacks
+
+| Surface  | Primary | Fallback(s)        | Fingerprint? |
+|----------|---------|--------------------|--------------|
+| SDDM     | password (typed)  | fingerprint shortcut (short timeout) | yes, `max-tries=1 timeout=10` |
+| hyprlock | PIN     | password (typed)   | NO |
+| sudo     | PIN     | password (typed)   | NO |
+
+All three stacks use `pam_pinpam.so` or `pam_fprintd.so` with `sufficient`
+control at the top, so a clean fallthrough to `pam_unix` preserves the
+last-resort password path. `pam_unix.so` is never removed from any stack —
+it stays the unconditional fallback.
+
+### Root cause of each observed bug on the live system
+
+1. **SDDM: "Password" field accepts PIN, then asks for finger after.** The
+   live `/etc/pam.d/sddm` had `auth sufficient pam_fprintd.so` hand-
+   prepended AND the original stack underneath (verified in-situ 2026-04-21).
+   pam_fprintd scans while the user types; if the user hits Enter first,
+   the stack falls through to `system-login` → pam_unix **and** — because
+   of how SDDM's own conversation loop works — fprintd's D-Bus prompt is
+   still active, so the user sees a finger prompt after the password. The
+   "PIN works in the password field" is an incidental side-effect of
+   `postinstall.sh`'s `sed -i '1i pam_pinpam.so'` loop having touched SDDM
+   in an earlier run (or the user manually). pam_pinpam with `sufficient`
+   at line 1 accepts whatever the greeter feeds and, if it matches a TPM-
+   stored PIN, authenticates — but then the fprintd line still fires. The
+   fix is to own the whole file (not `sed -i 1i`) and keep pam_pinpam out
+   of it.
+
+2. **hyprlock: PIN silently rejected, only password works.** The live
+   hyprlock stack has `auth sufficient pam_pinpam.so` prepended — that
+   part is correct. But the user has no PIN provisioned (`pinutil status`
+   returns `{"Ok":null}` and the TPM NVRAM is empty). pinpam returns
+   `AUTHINFO_UNAVAIL` → fallthrough to `login` → pam_unix → the user's
+   typed string is evaluated as a password, not a PIN. The fix is two-fold:
+   (a) run `pinutil setup` as part of postinstall (already there at §7),
+   (b) make sure postinstall doesn't silently skip it under non-TTY
+   re-runs without warning. Not a PAM-stack bug per se.
+
+3. **sudo: fingerprint prompts first, Ctrl+C falls to password, PIN never
+   offered.** The live sudo stack has fprintd at line 1 *above* pam_pinpam
+   — postinstall's `sed -i '1i'` on the for-loop puts pinpam at line 1,
+   but the `sudo` file was also hand-edited to include fprintd (or a
+   previous `end-4` postinstall run authored it). When sudo evaluates the
+   stack, fprintd runs first and blocks on a D-Bus prompt to the reader.
+   Fix: fully overwrite `/etc/pam.d/sudo` with a stack that contains
+   `pam_pinpam.so sufficient` + `include system-auth` and NOTHING ELSE.
+
+### Why PIN is more secure than a weak password (the Windows Hello pitch)
+
+A password is a **symmetric secret**: the exact same string the user types
+also exists somewhere as a hash (`/etc/shadow` locally, or a password
+database on a server). Dump the hash, brute-force it offline, impersonate
+the user anywhere they reuse the password. A TPM-backed PIN is **user-
+provided entropy that unseals a hardware-bound private key**: the PIN
+itself isn't stored anywhere off the TPM chip; the TPM uses it to unlock
+a key that never leaves silicon. Three things follow from that: (a) the
+PIN is useless off this specific laptop — there's no hash to exfiltrate,
+no credential to reuse on another machine; (b) the TPM enforces anti-
+hammering in hardware, so `pam_tally` / `pam_faillock` races aren't the
+only line of defence — a clone of `/etc/shadow` on a stolen disk can be
+brute-forced at line rate, a clone of the TPM's NVRAM cannot; (c) on
+Windows, PINs are additionally gated by **PCR measurements** so a booted-
+but-tampered OS can't unseal the key either (we don't use that for pinpam,
+but we do use it for LUKS via PCR 0+7 — same primitive, same idea).
+Cold-boot still demands a full password on Windows because PCR values
+haven't stabilised yet and the TPM hasn't handed out a session — once
+you're logged in and the TPM has a trusted session, a short PIN is
+provably at least as strong as a long password, because the ceiling on
+attempts is enforced below the OS. Microsoft's
+[Windows Hello FAQ](https://learn.microsoft.com/en-us/windows/security/identity-protection/hello-for-business/faq)
+phrases it as "the PIN is stronger than a password — not because of
+entropy, but because of the difference between providing entropy vs.
+using a symmetric key."
+
+### Script-level impact
+
+`postinstall.sh` §7a now owns all three PAM files end-to-end via `tee`
+heredocs (previously §7 used `sed -i '1i'` which was not idempotent
+across format changes and didn't touch SDDM). The verify block gains five
+extra checks: pinpam in sudo + hyprlock, fprintd-only-in-sddm, pinpam-
+NOT-in-sddm, pam_unix present in system-auth.
+
+Sources:
+- [`man pam_fprintd(8)`](https://manpages.debian.org/testing/libpam-fprintd/pam_fprintd.8) — `max-tries=`, `timeout=`, and the note that "the PAM stack is by design a serialised authentication, so it is not possible for pam_fprintd to allow authentication through passwords and fingerprints at the same time" (so parallel prompts are the app's job, not PAM's).
+- [Windows Hello for Business FAQ](https://learn.microsoft.com/en-us/windows/security/identity-protection/hello-for-business/faq) — PIN vs. password threat model.
+- [pinpam source `pinpam-pam/src/lib.rs`](https://github.com/RazeLighter777/pinpam/blob/main/pinpam-pam/src/lib.rs) — returns `AUTHINFO_UNAVAIL` when no PIN is set, which is the clean-fallthrough signal PAM's `sufficient` stanza needs.
