@@ -368,7 +368,7 @@ once Secure Boot + limine are proven on real hardware.
 
 ---
 
-## 4. Authentication stacks (PIN / password / fingerprint)
+## 5. Authentication stacks (PIN / password / fingerprint)
 
 Three auth methods are in play:
 - **Password** — `pam_unix.so` reading `/etc/shadow`.
@@ -382,33 +382,41 @@ Three auth methods are in play:
   module options — `timeout=-1` means "always active," positive values
   give up after N seconds ([`man pam_fprintd`]).
 
-### The hardware constraint that drives every stack
+### Design invariants
 
 The laptop spends 90% of its life under the user's desk. The fingerprint
-reader (power button on the Dell 7786) is **only reachable at cold boot**,
-before the laptop goes under the desk. Once docked:
+reader (power button on the Dell 7786) is only physically reachable at
+cold boot, before the laptop goes under the desk. Once docked, the hand
+can't reach the reader — so any PAM surface that **blocks** on a
+fingerprint prompt is broken UX.
 
-- hyprlock wakes → hand can't reach the reader → a blocking finger prompt
-  is unusable.
-- sudo prompts → same problem; forcing the user to Ctrl+C past a finger
-  prompt to reach a PIN field is broken UX.
+Two invariants drive all three stacks:
 
-Therefore fingerprint is offered at exactly one surface: SDDM cold-boot.
-The other two surfaces (sudo, hyprlock) must NEVER present a fingerprint
-prompt, even as a dismissable option — no fprintd in those stacks.
+1. **Fingerprint is always an option** at every surface. Never removed.
+2. **Fingerprint is never required** and never the first prompt at a
+   surface where the reader is unreachable. At sudo and hyprlock, PIN
+   prompts first — the common case (user types PIN, done) never sees the
+   finger prompt at all. If a user Ctrl+C's past PIN, the finger module
+   runs next with `max-tries=1 timeout=5`: one attempt, five-second wait,
+   then fall through to password. No lingering prompts.
+
+At SDDM (cold boot) the finger IS reachable, so it goes first with
+`timeout=10`; the user can touch the reader or type a password and
+whichever lands first wins.
 
 ### Target stacks
 
-| Surface  | Primary | Fallback(s)        | Fingerprint? |
-|----------|---------|--------------------|--------------|
-| SDDM     | password (typed)  | fingerprint shortcut (short timeout) | yes, `max-tries=1 timeout=10` |
-| hyprlock | PIN     | password (typed)   | NO |
-| sudo     | PIN     | password (typed)   | NO |
+| Surface  | Prompt order                                        | PIN | Finger | Password |
+|----------|-----------------------------------------------------|-----|--------|----------|
+| SDDM     | fingerprint (10s) → password                        | —   | yes    | yes      |
+| hyprlock | PIN → fingerprint (5s) → password                   | yes | yes    | yes      |
+| sudo     | PIN → fingerprint (5s) → password                   | yes | yes    | yes      |
 
-All three stacks use `pam_pinpam.so` or `pam_fprintd.so` with `sufficient`
-control at the top, so a clean fallthrough to `pam_unix` preserves the
-last-resort password path. `pam_unix.so` is never removed from any stack —
-it stays the unconditional fallback.
+All three stacks use `pam_pinpam.so` / `pam_fprintd.so` with `sufficient`
+control so any one match ends the auth successfully. `pam_unix.so` is
+never removed — it stays the unconditional fallback via the
+`system-auth` / `system-login` / `login` include at the end of each
+stack.
 
 ### Root cause of each observed bug on the live system
 
@@ -477,9 +485,11 @@ using a symmetric key."
 
 `postinstall.sh` §7a now owns all three PAM files end-to-end via `tee`
 heredocs (previously §7 used `sed -i '1i'` which was not idempotent
-across format changes and didn't touch SDDM). The verify block gains five
-extra checks: pinpam in sudo + hyprlock, fprintd-only-in-sddm, pinpam-
-NOT-in-sddm, pam_unix present in system-auth.
+across format changes and didn't touch SDDM). The verify block checks
+module presence at every surface (pinpam at sudo+hyprlock, fprintd at
+all three with the expected `max-tries=1` + `timeout=N` options, no
+pinpam at sddm) plus ordering (`pinpam` before `fprintd` at sudo and
+hyprlock so the common PIN case never sees a finger prompt).
 
 Sources:
 - [`man pam_fprintd(8)`](https://manpages.debian.org/testing/libpam-fprintd/pam_fprintd.8) — `max-tries=`, `timeout=`, and the note that "the PAM stack is by design a serialised authentication, so it is not possible for pam_fprintd to allow authentication through passwords and fingerprints at the same time" (so parallel prompts are the app's job, not PAM's).

@@ -502,26 +502,34 @@ else
 fi
 
 # ---------- 7a. PAM stacks for sudo / hyprlock / SDDM ----------
-# Three surfaces, three different stacks — see docs/reinstall-planning.md §4.
+# Three surfaces, three different stacks — see docs/reinstall-planning.md §5.
 #
-#   sudo     : PIN primary + password fallback. NO fingerprint (reader is
-#              under-the-desk unreachable once the laptop is in its day
-#              position — user refuses to Ctrl+C past a finger prompt to
-#              get to the PIN field).
-#   hyprlock : PIN primary + password fallback. NO fingerprint, same
-#              ergonomic reason — lockscreen wakes happen while the laptop
-#              is under the desk.
-#   sddm     : password primary + fingerprint optional (short timeout).
-#              NO PIN. This matches Windows Hello's "cold sign-in requires
-#              full password" pattern and is the one surface where the
-#              user's hand can physically reach the reader (cold boot,
-#              laptop still on the desk).
+# Design invariant: fingerprint is ALWAYS an option and NEVER required.
+# User's finger can only physically reach the reader at cold boot (the
+# laptop goes under the desk after login). Primary auth at sudo/hyprlock
+# is therefore PIN (fast, one-handed, works docked); fingerprint is still
+# wired in as a second-position sufficient module with a short timeout so
+# a user who did leave a finger within reach can still use it — but PIN
+# prompts first, so the common case never sees a blocking finger prompt.
+#
+#   sudo     : PIN → fingerprint(5s) → password. PIN primary; finger as a
+#              5s-timeout shortcut; pam_unix via system-auth as fallback.
+#   hyprlock : PIN → fingerprint(5s) → password. Same shape; `login`
+#              include provides pam_unix fallback.
+#   sddm     : fingerprint(10s) → password. NO PIN at cold boot — matches
+#              Windows Hello's "cold sign-in requires full password"
+#              pattern (TPM hasn't stabilised PCR state yet), and this is
+#              the one surface where the reader is physically reachable,
+#              so finger goes first with a longer timeout.
 #
 # pam_pinpam returns AUTHINFO_UNAVAIL when no PIN is provisioned, so
-# 'sufficient' falls through cleanly to pam_unix — first-boot (pre-
-# `pinutil setup`) still works. pam_fprintd supports `max-tries=` and
-# `timeout=`; we set them tight at SDDM so the greeter doesn't hang
-# waiting on a reader nobody's touching.
+# 'sufficient' falls through cleanly to pam_fprintd/pam_unix — first-boot
+# (pre-`pinutil setup`) still works.
+#
+# pam_fprintd options: `max-tries=1` = one finger attempt then fail;
+# `timeout=5` at sudo/hyprlock = give up after 5s of no finger and move
+# on to the password prompt, so Ctrl+C isn't needed. `timeout=10` at SDDM
+# because the reader IS reachable there and the user may be mid-reach.
 #
 # NEVER remove pam_unix from the stack via `system-auth`/`system-login`/
 # `login` includes — that's the last-resort password path.
@@ -529,22 +537,28 @@ fi
 # Fully idempotent: tee overwrites with identical bytes on re-run.
 log "Writing PAM stacks for sudo / hyprlock / sddm..."
 
-# sudo: PIN → password. No fingerprint.
+# sudo: PIN → fingerprint(5s) → password.
 sudo tee /etc/pam.d/sudo >/dev/null <<'SUDOPAMEOF'
 #%PAM-1.0
-# arch-setup: PIN primary, password fallback. See postinstall.sh §7a.
+# arch-setup: PIN primary, fingerprint optional (5s timeout), password fallback.
+# See postinstall.sh §7a.
 auth        sufficient  pam_pinpam.so
+auth        sufficient  pam_fprintd.so              max-tries=1 timeout=5
 auth        include     system-auth
 account     include     system-auth
 session     include     system-auth
 SUDOPAMEOF
 
-# hyprlock: PIN → password. No fingerprint (can't reach the reader once
-# locked; finger-only wakes are a UX trap the user explicitly rejected).
+# hyprlock: PIN → fingerprint(5s) → password. Finger is unlikely to be
+# reachable while the laptop is docked, but including it preserves the
+# "any one of three methods" invariant and only costs a 5s timeout in
+# the uncommon case where the user Ctrl+C'd past the PIN prompt.
 sudo tee /etc/pam.d/hyprlock >/dev/null <<'HYPRLOCKPAMEOF'
 #%PAM-1.0
-# arch-setup: PIN primary, password fallback. See postinstall.sh §7a.
+# arch-setup: PIN primary, fingerprint optional (5s timeout), password fallback.
+# See postinstall.sh §7a.
 auth        sufficient  pam_pinpam.so
+auth        sufficient  pam_fprintd.so              max-tries=1 timeout=5
 auth        include     login
 HYPRLOCKPAMEOF
 
@@ -1329,12 +1343,14 @@ echo "-- secrets / auth --"
 check "fprintd enabled"     "systemctl is-enabled fprintd"
 check "fprintd enrolled"    "fprintd-list tom 2>/dev/null | grep -q 'Fingerprints for user tom'"
 check "pinutil (TPM PIN)"   "test -x /usr/bin/pinutil || command -v pinutil"
-check "pinpam in sudo"      "grep -q pam_pinpam /etc/pam.d/sudo"
-check "pinpam in hyprlock"  "grep -q pam_pinpam /etc/pam.d/hyprlock"
-check "no pinpam in sddm"   "! grep -q pam_pinpam /etc/pam.d/sddm"
-check "fprintd in sddm"     "grep -q 'pam_fprintd.*max-tries=1' /etc/pam.d/sddm"
-check "no fprintd in sudo"  "! grep -q pam_fprintd /etc/pam.d/sudo"
-check "no fprintd in hyprlk" "! grep -q pam_fprintd /etc/pam.d/hyprlock"
+check "pinpam in sudo"       "grep -q pam_pinpam /etc/pam.d/sudo"
+check "pinpam in hyprlock"   "grep -q pam_pinpam /etc/pam.d/hyprlock"
+check "no pinpam in sddm"    "! grep -q pam_pinpam /etc/pam.d/sddm"
+check "fprintd in sddm"      "grep -q 'pam_fprintd.*max-tries=1.*timeout=10' /etc/pam.d/sddm"
+check "fprintd in sudo"      "grep -q 'pam_fprintd.*max-tries=1.*timeout=5' /etc/pam.d/sudo"
+check "fprintd in hyprlock"  "grep -q 'pam_fprintd.*max-tries=1.*timeout=5' /etc/pam.d/hyprlock"
+check "pinpam before fprintd sudo" "awk '/pam_pinpam/{p=NR} /pam_fprintd/{f=NR} END{exit !(p && f && p<f)}' /etc/pam.d/sudo"
+check "pinpam before fprintd hyprlock" "awk '/pam_pinpam/{p=NR} /pam_fprintd/{f=NR} END{exit !(p && f && p<f)}' /etc/pam.d/hyprlock"
 check "pam_unix in sys-auth" "grep -q pam_unix /etc/pam.d/system-auth"
 check "LUKS root TPM2"      "sudo systemd-cryptenroll /dev/disk/by-partlabel/ArchRoot 2>/dev/null | awk 'NR>1 && \$2==\"tpm2\"{f=1} END{exit !f}'"
 check "cryptvar keyfile"    "sudo test -f /etc/cryptsetup-keys.d/cryptvar.key"
