@@ -474,7 +474,7 @@ fi
 
 # ---------- 7. pinpam TPM-PIN setup ----------
 # pinutil setup asks for a fresh PIN and stores it in TPM NVRAM.
-# Configured as 'sufficient' in PAM so your Linux password stays as fallback.
+# PAM wiring for PIN lives in §7a below (sudo + hyprlock only — not SDDM).
 if command -v pinutil >/dev/null; then
     if [[ -z "${SKIP_PIN:-}" ]]; then
         # `pinutil setup` reads the new PIN interactively from stdin. Without a
@@ -497,17 +497,87 @@ if command -v pinutil >/dev/null; then
             warn "No TTY — skipping 'pinutil setup'. Run it manually after login: sudo pinutil setup"
         fi
     fi
-    log "Wiring pinpam into sudo, polkit, hyprlock PAM stacks..."
-    for svc in sudo polkit-1 hyprlock; do
-        f="/etc/pam.d/$svc"
-        [[ -f "$f" ]] || continue
-        if ! sudo grep -q pam_pinpam "$f"; then
-            sudo sed -i '1i auth       sufficient   pam_pinpam.so' "$f"
-        fi
-    done
 else
     warn "pinutil not found; skipping TPM-PIN setup."
 fi
+
+# ---------- 7a. PAM stacks for sudo / hyprlock / SDDM ----------
+# Three surfaces, three different stacks — see docs/reinstall-planning.md §4.
+#
+#   sudo     : PIN primary + password fallback. NO fingerprint (reader is
+#              under-the-desk unreachable once the laptop is in its day
+#              position — user refuses to Ctrl+C past a finger prompt to
+#              get to the PIN field).
+#   hyprlock : PIN primary + password fallback. NO fingerprint, same
+#              ergonomic reason — lockscreen wakes happen while the laptop
+#              is under the desk.
+#   sddm     : password primary + fingerprint optional (short timeout).
+#              NO PIN. This matches Windows Hello's "cold sign-in requires
+#              full password" pattern and is the one surface where the
+#              user's hand can physically reach the reader (cold boot,
+#              laptop still on the desk).
+#
+# pam_pinpam returns AUTHINFO_UNAVAIL when no PIN is provisioned, so
+# 'sufficient' falls through cleanly to pam_unix — first-boot (pre-
+# `pinutil setup`) still works. pam_fprintd supports `max-tries=` and
+# `timeout=`; we set them tight at SDDM so the greeter doesn't hang
+# waiting on a reader nobody's touching.
+#
+# NEVER remove pam_unix from the stack via `system-auth`/`system-login`/
+# `login` includes — that's the last-resort password path.
+#
+# Fully idempotent: tee overwrites with identical bytes on re-run.
+log "Writing PAM stacks for sudo / hyprlock / sddm..."
+
+# sudo: PIN → password. No fingerprint.
+sudo tee /etc/pam.d/sudo >/dev/null <<'SUDOPAMEOF'
+#%PAM-1.0
+# arch-setup: PIN primary, password fallback. See postinstall.sh §7a.
+auth        sufficient  pam_pinpam.so
+auth        include     system-auth
+account     include     system-auth
+session     include     system-auth
+SUDOPAMEOF
+
+# hyprlock: PIN → password. No fingerprint (can't reach the reader once
+# locked; finger-only wakes are a UX trap the user explicitly rejected).
+sudo tee /etc/pam.d/hyprlock >/dev/null <<'HYPRLOCKPAMEOF'
+#%PAM-1.0
+# arch-setup: PIN primary, password fallback. See postinstall.sh §7a.
+auth        sufficient  pam_pinpam.so
+auth        include     login
+HYPRLOCKPAMEOF
+
+# SDDM: password primary, fingerprint optional. Short fprintd timeout so
+# the greeter doesn't stall for 30s on every cold boot when the user
+# intends to type the password.
+#
+# max-tries=1 : one finger attempt, then fail & fall through.
+# timeout=10  : give up after 10s of no finger rather than the 30s default.
+#
+# pam_fprintd is 'sufficient' — if the finger matches, login is done
+# without asking for the password. If fprintd fails or times out, the
+# stack continues to system-login → pam_unix for the password the user
+# is already typing into the SDDM field.
+sudo tee /etc/pam.d/sddm >/dev/null <<'SDDMPAMEOF'
+#%PAM-1.0
+# arch-setup: password primary, fingerprint optional (short timeout).
+# See postinstall.sh §7a.
+auth        sufficient  pam_fprintd.so              max-tries=1 timeout=10
+auth        include     system-login
+-auth       optional    pam_gnome_keyring.so
+-auth       optional    pam_kwallet5.so
+
+account     include     system-login
+
+password    include     system-login
+-password   optional    pam_gnome_keyring.so        use_authtok
+
+session     optional    pam_keyinit.so              force revoke
+session     include     system-login
+-session    optional    pam_gnome_keyring.so        auto_start
+-session    optional    pam_kwallet5.so             auto_start
+SDDMPAMEOF
 
 # ---------- 7.5 LUKS TPM2 autounlock (FDE per decisions.md §Q11) ----------
 # install.sh sets the LUKS passphrase (key slot 0) at install time; this
@@ -1260,6 +1330,12 @@ check "fprintd enabled"     "systemctl is-enabled fprintd"
 check "fprintd enrolled"    "fprintd-list tom 2>/dev/null | grep -q 'Fingerprints for user tom'"
 check "pinutil (TPM PIN)"   "test -x /usr/bin/pinutil || command -v pinutil"
 check "pinpam in sudo"      "grep -q pam_pinpam /etc/pam.d/sudo"
+check "pinpam in hyprlock"  "grep -q pam_pinpam /etc/pam.d/hyprlock"
+check "no pinpam in sddm"   "! grep -q pam_pinpam /etc/pam.d/sddm"
+check "fprintd in sddm"     "grep -q 'pam_fprintd.*max-tries=1' /etc/pam.d/sddm"
+check "no fprintd in sudo"  "! grep -q pam_fprintd /etc/pam.d/sudo"
+check "no fprintd in hyprlk" "! grep -q pam_fprintd /etc/pam.d/hyprlock"
+check "pam_unix in sys-auth" "grep -q pam_unix /etc/pam.d/system-auth"
 check "LUKS root TPM2"      "sudo systemd-cryptenroll /dev/disk/by-partlabel/ArchRoot 2>/dev/null | awk 'NR>1 && \$2==\"tpm2\"{f=1} END{exit !f}'"
 check "cryptvar keyfile"    "sudo test -f /etc/cryptsetup-keys.d/cryptvar.key"
 check "ssh agent wired"     "grep -q bitwarden-ssh-agent.sock $HOME/.ssh/config"
