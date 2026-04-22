@@ -193,9 +193,11 @@ fi
 # build (Anthropic ships no official Linux binary). `-native` variant is the
 # community-recommended one — `-bin` has recurring ffmpeg dep issues. Lags
 # official releases; expect occasional breakage on Anthropic updates.
-log "Installing AUR-exclusive apps (VSCode, Edge, Claude desktop, pinpam-git, SDDM theme, iio-hyprland-git)..."
+log "Installing AUR-exclusive apps (VSCode, Edge, Claude desktop, pinpam-git, SDDM theme, iio-hyprland-git, powershell-bin)..."
 # iio-hyprland is published on AUR as `iio-hyprland-git` (no tagged release).
 # certbot-dns-azure is NOT in AUR — installed via pipx inject below (step 4d).
+# powershell-bin: Microsoft's prebuilt pwsh tarball. `powershell` (source)
+# builds from .NET SDK and takes noticeably longer; bin is the pragmatic pick.
 yay -S --noconfirm --needed \
     visual-studio-code-bin \
     microsoft-edge-stable-bin \
@@ -204,7 +206,8 @@ yay -S --noconfirm --needed \
     pinpam-git \
     sesh \
     wvkbd \
-    iio-hyprland-git
+    iio-hyprland-git \
+    powershell-bin
 
 # ---------- 3a. certbot-dns-azure plugin (pipx — not packaged for Arch) ----------
 # certbot-dns-azure is PyPI-only: not in extra, not in AUR, not community-
@@ -1188,6 +1191,7 @@ echo "-- shell + core CLI --"
 check "zsh"                 "command -v zsh"
 check "tmux"                "command -v tmux"
 check "helix"               "command -v helix || command -v hx"
+check "pwsh (powershell)"   "command -v pwsh"
 check "yay"                 "command -v yay"
 check "mise"                "command -v mise"
 check "chezmoi"             "command -v chezmoi"
