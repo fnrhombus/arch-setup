@@ -19,6 +19,7 @@ comprehensive at any one time.
 
 ```
 hyprland hypridle hyprlock hyprpolkitagent
+greetd greetd-regreet      # greeter (replaces SDDM)
 waybar fuzzel mako cliphist wl-clipboard
 swww grim slurp satty hyprshot
 xdg-desktop-portal-gtk xdg-desktop-portal-hyprland
@@ -27,6 +28,25 @@ matugen                    # AUR — wallpaper-derived theme generator
 hyprexpo                   # Hyprland plugin — Mission-Control-style overview
 pacseek                    # TUI fuzzy package installer (or a fuzzel-launched yay wrapper)
 ```
+
+## Greeter
+
+**greetd + ReGreet** replaces the prior SDDM choice. greetd is a tiny daemon
+that handles "show login UI, then start session"; ReGreet is the GTK4 UI it
+displays. Together ~3 MB vs SDDM's ~21 MB.
+
+Why switched:
+- Theme is plain GTK CSS — matugen output drops in directly. SDDM's Qt
+  theme was a separate maintenance surface (the `catppuccin-sddm-theme-mocha`
+  package goes away with this switch).
+- Wayland-native; no Qt/Xorg legacy paths.
+- Fingerprint at greeter still works via the same PAM stack — load-bearing
+  per `decisions.md:17` (no battery → no suspend cycles → greeter is the
+  one auth moment of the day).
+
+Config: `/etc/greetd/config.toml` with `command = "Hyprland"` for direct
+session launch. ReGreet's CSS lives at `/etc/greetd/regreet.css` (matugen
+template target).
 
 ## Visual
 

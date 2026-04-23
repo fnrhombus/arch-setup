@@ -14,7 +14,7 @@
   - Lid-close "hibernate on battery" branch in `logind.conf` is dead code today (no battery state for logind to see). Configured anyway for forward-compat — fires automatically when a battery returns, no reconfig.
   - **Hibernation is enabled** (S4) on Linux. Reverses the prior "disabled" decision; the cited dual-boot/BitLocker risk doesn't apply (Linux swap is on the Netac, Windows can't see LUKS or btrfs). Until the battery is replaced, hibernate is **user-invoked** (`Super+Shift+H`) since AC removal is an instant hard-cut. Swap sized 16 GB to match RAM. Persistent LUKS swap, TPM2-keyfile-sealed (mirrors cryptvar). See `docs/desktop-requirements.md` §Hibernate for the full plan.
   - Abrupt shutdowns (power cable kick) are the norm. btrfs COW handles this well — no `fsync` required for metadata integrity. Good argument for btrfs over ext4 on root.
-  - SDDM is the primary moment of the day where the user authenticates (no suspend/resume cycles → no lock screens) — fingerprint at SDDM is therefore load-bearing, not cosmetic.
+  - The greeter is the primary moment of the day where the user authenticates (no suspend/resume cycles → no lock screens) — fingerprint at the greeter is therefore load-bearing, not cosmetic.
 
 ## Requirements
 - [x] Fingerprint scanner support (fprintd + libfprint). **Device: Goodix `27c6:538c`** — supported only via the AUR `libfprint-goodix-53xc` package (older Dell OEM blob, pre-v0.0.11) riding on `libfprint-tod-git`. Current upstream AUR `libfprint-2-tod1-goodix` / `-v2` ship a **550A-only** blob that does NOT cover 538C. `libfprint-tod-git` must be built with `!lto` in PKGBUILD options — LTO strips ABI symbol versioning and breaks the link. `postinstall.sh` pre-flights this automatically. Enrollment on a bare TTY needs `sudo fprintd-enroll -f <finger> tom` (polkit denies unprivileged enroll without a graphical session).
@@ -181,8 +181,11 @@
   pre-Ghostty fallback that lives in pacman `[extra]`.
 - **Ghostty theme config gotcha**: the bundled theme file name is `Catppuccin Mocha` (capital C, literal space), not `catppuccin-mocha`. `theme = "Catppuccin Mocha"` in `~/.config/ghostty/config`.
 
-#### D) Login screen: SDDM
-- Wayland-native, themeable, fingerprint integration
+#### D) Login screen: greetd + ReGreet
+- Wayland-native, themeable via plain GTK CSS (matugen drops in directly)
+- ~3 MB vs SDDM's ~21 MB; smaller surface area, no Qt
+- Fingerprint integration via the same PAM stack
+- **Switched from SDDM 2026-04-22**: bare-Hyprland reinstall doesn't need Plasma's greeter. SDDM's Qt theme was a separate maintenance surface; ReGreet aligns with the matugen pipeline used everywhere else.
 
 #### E) Notifications: mako
 - Wayland-native, lightweight, matches the foot/fuzzel/swww profile of the rest of the stack.
