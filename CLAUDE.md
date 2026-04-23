@@ -42,7 +42,8 @@ Everything else at the repo root is a deliverable the install itself consumes (s
 ## File roles
 
 ### docs/ — planning / rationale (dev machine)
-- [docs/decisions.md](docs/decisions.md) — Locked-in decisions with rationale: hardware spec, partition plan, Hyprland, systemd-boot, yay, Ghostty, SDDM, PipeWire, Catppuccin, chezmoi, etc. **Edit this when a decision changes** — don't let it drift from the other docs.
+- [docs/decisions.md](docs/decisions.md) — Locked-in decisions with rationale: hardware spec, partition plan, Hyprland, **limine** (replaced systemd-boot 2026-04-22), yay, Ghostty, **greetd + ReGreet** (replaced SDDM), PipeWire, **matugen / Material You** (replaced Catppuccin), chezmoi, etc. Plus the `Desktop component picks` block locking the smaller picks. **Edit this when a decision changes** — don't let it drift from the other docs.
+- [docs/desktop-requirements.md](docs/desktop-requirements.md) — Full spec for the bare-Hyprland + chezmoi-managed approach (matugen pipeline, manual hibernate workflow, GTK-CSS pipeline end to end, keybind philosophy, workspace strategy). Source of truth for the *implementation* of what decisions.md decided.
 - [docs/autounattend-oobe-patch.md](docs/autounattend-oobe-patch.md) — Record of patches already applied to the Schneegans-generated `autounattend.xml` (Samsung-by-size detection, 512 MB EFI, 160 GiB Windows, silent OOBE, disable hibernation/Fast Startup). **Always cross-check against docs/decisions.md §Q9 when editing.**
 - [docs/wsl-setup-lessons.md](docs/wsl-setup-lessons.md) — Hard-won WSL pitfalls harvested from a prior `fnwsl` repo (MTU 1350 before any network op, `GIT_TEMPLATE_DIR=""` on every clone, `ZGEN_DIR` must be set before sourcing zgenom, never use raw.githubusercontent.com, etc.). **Consult before touching any setup script** — these gotchas are silent and expensive.
 
@@ -66,7 +67,7 @@ Everything else at the repo root is a deliverable the install itself consumes (s
 
 ### Phase 2 — Arch bare-metal install
 - [phase-2-arch-install/install.sh](phase-2-arch-install/install.sh) — Main installer. Runs from the Arch live ISO. Auto-detects Samsung + Netac by size, prompts for root + `tom` passwords once at the top (hashed via `openssl passwd -6`, handed to chroot via mode-600 file), pacstraps, then calls `chroot.sh`.
-- [phase-2-arch-install/chroot.sh](phase-2-arch-install/chroot.sh) — Inside `arch-chroot /mnt`. Consumes the pre-hashed passwords, sets timezone + locale, creates user `tom`, installs systemd-boot, wires PAM for gnome-keyring + fprintd, seeds Wi-Fi profiles, enables services.
+- [phase-2-arch-install/chroot.sh](phase-2-arch-install/chroot.sh) — Inside `arch-chroot /mnt`. Consumes the pre-hashed passwords, sets timezone + locale, creates user `tom`, allocates TPM2 SHA-256 PCR bank, installs **limine** (UEFI binary to ESP fallback path + NVRAM entry + `/boot/limine.conf`), installs **greetd + greetd-regreet** (system-files at `phase-3-arch-postinstall/system-files/{greetd,pam.d}/`), writes hibernate-ready `/etc/crypttab.initramfs` (cryptroot + cryptswap with TPM2), pacman post-upgrade reseal hook, wires greetd PAM for gnome-keyring + fprintd, seeds Wi-Fi profiles, enables services.
 
 ### Phase 3 — Arch post-install
 - [phase-3-arch-postinstall/postinstall.sh](phase-3-arch-postinstall/postinstall.sh) — First-boot script run as `tom`. Installs yay, AUR packages (VSCode, Edge), zgenom + plugins, chezmoi, fprintd enrollment, etc.
@@ -90,7 +91,7 @@ There is no build, lint, or test target. Work is almost entirely **editing markd
 ## Context that should influence every edit
 
 - **The target machine cannot use NVIDIA under Wayland.** MX250 requires nvidia-470xx, which lacks GBM. Any suggestion involving Optimus/nvidia on this hardware is wrong — Intel UHD 620 only, external monitor via HDMI (wired to iGPU), NVIDIA modules blacklisted.
-- **User does not enjoy config tweaking.** Choose opinionated defaults with sane upgrade paths. The `HyDE-Project/HyDE` Hyprland dotfiles are the baseline (switched from end-4/illogical-impulse on 2026-04-20 — see `docs/decisions.md` §Q3); don't suggest building Hyprland config from scratch. Omarchy is a closer fit but requires the limine bootloader (out of scope until/unless we redo phase 2).
+- **User does not enjoy config tweaking — but Claude does it for them.** The "no excessive config tweaking" preference is filtered through "Claude does the tweaking efficiently." Result: NO opinionated dotfile pack (HyDE, ml4w, Caelestia all rejected). Configs are **Claude-authored and chezmoi-managed** at `dotfiles/` in this repo. Theme = matugen (Material You from wallpaper). Bootloader = limine. Greeter = greetd + ReGreet. The reinstall-design history is in `docs/reinstall-planning.md`.
 - **tmux is required, not optional.** It's there for Claude Code's worktree workflow (Zellij is not supported). Prefix is `Ctrl+a`, carried from the prior `fnwsl` setup.
 - **Dotfiles will be managed by `chezmoi`** eventually — don't propose `stow` or plain symlinks.
 - **Shell stack is locked:** zsh + zgenom + powerlevel10k + the plugin list in `wsl-cli-test.sh`. Mirror any plugin change across both the `.zshrc` block *and* the pre-build block at the bottom of that script, or the zgenom cache will be stale on first login.
