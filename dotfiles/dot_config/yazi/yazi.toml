@@ -1,7 +1,10 @@
 # yazi — TUI file manager. Theme is matugen-rendered to theme.toml
 # (separate file).
+#
+# Section was renamed `[manager]` → `[mgr]` in yazi 25.x (see
+# yazi-config/preset/yazi-default.toml upstream, current preset on main).
 
-[manager]
+[mgr]
 ratio          = [1, 4, 3]
 sort_by        = "natural"
 sort_sensitive = false
