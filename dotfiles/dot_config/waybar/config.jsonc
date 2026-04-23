@@ -1,0 +1,135 @@
+// waybar — Metis status bar config.
+// Modules per docs/desktop-requirements.md "Bar" section.
+// Colors live in colors.css (matugen-rendered); structure here.
+
+{
+    "layer": "top",
+    "position": "top",
+    "height": 30,
+    "spacing": 6,
+    "margin-top": 4,
+    "margin-left": 8,
+    "margin-right": 8,
+
+    "modules-left":   ["hyprland/workspaces", "hyprland/window"],
+    "modules-center": ["clock"],
+    "modules-right":  [
+        "tray",
+        "custom/notifications",
+        "custom/network",
+        "wireplumber",
+        "battery",
+        "custom/theme-toggle",
+        "custom/power"
+    ],
+
+    "hyprland/workspaces": {
+        "format": "{icon}",
+        "format-icons": {
+            "1": "1", "2": "2", "3": "3", "4": "4", "5": "5",
+            "6": "6", "7": "7", "8": "8", "9": "9",
+            "active": "●", "default": "○",
+            "urgent": ""
+        },
+        "on-click": "activate",
+        "sort-by-number": true,
+        "show-special": true,
+        "all-outputs": false
+    },
+
+    "hyprland/window": {
+        "format": "{title}",
+        "max-length": 60,
+        "separate-outputs": true
+    },
+
+    "clock": {
+        "format": "{:%a %b %-d  %H:%M}",
+        "format-alt": "{:%Y-%m-%d %H:%M:%S}",
+        "tooltip-format": "<big>{:%Y %B}</big>\n<tt><small>{calendar}</small></tt>",
+        "calendar": {
+            "mode": "year",
+            "mode-mon-col": 3,
+            "weeks-pos": "right",
+            "on-scroll": 1,
+            "format": {
+                "months":    "<span color='@primary'><b>{}</b></span>",
+                "weekdays":  "<span color='@tertiary'><b>{}</b></span>",
+                "today":     "<span color='@on-primary'><b><u>{}</u></b></span>"
+            }
+        },
+        "actions": {
+            "on-click-right": "mode",
+            "on-scroll-up":   "shift_up",
+            "on-scroll-down": "shift_down"
+        }
+    },
+
+    "tray": {
+        "icon-size": 18,
+        "spacing": 8,
+        "show-passive-items": true
+    },
+
+    "custom/notifications": {
+        "tooltip": false,
+        "format": "{icon} {}",
+        "format-icons": {
+            "notification":            " <span foreground='@primary'><sup></sup></span>",
+            "none":                    "",
+            "dnd-notification":        " <span foreground='@error'><sup></sup></span>",
+            "dnd-none":                "",
+            "inhibited-notification":  " <span foreground='@error'><sup></sup></span>",
+            "inhibited-none":          "",
+            "dnd-inhibited-notification": " <span foreground='@error'><sup></sup></span>",
+            "dnd-inhibited-none":      ""
+        },
+        "return-type": "json",
+        "exec-if": "which swaync-client",
+        "exec":     "swaync-client -swb",
+        "on-click":       "swaync-client -t -sw",
+        "on-click-right": "swaync-client -d -sw",
+        "escape": true
+    },
+
+    "custom/network": {
+        "exec":     "~/.config/waybar/modules/network.sh",
+        "interval": 10,
+        "return-type": "json",
+        "on-click":       "ghostty -e nmtui",
+        "on-click-right": "nm-connection-editor"
+    },
+
+    "wireplumber": {
+        "format": "{icon}  {volume}%",
+        "format-muted": "  muted",
+        "format-icons": ["", "", ""],
+        "on-click":        "swayosd-client --output-volume mute-toggle",
+        "on-click-right":  "pwvucontrol",
+        "scroll-step": 5
+    },
+
+    "battery": {
+        "interval": 30,
+        "states":   { "warning": 30, "critical": 15 },
+        "format":          "{icon}  {capacity}%",
+        "format-charging": "  {capacity}%",
+        "format-plugged":  "  AC",
+        "format-icons":    ["", "", "", "", ""],
+        "tooltip-format":  "{timeTo}, {power}W"
+    },
+
+    "custom/theme-toggle": {
+        "tooltip": false,
+        "exec":     "~/.config/waybar/modules/theme-toggle.sh",
+        "interval": "once",
+        "signal":   8,
+        "on-click": "~/.local/bin/theme-toggle"
+    },
+
+    "custom/power": {
+        "tooltip": false,
+        "format":   "",
+        "on-click": "wleave"
+    }
+}
