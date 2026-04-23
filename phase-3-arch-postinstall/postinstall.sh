@@ -487,11 +487,27 @@ if command -v pinutil >/dev/null; then
             # errexit (otherwise pipefail + set -e kills the script on pinutil's
             # non-zero exit before we can check for idempotency).
             if sudo pinutil setup 2>&1 | tee /tmp/pinutil-setup.log; then
-                log "TPM PIN set."
+                log "TPM PIN set (per pinutil)."
             elif grep -q 'already has a PIN' /tmp/pinutil-setup.log; then
                 log "TPM PIN already set — skipping (idempotent re-run)."
             else
                 warn "pinutil setup failed; PAM PIN unlock won't work until fixed."
+            fi
+            # CRITICAL: pinutil setup can return success while the TPM NV
+            # write actually failed (TPM NVRAM full, NV index conflict with
+            # BitLocker or LUKS-TPM2 enrollment, etc). `pinutil status`
+            # is unreliable too — it returns {"Ok":null} even when the
+            # NV handle errors out (TPM_RC_HANDLE / 0x18B). The reliable
+            # smoke test is `pinutil test < /dev/null` — returns NoPinSet
+            # if the PIN didn't actually persist.
+            if pinutil test < /dev/null 2>&1 | grep -q NoPinSet; then
+                warn "pinutil test reports NoPinSet immediately after setup."
+                warn "This means the TPM NV write failed silently (likely NV"
+                warn "index conflict with BitLocker/LUKS-TPM2). PAM PIN auth"
+                warn "will NOT work until you reclaim NV space:"
+                warn "  sudo tpm2_nvreadpublic   # see what's allocated"
+                warn "  sudo tpm2_nvundefine 0xXXXX  # free the conflicting slot"
+                warn "  sudo pinutil delete && sudo pinutil setup"
             fi
         else
             warn "No TTY — skipping 'pinutil setup'. Run it manually after login: sudo pinutil setup"
@@ -1351,6 +1367,7 @@ check "fprintd enabled"     "systemctl is-enabled fprintd"
 check "fprintd enrolled"    "fprintd-list tom 2>/dev/null | grep -q 'Fingerprints for user tom'"
 check "pinutil (TPM PIN)"   "test -x /usr/bin/pinutil || command -v pinutil"
 check "pinpam .so present"   "test -f /usr/lib/security/libpinpam.so"
+check "PIN actually persisted" "! pinutil test < /dev/null 2>&1 | grep -q NoPinSet"
 check "pinpam in sudo"       "grep -q libpinpam /etc/pam.d/sudo"
 check "pinpam in hyprlock"   "grep -q libpinpam /etc/pam.d/hyprlock"
 check "no pinpam in sddm"    "! grep -q libpinpam /etc/pam.d/sddm"

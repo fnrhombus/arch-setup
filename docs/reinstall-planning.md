@@ -493,15 +493,41 @@ phrases it as "the PIN is stronger than a password — not because of
 entropy, but because of the difference between providing entropy vs.
 using a symmetric key."
 
+### Known gotcha: pinutil setup can lie
+
+Discovered 2026-04-22 on the live system after the libpinpam.so fix
+landed: `pinutil setup` returned success and `pinutil status` returned
+`{"Ok":null}`, but pinpam at sudo time emitted "PIN authentication is
+not configured" and the journal showed `pinpam[…]: No PIN set for user
+tom (uid: 1000)`. The TPM was returning `TPM_RC_HANDLE` (`0x18B`) on the
+NV read — meaning the NV index pinutil expected to write to **didn't
+actually exist after setup "succeeded."** Most likely cause on this
+hardware: NV index conflict with BitLocker-stored keys + LUKS-TPM2
+enrollment already occupying scarce TPM NVRAM; pinutil's write silently
+no-op'd or was overwritten.
+
+The reliable smoke test is `pinutil test < /dev/null`. It returns
+`{"Err":"NoPinSet"}` (exit 1) when the PIN didn't actually persist,
+regardless of what `pinutil setup` or `pinutil status` claim. Both
+postinstall §7 (post-setup sanity check) and the verify block now use
+this as the gate — a silent NV write failure produces a loud warning
+with `tpm2_nvreadpublic` / `tpm2_nvundefine` recovery hints.
+
+On the upcoming clean reinstall this should not recur — fresh TPM,
+LUKS2 enrollment happens after PIN setup so the NV allocation order
+is predictable. If the redo *does* hit it again, the verify check will
+catch it on the first run instead of three sudo-prompts later.
+
 ### Script-level impact
 
-`postinstall.sh` §7a now owns all three PAM files end-to-end via `tee`
+`postinstall.sh` §7a owns all three PAM files end-to-end via `tee`
 heredocs (previously §7 used `sed -i '1i'` which was not idempotent
 across format changes and didn't touch SDDM). The verify block checks
 module presence at every surface (pinpam at sudo+hyprlock, fprintd at
 all three with the expected `max-tries=1` + `timeout=N` options, no
 pinpam at sddm) plus ordering (`pinpam` before `fprintd` at sudo and
-hyprlock so the common PIN case never sees a finger prompt).
+hyprlock so the common PIN case never sees a finger prompt) plus the
+PIN-actually-persisted smoke test described above.
 
 Sources:
 - [`man pam_fprintd(8)`](https://manpages.debian.org/testing/libpam-fprintd/pam_fprintd.8) — `max-tries=`, `timeout=`, and the note that "the PAM stack is by design a serialised authentication, so it is not possible for pam_fprintd to allow authentication through passwords and fingerprints at the same time" (so parallel prompts are the app's job, not PAM's).
