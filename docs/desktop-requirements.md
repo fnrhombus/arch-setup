@@ -358,10 +358,16 @@ themselves:
   /org/freedesktop/portal/desktop org.freedesktop.impl.portal.Settings ...`
   in addition to the per-component CSS reloads. Edge/Bitwarden pick it up
   automatically.
-- **Nudge the portal on resume.** `xdg-desktop-portal-hyprland` can race
-  with apps started right after `systemd-resume` — apps that read the
-  color scheme at startup never re-query. Add a `dispatcher = on,resume,...`
-  in hypridle config to trigger a re-broadcast.
+- **XDPH + hyprlock + dpms-off crash mitigation.** Unresolved bug as of
+  Sep 2025 (Arch BBS #308227, XDPH#62): XDPH segfaults in libwayland-client
+  during `CCWlOutput` cleanup when hypridle fires `dpms,off` after
+  hyprlock has locked, leaving the desktop unresponsive on resume.
+  Mitigation in `hypridle.conf`: explicit `unlock_cmd = notify-send ...`
+  to fire an activity event that re-arms the portal connection; don't
+  ignore `dbus_inhibit` or `systemd_inhibit`; ensure the dpms-off listener
+  fires AFTER the lock listener (offset timeout by 1s). The earlier note
+  in this doc about a `dispatcher = on,resume` flag was wrong — that
+  option doesn't exist in hypridle.
 - **hyprexpo workaround for issue #138.** Clicking the currently-visible
   workspace in the overview leaves focus stuck. In the keybind, always
   dispatch `workspace,e+0` before `hyprexpo:expo,off`. If this ever
