@@ -5,11 +5,13 @@ Print this. Keep it next to the laptop.
 Total wall-clock: ~90 min active, ~2 h with waits.
 
 You'll need:
-- Ventoy USB (already built + staged via `pnpm i` on the dev machine — whatever drive letter Windows mounts it at, e.g. `E:` or `F:`)
-- Wi-Fi SSID + password
+- **Boot medium with both ISOs + the repo staged.** Two paths:
+  - **Standard:** Ventoy USB built via `pnpm i` on the dev machine.
+  - **No-USB fallback** (Metis-specific — laptop's USB ports won't reliably boot Ventoy): use the **Netac SSD itself** as a Ventoy boot medium. From the *current* Arch install on Metis, run `sudo bash prep-netac-ventoy.sh` from the repo root. That wipes the Netac, installs Ventoy, populates with both ISOs + the repo. One-way door — covered in detail in `runbook/phase-0-handoff.md`.
+- Wi-Fi SSID + password (or USB-C dock for ethernet)
 - The Bitwarden master password (for later — Bitwarden desktop in Arch)
-- A second device (phone) to read this if you can't print
-- A safe place to stash **two** recovery secrets: the **BitLocker recovery key** (see Phase 1 step 7) and the **LUKS passphrase** you pick in Phase 2d
+- **Phone with Claude on it** for the install drive (paste `runbook/phase-0-handoff.md` into a fresh Claude conversation; it carries enough context to ride along).
+- A safe place to stash **two** recovery secrets: the **BitLocker recovery key** (Phase 1 step 7, "Metis BitLocker recovery") and the **LUKS recovery key** (Phase 2 — auto-generated and displayed once, "Metis LUKS recovery").
 
 What gets touched:
 - **Samsung 512 GB** → EFI + MSR + Windows 160 GB (BitLocker) + Arch LUKS+btrfs (~316 GB)
@@ -26,16 +28,20 @@ Three things to know before starting:
 
 ## Phase 0 — BIOS prep (5 min)
 
-1. Plug the Ventoy USB. Power on. Hammer **F2** to enter BIOS setup.
+1. Plug the Ventoy USB (or, if you ran `prep-netac-ventoy.sh`, the boot medium is the internal Netac — nothing to plug). Power on. Hammer **F2** to enter BIOS setup.
 2. Set:
    - **Boot Mode**: UEFI (not Legacy)
    - **Secure Boot**: **Disabled** for the install (limine UEFI binary isn't signed out of the box). `decisions.md` wants Secure Boot ON long-term; that's a separate later step using `sbctl` to enroll your own keys (see `phase-3-handoff.md` Upgrade Paths). Don't block on it now — get the install running first.
    - **SATA Operation**: AHCI (should already be; RAID/Intel RST will hide disks from Arch)
    - **Fast Boot**: Disabled (stops it skipping the boot menu)
    - **Fingerprint Reader**: **Enabled** (Dell BIOS hides this under Security → Fingerprint Reader on some firmware revisions). If it's disabled, Linux won't see the sensor at all and Phase 3 fingerprint enrollment will fail with "no devices".
-3. Save & exit. Hammer **F12** at the Dell logo → boot menu → pick the USB (something like "UEFI: SanDisk …" or the WD label).
+3. Save & exit. Hammer **F12** at the Dell logo → boot menu → pick the boot medium:
+   - **USB path**: something like "UEFI: SanDisk …" or the WD label.
+   - **Netac path**: usually labeled "Netac SSD …" or "Internal SSD" (whichever entry is *not* "Windows Boot Manager").
 
-**If the USB isn't in F12:** go back to BIOS → Boot Sequence → Add Boot Option, or make sure USB Boot is enabled. Secure Boot being on will also hide it.
+**If your boot medium isn't in F12:** go back to BIOS → Boot Sequence → Add Boot Option, or make sure USB Boot is enabled (USB path). Secure Boot being on will also hide it. For the Netac path: confirm it's listed in Boot Sequence at all — if `prep-netac-ventoy.sh` ran clean it should appear.
+
+> **Want a Claude session walking you through this on your phone?** Paste the contents of `runbook/phase-0-handoff.md` into a fresh Claude Code conversation as the first message. It carries Metis hardware context, the three-phase boot flow, the secrets-to-photograph list, and recovery doors — designed for thumb-typing on a 5-inch screen.
 
 ---
 

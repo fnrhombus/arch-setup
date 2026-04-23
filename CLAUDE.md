@@ -15,14 +15,17 @@ This repo's deliverables map to these phases. [docs/decisions.md](docs/decisions
 | # | Phase | Environment | Entry point(s) |
 |---|---|---|---|
 | 0 | USB prep (on dev machine) | Windows + PowerShell | `pnpm i` → [scripts/fetch-assets.ps1](scripts/fetch-assets.ps1) + [scripts/stage-usb.ps1](scripts/stage-usb.ps1) |
+| 0-alt | **Netac-Ventoy bootstrap** (Metis-only — when USB ports won't boot Ventoy) | Current Arch on Metis | [prep-netac-ventoy.sh](prep-netac-ventoy.sh) — wipes the Netac, installs Ventoy, populates with both ISOs + the repo. One-way door. |
 | 0.5 | CLI-stack shakedown (optional) | `archlinux` WSL distro on the user's current machine | [wsl-setup.sh](wsl-setup.sh) → [wsl-cli-test.sh](wsl-cli-test.sh) |
-| 1 | Windows install | Ventoy USB → Windows Setup | [autounattend.xml](autounattend.xml) + [ventoy/ventoy.json](ventoy/ventoy.json) |
-| 2 | Arch bare-metal install | Ventoy USB → Arch live ISO | [phase-2-arch-install/install.sh](phase-2-arch-install/install.sh) → [phase-2-arch-install/chroot.sh](phase-2-arch-install/chroot.sh) |
+| 1 | Windows install | Ventoy boot medium → Windows Setup | [autounattend.xml](autounattend.xml) + [ventoy/ventoy.json](ventoy/ventoy.json) |
+| 2 | Arch bare-metal install | Ventoy boot medium → Arch live ISO | [phase-2-arch-install/install.sh](phase-2-arch-install/install.sh) → [phase-2-arch-install/chroot.sh](phase-2-arch-install/chroot.sh) |
 | 3 | Arch post-install / teaching | Booted Arch, logged in as `tom` | [phase-3-arch-postinstall/postinstall.sh](phase-3-arch-postinstall/postinstall.sh). [runbook/phase-3-handoff.md](runbook/phase-3-handoff.md) briefs the next Claude session. |
 | 3.5 | 2-in-1 hardware wiring (deferred) | Booted Arch | [runbook/phase-3.5-hardware-handoff.md](runbook/phase-3.5-hardware-handoff.md) |
 | 6 | Reclaim space for Windows (future) | Arch live USB or recovery partition | [phase-6-grow-windows.sh](phase-6-grow-windows.sh) |
 
-Phase 1 only touches the Samsung SSD 840 PRO 512GB. The Netac 128GB is reserved entirely for Linux (recovery ISO + swap + `/var/log`+`/var/cache`, per [docs/decisions.md](docs/decisions.md) §Q9) and stays untouched until phase 2.
+Phase 1 only touches the Samsung SSD 840 PRO 512GB. The Netac 128GB is reserved entirely for Linux (recovery ISO + swap + `/var/log`+`/var/cache`, per [docs/decisions.md](docs/decisions.md) §Q9) once Phase 2 finishes — but during the **Phase 0-alt no-USB bootstrap**, the Netac transiently hosts Ventoy as a USB stand-in. Phase 2's `install.sh` re-wipes the Netac and rebuilds the §Q9 layout from scratch, so the Ventoy install is sacrificial.
+
+For phone-coaching the user through the install (BIOS prep, secret-photographing, troubleshooting), paste [runbook/phase-0-handoff.md](runbook/phase-0-handoff.md) into a fresh Claude conversation on the user's phone before they reboot.
 
 The whole end-to-end flow from a bare dev machine is:
 1. Clone this repo, `pnpm i` — fetches ISOs, detects the Ventoy USB, mirrors everything onto it.
