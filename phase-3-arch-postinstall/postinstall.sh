@@ -257,7 +257,8 @@ yay -S --noconfirm --needed \
     overskride \
     wleave \
     bibata-cursor-theme \
-    pacseek
+    pacseek \
+    limine-snapper-sync
 
 # ---------- 3a. certbot-dns-azure plugin (pipx — not packaged for Arch) ----------
 # certbot-dns-azure is PyPI-only: not in extra, not in AUR, not community-
@@ -1004,38 +1005,11 @@ ALIASEOF
 log "Pre-building zgenom plugin cache (so first login is fast)..."
 zsh -i -c 'echo zgenom warmup complete' 2>/dev/null || warn "zgenom warmup had issues; first login will rebuild."
 
-# ---------- 11. tmux config ----------
-log "Writing ~/.tmux.conf..."
-cat > "$HOME/.tmux.conf" <<'TMUXEOF'
-# Ctrl+a prefix (carried from fnwsl)
-unbind C-b
-set -g prefix C-a
-bind C-a send-prefix
-
-set -g mouse on
-set -g history-limit 50000
-set -g base-index 1
-setw -g pane-base-index 1
-set -g renumber-windows on
-set -g default-terminal "tmux-256color"
-set -ag terminal-overrides ",xterm-256color:RGB,ghostty:RGB"
-
-bind | split-window -h -c "#{pane_current_path}"
-bind - split-window -v -c "#{pane_current_path}"
-bind c new-window -c "#{pane_current_path}"
-
-set -g @plugin 'tmux-plugins/tpm'
-set -g @plugin 'tmux-plugins/tmux-sensible'
-set -g @plugin 'catppuccin/tmux#v2.1.3'
-set -g @catppuccin_flavor 'mocha'
-run '~/.tmux/plugins/tpm/tpm'
-TMUXEOF
-
-if [[ ! -d "$HOME/.tmux/plugins/tpm" ]]; then
-    GIT_TEMPLATE_DIR="" git clone https://github.com/tmux-plugins/tpm "$HOME/.tmux/plugins/tpm"
-fi
-"$HOME/.tmux/plugins/tpm/scripts/install_plugins.sh" >/dev/null 2>&1 || \
-    warn "tpm install deferred to first tmux run"
+# ---------- 11. tmux config — handled by chezmoi (§13) ----------
+# dotfiles/dot_tmux.conf is the source of truth (Ctrl+a prefix, splits open
+# in pane CWD for the Claude Code worktree workflow, matugen-rendered colors
+# via ~/.config/tmux/colors.conf). No tpm — sesh-bin (§3 yay) covers session
+# switching, and matugen replaces the catppuccin/tmux plugin's coloring.
 
 # ---------- 12. Helix config — handled by chezmoi (§13) ----------
 # dotfiles/dot_config/helix/config.toml is the source of truth (theme = matugen).
@@ -1049,8 +1023,9 @@ fi
 # "Claude does the tweaking." Now: Claude-authored configs live in
 # /root/arch-setup/dotfiles, applied via chezmoi.
 #
-# Theme is matugen (Material You from wallpaper). Catppuccin references
-# in old code paths are stale — see desktop-requirements.md "Carry-forwards".
+# Theme is matugen (Material You from wallpaper) — every component (waybar,
+# swaync, fuzzel, ghostty, helix, hypr-colors, tmux, gtk, qt) reads colors
+# from a matugen-rendered template. See dotfiles/dot_config/matugen/config.toml.
 #
 # Idempotent: chezmoi's `apply` is a no-op when source matches dest.
 DOTFILES_SRC="/root/arch-setup/dotfiles"
@@ -1245,8 +1220,8 @@ check "yazi"                "command -v yazi"
 
 echo "-- terminal stack --"
 check "ghostty"             "command -v ghostty"
-check "foot (fallback)"     "command -v foot"
 check "ghostty config"      "test -f $HOME/.config/ghostty/config && grep -q 'theme = matugen' $HOME/.config/ghostty/config"
+check "tmux config (chezmoi)" "test -f $HOME/.tmux.conf && grep -q 'C-a' $HOME/.tmux.conf"
 
 echo "-- Hyprland (bare, chezmoi-managed) --"
 check "hyprland config"     "test -f $HOME/.config/hypr/hyprland.conf"
@@ -1321,6 +1296,7 @@ check "ufw default deny in" "sudo ufw status verbose | grep -qi 'Default: deny (
 echo "-- DDNS + Let's Encrypt --"
 check "azure-cli"           "command -v az"
 check "memtest86+ entry"   "sudo grep -qE '^/Memtest86\\+' /boot/limine.conf"
+check "limine-snapper-sync" "pacman -Q limine-snapper-sync"
 check "smartd enabled"      "systemctl is-enabled smartd.service"
 check "metis-ddns binary"   "test -x /usr/local/bin/metis-ddns"
 check "metis-ddns service"  "systemctl is-enabled metis-ddns.service 2>/dev/null || systemctl cat metis-ddns.service >/dev/null 2>&1"

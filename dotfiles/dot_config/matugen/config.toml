@@ -73,6 +73,14 @@ output_path = "~/.config/zathura/colors.zathurarc"
 input_path = "~/.config/matugen/templates/helix.toml"
 output_path = "~/.config/helix/themes/matugen.toml"
 
+# tmux gets its own color file sourced by ~/.tmux.conf. The post_hook
+# re-sources the parent file in every running tmux session so a wallpaper
+# change updates colors immediately (no detach/reattach).
+[templates.tmux]
+input_path = "~/.config/matugen/templates/tmux-colors.conf"
+output_path = "~/.config/tmux/colors.conf"
+post_hook = "tmux list-sessions >/dev/null 2>&1 && tmux source-file ~/.tmux.conf 2>/dev/null || true"
+
 # Greeter CSS: rendered to user cache; postinstall installs to /etc/greetd/
 # during reinstall. Live theme-following for the greeter is deferred (would
 # require a polkit rule for the cp; greeter is only seen at cold boot anyway).
