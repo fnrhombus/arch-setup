@@ -268,6 +268,33 @@ takes over and need to be reworked:
 remain — these are hardware-driver-level on Hyprland, not theme-pack
 dependencies.
 
+## Implementation notes (from 2026-04 validation pass)
+
+Things to bake into the install / first-boot scripts that aren't decisions
+themselves:
+
+- **Drop Electron `--ozone-platform=wayland` flags.** Electron is Wayland-native
+  by default since late 2025 — Edge/VSCode/Claude Desktop don't need the
+  flag anymore. The `claude-desktop-native` `.desktop` and any
+  arch-setup-shipped wrappers should be cleaned up. (Discord's bundled
+  Electron build still wants the flag — leave it there.)
+- **Use the freedesktop color-scheme portal for theme broadcast.** GTK4,
+  libadwaita, Firefox, Chromium, Qt 6.9+ all read it. The theme-toggle
+  script should `busctl --user set-property org.freedesktop.portal.Desktop
+  /org/freedesktop/portal/desktop org.freedesktop.impl.portal.Settings ...`
+  in addition to the per-component CSS reloads. Edge/Bitwarden pick it up
+  automatically.
+- **Nudge the portal on resume.** `xdg-desktop-portal-hyprland` can race
+  with apps started right after `systemd-resume` — apps that read the
+  color scheme at startup never re-query. Add a `dispatcher = on,resume,...`
+  in hypridle config to trigger a re-broadcast.
+- **hyprexpo workaround for issue #138.** Clicking the currently-visible
+  workspace in the overview leaves focus stuck. In the keybind, always
+  dispatch `workspace,e+0` before `hyprexpo:expo,off`. If this ever
+  blocks, **Hyprspace** (KZDKM) is a config-compatible swap.
+- **TPM2 PCR re-enrolment hook** — covered in the Hibernate section above.
+  Required for kernel/UKI/limine updates on a hibernate-enabled system.
+
 ## Non-requirements
 
 - Comprehensive list — the user flagged this is what they thought of in one
