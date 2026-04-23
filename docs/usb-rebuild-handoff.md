@@ -40,15 +40,16 @@ Known failure modes from today's prior attempts:
 - Exact error code and the preceding cmd-window scrollback if visible.
 - Which Ventoy-menu ISO was picked (shouldn't matter but confirm).
 
-## Known repo issues (not blocking this attempt)
+## Known repo state (the USB does NOT have these fixes)
 
-The dev-machine session identified three pre-existing bugs in `autounattend.xml` but **has not yet committed fixes** because today's priority was unblocking the install. Don't stress about them during this session — they're flagged here only so you're not surprised if the install hits an edge case:
+The dev-machine session committed two `autounattend.xml` fixes to this branch **after** the USB was staged, so the stick in fnrhombus's hand still has the old XML:
 
-1. **Order 6 hardcodes DISK=0** instead of running the documented PowerShell size-match against `Get-Disk | Where-Object {$_.Size -gt 500GB -and $_.Size -lt 600GB}`. On this 7786, disk enumeration under Ventoy happens to put Samsung at 0 (that's why the install worked 2 days ago), but it's luck, not logic.
-2. **Order 11 still carries `/CheckIntegrity /Verify`** on the DISM line. Causes false-positive verify failures on slow USB media; doesn't help with real corruption.
-3. **Doc drift:** `docs/autounattend-oobe-patch.md` §1 and `CLAUDE.md`'s Phase 1 description both claim the PowerShell size-match is in place. It isn't.
+1. [36ec791](https://github.com/fnrhombus/arch-setup/commit/36ec791) — Order 6: restore PowerShell Samsung-by-size detection (was hardcoded DISK=0).
+2. [2f5337d](https://github.com/fnrhombus/arch-setup/commit/2f5337d) — Order 11: strip `/CheckIntegrity /Verify` from DISM `/Apply-Image`.
 
-If today's install works, the dev-machine session will commit the three fixes on this branch afterward.
+Doc drift (3rd bug from the prior handoff) doesn't need a commit — the docs' claim ("inline PS picks the Samsung by size") now matches reality after fix #1 landed.
+
+**Implication for tonight:** the USB runs the OLD XML. Order 6 hardcodes DISK=0, Order 11 still has `/CheckIntegrity /Verify`. On this 7786 the DISK=0 coincidentally hits the Samsung under Ventoy enumeration, so it's not a blocker for this attempt. But if the install fails in a way that might be XML-related, **do not tell fnrhombus to re-stage the USB** with `pnpm stage` — the new XML has an untested PS one-liner in Order 6 and could regress. Escalate back to the dev-machine session instead.
 
 ## Credentials / passwords fnrhombus will need ready
 
