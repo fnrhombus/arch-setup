@@ -15,7 +15,7 @@ If you see a black screen, a graphical boot loop, a frozen greetd login, or anyt
 - **Press `Ctrl + Alt + F3`** (try F2, F4, F5, F6 if F3 is blank).
 - You should get a plain login prompt:
   ```
-  inspiron login:
+  metis login:
   ```
 
 If there's no response at all — the kernel or firmware wedged. Hold power **10 seconds**, power back on, at the **limine boot menu** pick a different entry:
@@ -28,7 +28,7 @@ Retry `Ctrl+Alt+F3` once it's up.
 ## 2. Log in
 
 ```
-archlinux login: tom
+metis login: tom
 Password: <the password you set during phase 2>
 ```
 

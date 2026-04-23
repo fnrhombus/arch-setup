@@ -125,7 +125,7 @@ Organized by category so you can skim. Nothing here is install instructions — 
 - **pacman** — Arch's package manager. `sudo pacman -S foo`. You care: every official package comes through it.
 - **pacstrap** — Installs a base Arch system into a mount point (`/mnt`). Used by phase 2.
 - **makepkg** — Builds a package from a PKGBUILD. AUR helpers wrap this.
-- **AUR** (Arch User Repository) — Community-contributed build recipes for things not in official repos. You care: `visual-studio-code-bin`, `microsoft-edge-stable-bin`, end-4 dotfiles all live here.
+- **AUR** (Arch User Repository) — Community-contributed build recipes for things not in official repos. You care: `visual-studio-code-bin`, `microsoft-edge-stable-bin`, `awww-bin`, `matugen-bin`, `pinpam-git`, `claude-desktop-native` all live here.
 - **yay** — AUR helper. Wraps `makepkg` + `pacman` so `yay -S foo` works regardless of source.
 - **DKMS** (Dynamic Kernel Module Support) — Rebuilds out-of-tree kernel modules on kernel upgrade. You care: NVIDIA/Wacom/other vendor drivers use it. We avoid it by not installing NVIDIA.
 
@@ -200,7 +200,7 @@ The control-panel script (Super+,) is a fuzzel-launched menu that dispatches to 
 - **COW** (Copy-On-Write) — btrfs's write strategy. Writes go to fresh blocks; old data only freed when no snapshot references it. Makes snapshots cheap and crash-safe.
 - **TTY** (teletypewriter) — Text console. `Ctrl+Alt+F3` on Linux. See [SURVIVAL.md](SURVIVAL.md).
 - **LSP** (Language Server Protocol) — How editors talk to per-language analyzers for autocomplete/diagnostics/goto-def. Helix uses it.
-- **D-Bus** — IPC bus every Linux desktop app uses. iio-sensor-proxy, Bitwarden, SDDM, PipeWire all communicate over it.
+- **D-Bus** — IPC bus every Linux desktop app uses. iio-sensor-proxy, Bitwarden, greetd, PipeWire all communicate over it.
 - **systemd** — The init system + service manager + timer runner + network stack + login manager + 40 other things. If a background service exists, `systemctl status foo` tells you about it.
 - **CLI** (Command Line Interface) — Things you type commands at.
 - **TUI** (Text User Interface) — CLI programs with full-screen text UI (btop, helix, nmtui). As opposed to line-oriented CLI.

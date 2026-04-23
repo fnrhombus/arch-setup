@@ -64,7 +64,7 @@ echo 'LANG=en_US.UTF-8' > /etc/locale.conf
 echo 'KEYMAP=us'        > /etc/vconsole.conf
 
 # ---------- hostname ----------
-HOSTNAME="inspiron"
+HOSTNAME="metis"
 log "Hostname → $HOSTNAME..."
 echo "$HOSTNAME" > /etc/hostname
 cat > /etc/hosts <<EOF

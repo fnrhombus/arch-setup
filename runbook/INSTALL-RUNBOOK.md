@@ -18,7 +18,7 @@ What gets touched:
 **Both drives are required.** `install.sh` size-detects both and aborts if either is missing. If you've repurposed the Netac for something else, swap it back in before starting — the layout is not optional (swap, recovery partition, and the `/var/log`+`/var/cache` ext4 all depend on it per [docs/decisions.md](../docs/decisions.md) §Q9).
 
 Three things to know before starting:
-- **Hostnames are intentionally different**: Windows = `Metis`, Arch = `inspiron`. Your router sees whichever OS is up. This is cosmetic, not a bug (see recovery §D if it bothers you).
+- **Hostnames intentionally match**: Windows = `Metis`, Arch = `metis`. Same name, same machine — your router sees `metis` regardless of which OS is up. (Windows may be renamed to `metis-win` later for unambiguous DHCP leases; not wired yet.)
 - **First Windows boot after Arch install will prompt for the BitLocker recovery key.** Expected — installing **limine** to the shared EFI changes PCR values that BitLocker sealed against. Phase 1 step 7 stashes the recovery key in Bitwarden. See §C below for the one-shot reseal.
 - **First Arch boot after install will prompt for the LUKS passphrase.** Also expected — TPM2 autounlock isn't wired until Phase 3 runs `systemd-cryptenroll`. After that, Arch boots silently (same model as BitLocker). The passphrase stays as a key slot forever so you can always recover.
 
@@ -73,7 +73,7 @@ The inline PowerShell safety check in `autounattend.xml` aborted because either 
    - File #1: `C:\Windows\Setup\Scripts\BitLocker-Recovery.txt`
    - File #2: `<VENTOY_USB>:\bitlocker-recovery.txt` (same content)
    - Open it. Copy the 48-digit key.
-   - Paste into Bitwarden as a **Secure Note** titled "Inspiron BitLocker recovery". Save.
+   - Paste into Bitwarden as a **Secure Note** titled "Metis BitLocker recovery". Save.
    - Also take a phone photo of it as a belt-and-suspenders backup.
    - Once you've confirmed the key is safely in Bitwarden, delete both files: `Remove-Item C:\Windows\Setup\Scripts\BitLocker-Recovery.txt, <USB_LETTER>:\bitlocker-recovery.txt -Force` (substitute whatever drive letter Windows assigned the Ventoy stick — check **This PC**)
    - **Do not skip this.** You'll need this key in Phase 2e — the first Windows boot after Arch install will almost certainly prompt for it.
@@ -155,7 +155,7 @@ It will:
 3. **Prompt once up-front for three secrets** (all confirmed twice; nothing else will ask you for input until install is done):
    - **root password** — account recovery.
    - **tom's password** — your daily login. Make it strong; you'll bypass it with TPM-PIN and fingerprint later.
-   - **LUKS passphrase** — unlocks both the Samsung root and Netac /var at boot until TPM2 autounlock is wired in Phase 3. **Stash this in Bitwarden now** (next to the BitLocker key) as a Secure Note called "Inspiron LUKS passphrase". 8+ chars, 12+ recommended. If PCR values ever drift, this is what gets you back in.
+   - **LUKS passphrase** — unlocks both the Samsung root and Netac /var at boot until TPM2 autounlock is wired in Phase 3. **Stash this in Bitwarden now** (next to the BitLocker key) as a Secure Note called "Metis LUKS passphrase". 8+ chars, 12+ recommended. If PCR values ever drift, this is what gets you back in.
 4. LUKS-format both data partitions, mkfs, pacstrap (~15 min — biggest wait, fully unattended).
 5. Enter chroot (passwords + LUKS UUIDs handed in via mode-600 files), allocate TPM2 SHA-256 PCR bank, install **limine** + greetd + greetd-regreet, write `/etc/crypttab.initramfs` (cryptroot + cryptswap with TPM2) + `/etc/crypttab` (cryptvar via keyfile), add `sd-encrypt` to mkinitcpio HOOKS, install greetd config from `/root/arch-setup/phase-3-arch-postinstall/system-files/`, install pacman post-upgrade hook for TPM2 reseal on kernel/limine updates, wire greetd PAM for gnome-keyring auto-unlock.
 6. `dd` the Arch ISO onto the Netac recovery partition (~1 min, unencrypted by design so it still boots from F12 if Arch is hosed).
@@ -194,20 +194,20 @@ It will:
 
 **If the limine menu doesn't show Windows:** boot into Arch anyway, then as root check `/boot/limine.conf` — the `Windows Boot Manager` chainload entry should be present (chroot.sh writes it). Verify `ls /boot/EFI/Microsoft/Boot/bootmgfw.efi` exists — missing file means Windows install didn't write it (rare). Fix later; don't block on this.
 
-**Expected: BitLocker recovery prompt on first Windows boot after this step.** Systemd-boot installing itself to the shared EFI changes the TPM's PCR values → BitLocker can't auto-unseal → you get the blue "Enter recovery key" screen. This is not a bug.
+**Expected: BitLocker recovery prompt on first Windows boot after this step.** limine installing itself to the shared EFI changes the TPM's PCR values → BitLocker can't auto-unseal → you get the blue "Enter recovery key" screen. This is not a bug.
 - Type the 48-digit key from Bitwarden.
 - Windows unlocks, boots normally.
 - Windows re-seals to the new PCR values automatically. Next boots: silent unlock, no prompt ever again (unless bootloader changes).
 - **If you don't have the key when this screen appears — you are locked out of Windows.** Phase 1 step 7 exists for this reason.
 
-**If nothing boots:** BIOS → Boot Sequence → make sure "Linux Boot Manager" is listed and first. If only "Windows Boot Manager" is there, run from a live USB: `bootctl --path=/boot install` to re-register.
+**If nothing boots:** BIOS → Boot Sequence → make sure "Limine Boot Manager" is listed and first. If only "Windows Boot Manager" is there, recover from a live USB: unlock LUKS + chroot in (see §A below for the unlock incantation), then `install -d /boot/EFI/BOOT && install -m 644 /usr/share/limine/BOOTX64.EFI /boot/EFI/BOOT/BOOTX64.EFI && efibootmgr --create --disk /dev/sda --part 1 --label "Limine Boot Manager" --loader '\EFI\BOOT\BOOTX64.EFI'` to re-register.
 
 ### 2f. Clear the BitLocker prompt now (before Phase 3)
 
 Do this before starting Phase 3 — you want the BitLocker key mess handled while you're still thinking about it, not 25 minutes into Hyprland setup.
 
 1. Reboot. At the limine boot menu, pick **Windows Boot Manager**.
-2. BitLocker prompts for the recovery key. Type the 48-digit key from Bitwarden ("Inspiron BitLocker recovery").
+2. BitLocker prompts for the recovery key. Type the 48-digit key from Bitwarden ("Metis BitLocker recovery").
 3. Windows boots. Log in as `Tom`. Let it sit for 30 seconds so BitLocker re-seals against the new PCR values.
 4. Shut down: **Start → Power → Shut down**. (Fast Startup is off, so this is a clean shutdown, not a hybrid-hibernate.)
 5. Power on → limine → pick **Arch Linux** → back into Arch. No more BitLocker prompts from here.
@@ -538,7 +538,7 @@ If editing fstab from emergency mode is scary: add `systemd.unit=rescue.target` 
 
 ### C. BitLocker recovery prompt on next Windows boot (and keeps prompting)
 
-**First prompt is expected, not a failure.** Installing limine (or any non-Microsoft EFI binary) to the shared EFI rewrites the PCR values the TPM sealed BitLocker against. First Windows boot after Arch install → blue "Enter recovery key" screen. Type the 48-digit key (stored in Bitwarden as "Inspiron BitLocker recovery" per Phase 1 step 7) to get in.
+**First prompt is expected, not a failure.** Installing limine (or any non-Microsoft EFI binary) to the shared EFI rewrites the PCR values the TPM sealed BitLocker against. First Windows boot after Arch install → blue "Enter recovery key" screen. Type the 48-digit key (stored in Bitwarden as "Metis BitLocker recovery" per Phase 1 step 7) to get in.
 
 **But Windows does NOT auto-reseal the TPM protector just because you entered the recovery key** — that path unlocks the drive but leaves the TPM protector sealed against the *old* (pre-Arch) PCRs. So the next boot, and the next, and the next will all keep prompting unless you force a re-seal.
 
@@ -583,11 +583,15 @@ manage-bde -status C:      # watch progress
 
 Trade-off: stolen laptop + removed drive + NTFS reader = your Windows files are readable.
 
-### D. Hostname shows as `Metis` on the network, not `inspiron`
+### D. DHCP lease shows two devices both named `metis`
 
-**Cause:** Windows unattend names the machine `Metis`, Arch's `chroot.sh` names it `inspiron`. Both are correct for their respective OS — they just don't match. Your router's DHCP lease will show whichever OS booted most recently.
+**Cause:** Both OSes intentionally use the same hostname (`Metis` on Windows, `metis` on Arch — case-insensitive at the DHCP/mDNS layer). Your router will see one `metis` lease that flips between two MAC addresses depending on which OS is up.
 
-**This is cosmetic.** If you care: edit `/etc/hostname` in Arch to `Metis` (and the `127.0.1.1` line in `/etc/hosts`), or change Windows via `Rename-Computer -NewName inspiron -Restart` from an elevated PowerShell. Neither change is required for anything to work.
+**This is by design** for the single-OS-at-a-time use case. If you want unambiguous leases (e.g., for both OSes to coexist visibly in router DHCP tables, or to avoid mDNS collisions if both are ever booted simultaneously via PXE/dual-network):
+- **Rename Windows**: `Rename-Computer -NewName metis-win -Restart` from elevated PowerShell.
+- **Or rename Arch**: `sudo hostnamectl set-hostname metis-arch` (also update the `127.0.1.1` line in `/etc/hosts`).
+
+Neither change is required for anything to work.
 
 ### E. Snapper complains `config "root" does not exist` or `.snapshots not found`
 
@@ -630,7 +634,7 @@ sudo systemctl restart bluetooth
 ```
 Verify `ls /boot/EFI/Microsoft/Boot/bootmgfw.efi` exists — missing file means Windows install didn't write it.
 
-**Fix:** Reboot, hit F12 at the Dell logo, pick "Windows Boot Manager" directly from the firmware menu. From inside Windows, re-run Arch's `bootctl` from a live USB later to re-register. You are not stuck — both OSes are still bootable via F12.
+**Fix:** Reboot, hit F12 at the Dell logo, pick "Windows Boot Manager" directly from the firmware menu. From a live USB later, boot the Arch ISO, unlock LUKS + chroot in (see §A above for the unlock incantation), and re-run `limine bios-install` + reinstall the UEFI binary to `/boot/EFI/BOOT/BOOTX64.EFI` to re-register. You are not stuck — both OSes are still bootable via F12.
 
 ### H. greetd shows but fingerprint prompt never appears at login
 
