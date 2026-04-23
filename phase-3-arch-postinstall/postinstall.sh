@@ -27,10 +27,13 @@
 #     brought in from fnwsl; WSL-specific pieces dropped). p10k config itself
 #     is authored by the user via `p10k configure` on first shell launch —
 #     no pre-shipped ~/.p10k.zsh.
-#   - HyDE-Project/HyDE Hyprland dotfiles + Catppuccin-Mocha theme
+#   - chezmoi apply against /root/arch-setup/dotfiles — writes the bare
+#     Hyprland configs (split fragments), waybar, swaync, fuzzel, ghostty,
+#     yazi, helix, qt5/6ct, matugen pipeline + templates, helper scripts.
 #   - 2-in-1 touch: iio-sensor-proxy / iio-hyprland (rotation), wvkbd (OSK),
 #     hyprgrass plugin (touch gestures), libwacom (Wacom AES stylus)
-#   - Catppuccin Mocha across Ghostty/SDDM/tmux/Helix
+#   - matugen Material You palette derived from wallpaper; rendered into
+#     waybar / swaync / fuzzel / ghostty / hypr-colors / etc.
 #   - Snapper baseline snapshot
 #   - USB-serial udev rules (ESP32/Pico)
 #
@@ -73,7 +76,7 @@ ping -c1 -W3 archlinux.org >/dev/null || die "No network."
 # Two modes:
 #   - SUDO_ASKPASS exported + helper executable  → keeper can re-auth on its
 #     own via `sudo -A` when the cache expires. Robust to anything inside
-#     the run that clears the cache (HyDE's scripts have been observed to).
+#     the run that clears the cache (some installer scripts have been observed to).
 #   - Otherwise                                    → keeper only refreshes an
 #     already-cached credential via `sudo -n -v`. A pre-run `sudo -v` is
 #     required; if the cache is ever cleared during the run, the next sudo
@@ -135,6 +138,26 @@ sudo pacman -Syu --noconfirm --needed \
 
 sudo pkgfile -u
 
+# ---------- 1-print. CUPS + gutenprint (Canon Pro 9000 Mk II via USB) ----------
+# CUPS is the spooler; gutenprint ships the open-source PPDs that cover
+# legacy Canon Pixma inkjets including the Pro 9000 Mark II (released 2009 —
+# pre-cnijfilter consolidation, so Canon's own driver isn't packaged for it).
+# system-config-printer adds the GTK GUI for adding/removing printers.
+# usbutils is needed by CUPS auto-discovery on USB-attached printers.
+log "Installing CUPS + gutenprint (Canon Pro 9000 Mk II)..."
+sudo pacman -S --noconfirm --needed \
+    cups cups-pdf cups-filters \
+    gutenprint foomatic-db foomatic-db-engine \
+    ghostscript system-config-printer usbutils
+# cups.socket = on-demand activation (vs cups.service which runs forever).
+# Lighter; CUPS spins up only when something hits :631 or queues a job.
+sudo systemctl enable --now cups.socket
+# `lp` group lets users manage queues / cancel others' jobs.
+if ! id -nG tom | grep -qw lp; then
+    sudo usermod -aG lp tom
+    warn "Added tom to lp group — log out and back in for CUPS GUI access."
+fi
+
 # ---------- 1-smart. smartd: ongoing SMART monitoring ----------
 # The BIOS "SMART Reporting" toggle only surfaces errors at POST. smartd
 # runs continuously and logs to journald + emails root on pre-fail events.
@@ -163,25 +186,27 @@ fi
 systemctl --user enable --now hyprpolkitagent.service 2>/dev/null || \
     warn "hyprpolkitagent.service enable failed — Bitwarden may flag system-auth as unavailable."
 
-# ---------- 1c. memtest86+ systemd-boot loader entry ----------
+# ---------- 1c. memtest86+ limine entry ----------
 # Arch splits memtest86+ into two packages: `memtest86+` ships only the BIOS
 # binary (memtest.bin), `memtest86+-efi` ships the UEFI binary (memtest.efi).
-# Metis boots UEFI via systemd-boot, so the EFI package is the one we need
-# for a usable loader entry. We query memtest86+-efi specifically — the plain
-# package's file list has no .efi and the grep would silently skip.
-# Systemd-boot has no auto-scan for memtest86+/, so write the entry here.
-# Idempotent: tee just overwrites with identical content on re-run.
+# Metis boots UEFI via limine, so the EFI package is the one we need. We
+# append a /Memtest86+ entry to /boot/limine.conf (chained as efi_chainload).
+# Idempotent: only appends if the entry isn't already there.
 MEMTEST_EFI=$(pacman -Ql memtest86+-efi 2>/dev/null | awk '/\.efi$/ {print $2; exit}')
 if [[ -n "$MEMTEST_EFI" ]] && sudo test -f "$MEMTEST_EFI"; then
-    # Strip the /boot prefix — loader entries use ESP-relative paths.
+    # Strip the /boot prefix — limine's boot():… is ESP-relative.
     MEMTEST_EFI_REL="${MEMTEST_EFI#/boot}"
-    log "Registering memtest86+ with systemd-boot..."
-    sudo tee /boot/loader/entries/memtest86+.conf >/dev/null <<MEMEOF
-title   Memtest86+
-efi     ${MEMTEST_EFI_REL}
+    if sudo test -f /boot/limine.conf && ! sudo grep -qE '^/Memtest86\+' /boot/limine.conf; then
+        log "Adding memtest86+ entry to /boot/limine.conf..."
+        sudo tee -a /boot/limine.conf >/dev/null <<MEMEOF
+
+/Memtest86+
+    protocol: efi_chainload
+    image_path: boot():${MEMTEST_EFI_REL}
 MEMEOF
+    fi
 else
-    warn "memtest86+-efi EFI binary not found — loader entry skipped. Did pacman -S memtest86+-efi succeed?"
+    warn "memtest86+-efi EFI binary not found — limine entry skipped. Did pacman -S memtest86+-efi succeed?"
 fi
 
 # ---------- 2. yay bootstrap ----------
@@ -514,7 +539,7 @@ fi
 
 # ---------- 7. pinpam TPM-PIN setup ----------
 # pinutil setup asks for a fresh PIN and stores it in TPM NVRAM.
-# PAM wiring for PIN lives in §7a below (sudo + hyprlock only — not SDDM).
+# PAM wiring for PIN lives in §7a below (sudo + hyprlock only — not greetd).
 if command -v pinutil >/dev/null; then
     if [[ -z "${SKIP_PIN:-}" ]]; then
         # `pinutil setup` reads the new PIN interactively from stdin. Without a
@@ -557,8 +582,12 @@ else
     warn "pinutil not found; skipping TPM-PIN setup."
 fi
 
-# ---------- 7a. PAM stacks for sudo / hyprlock / SDDM ----------
-# Three surfaces, three different stacks — see docs/reinstall-planning.md §5.
+# ---------- 7a. PAM stacks for sudo / hyprlock ----------
+# Two surfaces, two stacks here — see docs/reinstall-planning.md §5.
+# (greetd's PAM stack is installed by chroot.sh from
+# phase-3-arch-postinstall/system-files/pam.d/greetd; PIN is intentionally
+# excluded from greetd because cold-boot wants full credential per the
+# Windows Hello pattern.)
 #
 # Design invariant: fingerprint is ALWAYS an option and NEVER required.
 # User's finger can only physically reach the reader at cold boot (the
@@ -572,11 +601,6 @@ fi
 #              5s-timeout shortcut; pam_unix via system-auth as fallback.
 #   hyprlock : PIN → fingerprint(5s) → password. Same shape; `login`
 #              include provides pam_unix fallback.
-#   sddm     : fingerprint(10s) → password. NO PIN at cold boot — matches
-#              Windows Hello's "cold sign-in requires full password"
-#              pattern (TPM hasn't stabilised PCR state yet), and this is
-#              the one surface where the reader is physically reachable,
-#              so finger goes first with a longer timeout.
 #
 # Module name quirk: pinpam-git ships its module as `libpinpam.so` (not
 # the expected `pam_pinpam.so`). PAM resolves bare names against
@@ -591,14 +615,13 @@ fi
 #
 # pam_fprintd options: `max-tries=1` = one finger attempt then fail;
 # `timeout=5` at sudo/hyprlock = give up after 5s of no finger and move
-# on to the password prompt, so Ctrl+C isn't needed. `timeout=10` at SDDM
-# because the reader IS reachable there and the user may be mid-reach.
+# on to the password prompt, so Ctrl+C isn't needed.
 #
 # NEVER remove pam_unix from the stack via `system-auth`/`system-login`/
 # `login` includes — that's the last-resort password path.
 #
 # Fully idempotent: tee overwrites with identical bytes on re-run.
-log "Writing PAM stacks for sudo / hyprlock / sddm..."
+log "Writing PAM stacks for sudo / hyprlock..."
 
 # sudo: PIN → fingerprint(5s) → password.
 sudo tee /etc/pam.d/sudo >/dev/null <<'SUDOPAMEOF'
@@ -624,37 +647,6 @@ auth        sufficient  libpinpam.so
 auth        sufficient  pam_fprintd.so              max-tries=1 timeout=5
 auth        include     login
 HYPRLOCKPAMEOF
-
-# SDDM: password primary, fingerprint optional. Short fprintd timeout so
-# the greeter doesn't stall for 30s on every cold boot when the user
-# intends to type the password.
-#
-# max-tries=1 : one finger attempt, then fail & fall through.
-# timeout=10  : give up after 10s of no finger rather than the 30s default.
-#
-# pam_fprintd is 'sufficient' — if the finger matches, login is done
-# without asking for the password. If fprintd fails or times out, the
-# stack continues to system-login → pam_unix for the password the user
-# is already typing into the SDDM field.
-sudo tee /etc/pam.d/sddm >/dev/null <<'SDDMPAMEOF'
-#%PAM-1.0
-# arch-setup: password primary, fingerprint optional (short timeout).
-# See postinstall.sh §7a.
-auth        sufficient  pam_fprintd.so              max-tries=1 timeout=10
-auth        include     system-login
--auth       optional    pam_gnome_keyring.so
--auth       optional    pam_kwallet5.so
-
-account     include     system-login
-
-password    include     system-login
--password   optional    pam_gnome_keyring.so        use_authtok
-
-session     optional    pam_keyinit.so              force revoke
-session     include     system-login
--session    optional    pam_gnome_keyring.so        auto_start
--session    optional    pam_kwallet5.so             auto_start
-SDDMPAMEOF
 
 # ---------- 7.5 LUKS TPM2 autounlock (FDE per decisions.md §Q11) ----------
 # install.sh sets the LUKS passphrase (key slot 0) at install time; this
@@ -1045,28 +1037,9 @@ fi
 "$HOME/.tmux/plugins/tpm/scripts/install_plugins.sh" >/dev/null 2>&1 || \
     warn "tpm install deferred to first tmux run"
 
-# ---------- 12. Helix config ----------
-log "Writing Helix config..."
-mkdir -p "$HOME/.config/helix"
-cat > "$HOME/.config/helix/config.toml" <<'HXEOF'
-theme = "catppuccin_mocha"
-
-[editor]
-line-number = "relative"
-mouse = true
-cursorline = true
-bufferline = "multiple"
-color-modes = true
-true-color = true
-
-[editor.cursor-shape]
-insert = "bar"
-normal = "block"
-select = "underline"
-
-[editor.indent-guides]
-render = true
-HXEOF
+# ---------- 12. Helix config — handled by chezmoi (§13) ----------
+# dotfiles/dot_config/helix/config.toml is the source of truth (theme = matugen).
+# No write here.
 
 # ---------- 13. Hyprland configs via chezmoi (bare-Hyprland design) ----------
 # Switched from HyDE → bare-Hyprland 2026-04-22 (decisions.md §Q10 + §Q-K +
@@ -1141,8 +1114,8 @@ if command -v hyprpm >/dev/null; then
     fi
 fi
 
-# Ghostty config + Catppuccin SDDM theme are now part of dotfiles/system-files —
-# no separate §14 / §15 needed. The legacy blocks were removed in this rewrite.
+# Ghostty config + greetd-regreet config are now part of dotfiles/system-files
+# (matugen-themed). No separate §14 / §15 needed — legacy blocks removed.
 
 # ---------- 16. Snapper: baseline snapshot of / ----------
 # NOTE: install.sh already created the @snapshots subvolume and mounted it at
@@ -1214,7 +1187,7 @@ fi
 if (( SKIP_VERIFY == 1 )); then
     log "Skipping verify (--no-verify). Re-run without the flag for the full sweep."
     echo
-    echo "Log out and back in (or reboot) to start Hyprland via SDDM."
+    echo "Log out and back in (or reboot) to start Hyprland via greetd."
     exit 0
 fi
 echo
@@ -1273,19 +1246,23 @@ check "yazi"                "command -v yazi"
 echo "-- terminal stack --"
 check "ghostty"             "command -v ghostty"
 check "foot (fallback)"     "command -v foot"
-check "ghostty config"      "test -f $HOME/.config/ghostty/config && grep -q 'Catppuccin Mocha' $HOME/.config/ghostty/config"
+check "ghostty config"      "test -f $HOME/.config/ghostty/config && grep -q 'theme = matugen' $HOME/.config/ghostty/config"
 
-echo "-- Hyprland / HyDE --"
-check "HyDE staged"         "test -d $HOME/HyDE/Scripts"
-check "HyDE installed"      "test -x $HOME/.local/share/bin/theme-switch.sh || test -d $HOME/.local/lib/hyde"
+echo "-- Hyprland (bare, chezmoi-managed) --"
 check "hyprland config"     "test -f $HOME/.config/hypr/hyprland.conf"
-check "arch-setup customs"  "grep -q 'arch-setup-customizations' $HOME/.config/hypr/hyprland.conf"
+check "binds.conf src"      "grep -q 'source = ~/.config/hypr/binds.conf' $HOME/.config/hypr/hyprland.conf"
 check "monitors.conf src"   "grep -q 'monitors.conf' $HOME/.config/hypr/hyprland.conf"
+check "matugen colors src"  "grep -q 'colors.conf' $HOME/.config/hypr/hyprland.conf"
+check "matugen config"      "test -f $HOME/.config/matugen/config.toml"
+check "validate-hypr-binds" "test -x $HOME/.local/bin/validate-hypr-binds"
+check "wallpaper-rotate"    "test -x $HOME/.local/bin/wallpaper-rotate"
+check "theme-toggle"        "test -x $HOME/.local/bin/theme-toggle"
 check "fuzzel"              "command -v fuzzel"
 check "cliphist"            "command -v cliphist"
-check "mako"                "command -v makoctl"
+check "swaync"              "command -v swaync && command -v swaync-client"
 check "satty"               "command -v satty"
-check "swww/awww"           "pacman -Q swww 2>/dev/null || command -v awww"
+check "awww (wallpaper)"    "command -v awww && command -v awww-daemon"
+check "matugen (palette)"   "command -v matugen"
 check "hyprshot"            "command -v hyprshot"
 check "wl-copy"             "command -v wl-copy"
 check "xdg-portal-gtk"      "pacman -Q xdg-desktop-portal-gtk"
@@ -1300,10 +1277,16 @@ check "hyprgrass plugin"    "hyprpm list 2>/dev/null | grep -q hyprgrass"
 
 echo "-- session / login / display --"
 check "NetworkManager"      "systemctl is-enabled NetworkManager"
-check "sddm"                "systemctl is-enabled sddm"
-check "sddm catppuccin"     "pacman -Q catppuccin-sddm-theme-mocha"
+check "greetd"              "systemctl is-enabled greetd"
+check "greetd-regreet"      "pacman -Q greetd-regreet"
 check "pipewire"            "pacman -Q pipewire wireplumber"
 check "bluetooth"           "systemctl is-enabled bluetooth"
+
+echo "-- printing (Canon Pro 9000 Mk II via USB) --"
+check "cups installed"      "pacman -Q cups"
+check "cups.socket enabled" "systemctl is-enabled cups.socket"
+check "gutenprint PPDs"     "test -d /usr/share/cups/model/gutenprint || ls /usr/share/cups/model 2>/dev/null | grep -q gutenprint"
+check "tom in lp group"     "id -nG tom | grep -qw lp"
 
 echo "-- secrets / auth --"
 check "fprintd enabled"     "systemctl is-enabled fprintd"
@@ -1313,8 +1296,8 @@ check "pinpam .so present"   "test -f /usr/lib/security/libpinpam.so"
 check "PIN actually persisted" "! pinutil test < /dev/null 2>&1 | grep -q NoPinSet"
 check "pinpam in sudo"       "grep -q libpinpam /etc/pam.d/sudo"
 check "pinpam in hyprlock"   "grep -q libpinpam /etc/pam.d/hyprlock"
-check "no pinpam in sddm"    "! grep -q libpinpam /etc/pam.d/sddm"
-check "fprintd in sddm"      "grep -q 'pam_fprintd.*max-tries=1.*timeout=10' /etc/pam.d/sddm"
+check "no pinpam in greetd"  "! grep -q libpinpam /etc/pam.d/greetd"
+check "fprintd in greetd"    "grep -q 'pam_fprintd.*max-tries=1.*timeout=10' /etc/pam.d/greetd"
 check "fprintd in sudo"      "grep -q 'pam_fprintd.*max-tries=1.*timeout=5' /etc/pam.d/sudo"
 check "fprintd in hyprlock"  "grep -q 'pam_fprintd.*max-tries=1.*timeout=5' /etc/pam.d/hyprlock"
 check "pinpam before fprintd sudo" "awk '/libpinpam/{p=NR} /pam_fprintd/{f=NR} END{exit !(p && f && p<f)}' /etc/pam.d/sudo"
@@ -1337,7 +1320,7 @@ check "ufw default deny in" "sudo ufw status verbose | grep -qi 'Default: deny (
 
 echo "-- DDNS + Let's Encrypt --"
 check "azure-cli"           "command -v az"
-check "memtest86+ entry"   "test -f /boot/loader/entries/memtest86+.conf"
+check "memtest86+ entry"   "sudo grep -qE '^/Memtest86\\+' /boot/limine.conf"
 check "smartd enabled"      "systemctl is-enabled smartd.service"
 check "metis-ddns binary"   "test -x /usr/local/bin/metis-ddns"
 check "metis-ddns service"  "systemctl is-enabled metis-ddns.service 2>/dev/null || systemctl cat metis-ddns.service >/dev/null 2>&1"
@@ -1375,7 +1358,7 @@ cat <<'POSTINSTALL_OUTRO'
   ONE-TIME ACTIONS (only matter the first time you run this)
 ====================================================================
 
-[1] Reboot or log out → log back in via SDDM to start Hyprland.
+[1] Reboot or log out → log back in via greetd to start Hyprland.
 
 [2] Bitwarden desktop:
       - Launch, log in once with your master password.
@@ -1387,38 +1370,16 @@ cat <<'POSTINSTALL_OUTRO'
       Already wired if the first-login planter ran (see ~/.gitconfig.local).
       Otherwise: open a new terminal and `gh auth login` once.
 
-[4] Azure DDNS (metis.rhombus.rocks):
-      One-time service principal setup (run on this laptop or any machine
-      with the az CLI — `az` is now installed locally either way):
+[4] Azure DDNS (metis.rhombus.rocks) — one-time wiring via setup-azure-ddns.sh:
 
         az login
-        SUB=$(az account show --query id -o tsv)
-        RG=<resource-group-with-the-DNS-zone>      # fnrhombus knows this
-        ZONE_ID=$(az network dns zone show -g "$RG" -n rhombus.rocks --query id -o tsv)
-        az ad sp create-for-rbac \
-            --name metis-ddns \
-            --role "DNS Zone Contributor" \
-            --scopes "$ZONE_ID" \
-            --years 2
+        ~/setup-azure-ddns.sh           # idempotent; rotates secret on each run
 
-      Paste the output into /etc/metis-ddns.env  (mode 600, root):
-        AZ_TENANT_ID=<tenant>
-        AZ_CLIENT_ID=<appId>
-        AZ_CLIENT_SECRET=<password>
-        AZ_SUBSCRIPTION_ID=<SUB>
-        AZ_RESOURCE_GROUP=<RG>
-        # zone + record already set; DDNS_DISABLE_IPV4=1 is the default
-        # (router blocks v4 anyway). Flip to 0 if you ever expose v4.
-
-      Then:
-        sudo systemctl start metis-ddns.service
-        sudo journalctl -u metis-ddns -n 20
-      First call may 403 (role propagation, ~30s–5min) — just retry.
-      The timer + NetworkManager hook take over after first success.
+      The script writes /etc/metis-ddns.env + /etc/letsencrypt/azure.ini and
+      restarts metis-ddns. First call may 403 (role propagation, ~30s–5min)
+      — just retry. Timer + NM hook take over after first success.
 
 [5] Let's Encrypt cert for metis.rhombus.rocks (after step 4 succeeds):
-      Mirror the same SP creds into /etc/letsencrypt/azure.ini using its
-      INI keys (template already in place), then:
 
         sudo certbot certonly \
             --authenticator dns-azure \

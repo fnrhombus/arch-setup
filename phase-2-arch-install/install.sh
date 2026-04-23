@@ -555,7 +555,8 @@ Done. Remove the USB and reboot.
 
 First boot asks for the LUKS passphrase (you set it at the top of this run).
 Log in as 'tom', then:
-    ./postinstall.sh           # installs yay, zgenom, illogical-impulse dots,
-                               # catppuccin, chezmoi, fingerprint, TPM2 enroll
-                               # for silent LUKS unlock, etc.
+    ./postinstall.sh           # installs yay, zgenom, chezmoi (applies the
+                               # bare-Hyprland dotfiles + matugen pipeline),
+                               # fingerprint, TPM2 enroll for silent LUKS
+                               # unlock, ufw, metis-ddns, printer drivers, etc.
 EOF

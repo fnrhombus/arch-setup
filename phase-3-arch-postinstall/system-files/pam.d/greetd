@@ -10,7 +10,7 @@
 # We do NOT include libpinpam here on purpose — PIN is not a greeter-tier
 # auth method on this design.
 #
-# Installed to /etc/pam.d/greetd by postinstall.sh.
+# Installed to /etc/pam.d/greetd by phase-2-arch-install/chroot.sh.
 
 auth        sufficient  pam_fprintd.so              max-tries=1 timeout=10
 auth        include     system-login

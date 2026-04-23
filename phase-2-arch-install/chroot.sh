@@ -2,11 +2,15 @@
 # phase-2-arch-install/chroot.sh
 #
 # Runs inside `arch-chroot /mnt` from install.sh. Sets up:
-#   - timezone, locale, hostname
+#   - timezone, locale, hostname (= metis)
 #   - user tom with wheel/sudo
-#   - systemd-boot (shares the EFI Windows created at /boot)
+#   - limine bootloader (shares the EFI Windows created at /boot, written
+#     to the fallback path \EFI\BOOT\BOOTX64.EFI so Windows NVRAM resets
+#     don't kill us)
+#   - hibernate-ready cryptswap with TPM2 sealing + resume= cmdline
 #   - NVIDIA blacklist (MX250 Optimus — Intel iGPU only, decisions.md §Q5)
-#   - NetworkManager + SDDM + bluetooth + fprintd enabled
+#   - NetworkManager + greetd + bluetooth + fprintd enabled
+#   - greetd PAM stack from system-files/pam.d/greetd (gnome-keyring + fprintd)
 #   - yay build is done in phase-3 (needs non-root + network)
 
 set -euo pipefail
