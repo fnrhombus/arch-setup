@@ -20,7 +20,7 @@ comprehensive at any one time.
 ```
 hyprland hypridle hyprlock hyprpolkitagent
 greetd greetd-regreet      # greeter (replaces SDDM)
-waybar fuzzel mako cliphist wl-clipboard
+waybar fuzzel swaync cliphist wl-clipboard
 swww grim slurp satty hyprshot
 xdg-desktop-portal-gtk xdg-desktop-portal-hyprland
 iio-hyprland-git wvkbd     # 2-in-1 (rotation, OSK)
@@ -76,6 +76,24 @@ template target).
 - Battery
 - Workspace pills with current highlighted
 - Theme toggle icon (sun/moon), click flips dark/light
+
+## Notifications (swaync)
+
+**SwayNotificationCenter** replaces the prior mako choice. Same popup
+behavior, plus a pull-out panel showing notification history, a
+do-not-disturb toggle, and room for widgets.
+
+Why switched:
+- Notification history matters when "did Bitwarden finish syncing?" or
+  "did the build notify me?" come up — mako gives no recall once the
+  popup fades.
+- Themed via GTK CSS — matugen template drops in directly. mako uses INI
+  + its own color scheme; swaync's CSS aligns with the rest of the stack.
+- Pairs naturally with the bar-icon + fuzzel control-panel pattern: a
+  waybar icon shows unread count, click pulls the panel.
+
+Bindings: hotkey (Super+N) toggles the panel; bar icon click does the
+same; fuzzel control-panel entry "Notifications" same.
 
 ## Clipboard history
 

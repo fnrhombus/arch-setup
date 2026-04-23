@@ -187,9 +187,10 @@
 - Fingerprint integration via the same PAM stack
 - **Switched from SDDM 2026-04-22**: bare-Hyprland reinstall doesn't need Plasma's greeter. SDDM's Qt theme was a separate maintenance surface; ReGreet aligns with the matugen pipeline used everywhere else.
 
-#### E) Notifications: mako
-- Wayland-native, lightweight, matches the foot/fuzzel/swww profile of the rest of the stack.
-- **Why not swaync**: originally chosen because end-4's wizard only accepted `dunst`/`mako`. Carried forward on the HyDE swap because mako is simpler, lighter, and HyDE has no opinion on the daemon. Dunst is the feature-rich alternative if mako ever feels too minimal.
+#### E) Notifications: swaync (SwayNotificationCenter)
+- Wayland-native popup daemon plus a pull-out panel for notification history + DND toggle.
+- Themed via GTK CSS — drops straight into the matugen pipeline.
+- **Switched from mako 2026-04-22**: the prior pick optimized for minimalism (end-4's wizard only accepted dunst/mako, then carried forward on the HyDE swap). The reinstall design favors visible state + GUI affordances; swaync's panel is the lowest-cost step in that direction. mako remains the minimal-surface alternative if the panel ever feels like overhead.
 
 #### F) App launcher: fuzzel
 - Wayland-native, lightweight, fuzzy matching
