@@ -522,7 +522,14 @@ fi
 #              the one surface where the reader is physically reachable,
 #              so finger goes first with a longer timeout.
 #
-# pam_pinpam returns AUTHINFO_UNAVAIL when no PIN is provisioned, so
+# Module name quirk: pinpam-git ships its module as `libpinpam.so` (not
+# the expected `pam_pinpam.so`). PAM resolves bare names against
+# `/usr/lib/security/`, so we reference `libpinpam.so` literally — the
+# old `pam_pinpam.so` reference dlopen-failed silently and PAM treated
+# it as a faulty module, which is what kept PIN auth from ever working
+# pre-2026-04-22 even when `pinutil setup` had succeeded.
+#
+# pinpam returns AUTHINFO_UNAVAIL when no PIN is provisioned, so
 # 'sufficient' falls through cleanly to pam_fprintd/pam_unix — first-boot
 # (pre-`pinutil setup`) still works.
 #
@@ -542,7 +549,7 @@ sudo tee /etc/pam.d/sudo >/dev/null <<'SUDOPAMEOF'
 #%PAM-1.0
 # arch-setup: PIN primary, fingerprint optional (5s timeout), password fallback.
 # See postinstall.sh §7a.
-auth        sufficient  pam_pinpam.so
+auth        sufficient  libpinpam.so
 auth        sufficient  pam_fprintd.so              max-tries=1 timeout=5
 auth        include     system-auth
 account     include     system-auth
@@ -557,7 +564,7 @@ sudo tee /etc/pam.d/hyprlock >/dev/null <<'HYPRLOCKPAMEOF'
 #%PAM-1.0
 # arch-setup: PIN primary, fingerprint optional (5s timeout), password fallback.
 # See postinstall.sh §7a.
-auth        sufficient  pam_pinpam.so
+auth        sufficient  libpinpam.so
 auth        sufficient  pam_fprintd.so              max-tries=1 timeout=5
 auth        include     login
 HYPRLOCKPAMEOF
@@ -1343,14 +1350,15 @@ echo "-- secrets / auth --"
 check "fprintd enabled"     "systemctl is-enabled fprintd"
 check "fprintd enrolled"    "fprintd-list tom 2>/dev/null | grep -q 'Fingerprints for user tom'"
 check "pinutil (TPM PIN)"   "test -x /usr/bin/pinutil || command -v pinutil"
-check "pinpam in sudo"       "grep -q pam_pinpam /etc/pam.d/sudo"
-check "pinpam in hyprlock"   "grep -q pam_pinpam /etc/pam.d/hyprlock"
-check "no pinpam in sddm"    "! grep -q pam_pinpam /etc/pam.d/sddm"
+check "pinpam .so present"   "test -f /usr/lib/security/libpinpam.so"
+check "pinpam in sudo"       "grep -q libpinpam /etc/pam.d/sudo"
+check "pinpam in hyprlock"   "grep -q libpinpam /etc/pam.d/hyprlock"
+check "no pinpam in sddm"    "! grep -q libpinpam /etc/pam.d/sddm"
 check "fprintd in sddm"      "grep -q 'pam_fprintd.*max-tries=1.*timeout=10' /etc/pam.d/sddm"
 check "fprintd in sudo"      "grep -q 'pam_fprintd.*max-tries=1.*timeout=5' /etc/pam.d/sudo"
 check "fprintd in hyprlock"  "grep -q 'pam_fprintd.*max-tries=1.*timeout=5' /etc/pam.d/hyprlock"
-check "pinpam before fprintd sudo" "awk '/pam_pinpam/{p=NR} /pam_fprintd/{f=NR} END{exit !(p && f && p<f)}' /etc/pam.d/sudo"
-check "pinpam before fprintd hyprlock" "awk '/pam_pinpam/{p=NR} /pam_fprintd/{f=NR} END{exit !(p && f && p<f)}' /etc/pam.d/hyprlock"
+check "pinpam before fprintd sudo" "awk '/libpinpam/{p=NR} /pam_fprintd/{f=NR} END{exit !(p && f && p<f)}' /etc/pam.d/sudo"
+check "pinpam before fprintd hyprlock" "awk '/libpinpam/{p=NR} /pam_fprintd/{f=NR} END{exit !(p && f && p<f)}' /etc/pam.d/hyprlock"
 check "pam_unix in sys-auth" "grep -q pam_unix /etc/pam.d/system-auth"
 check "LUKS root TPM2"      "sudo systemd-cryptenroll /dev/disk/by-partlabel/ArchRoot 2>/dev/null | awk 'NR>1 && \$2==\"tpm2\"{f=1} END{exit !f}'"
 check "cryptvar keyfile"    "sudo test -f /etc/cryptsetup-keys.d/cryptvar.key"

@@ -435,15 +435,27 @@ stack.
    fix is to own the whole file (not `sed -i 1i`) and keep pam_pinpam out
    of it.
 
-2. **hyprlock: PIN silently rejected, only password works.** The live
-   hyprlock stack has `auth sufficient pam_pinpam.so` prepended — that
-   part is correct. But the user has no PIN provisioned (`pinutil status`
-   returns `{"Ok":null}` and the TPM NVRAM is empty). pinpam returns
-   `AUTHINFO_UNAVAIL` → fallthrough to `login` → pam_unix → the user's
-   typed string is evaluated as a password, not a PIN. The fix is two-fold:
-   (a) run `pinutil setup` as part of postinstall (already there at §7),
-   (b) make sure postinstall doesn't silently skip it under non-TTY
-   re-runs without warning. Not a PAM-stack bug per se.
+2. **hyprlock: PIN silently rejected, only password works.** Two
+   compounding bugs here, only the second one was caught on first
+   investigation:
+   - **The real root cause** (caught 2026-04-22 after a re-test): the
+     PAM line referenced `pam_pinpam.so`, but pinpam-git installs its
+     module as `libpinpam.so` — every other PAM module follows the
+     `pam_*.so` naming convention but pinpam doesn't. PAM's dlopen
+     failed silently (`PAM unable to dlopen(/usr/lib/security/pam_pinpam.so)`
+     in the journal); PAM marked it a "faulty module" and skipped to the
+     next line. PIN was never even attempted, regardless of whether
+     `pinutil setup` had run.
+   - **The originally-suspected cause** (turned out to be a red herring
+     this round): an early reading of `pinutil status` returned
+     `{"Ok":null}` and the agent interpreted that as "no PIN
+     provisioned." After running `pinutil setup` and re-testing, the
+     dlopen-failure was still in the journal — so the status reading
+     either meant something else or the user provisioned PIN
+     immediately after.
+
+   Fix: reference `libpinpam.so` literally in the PAM lines. Comment in
+   §7a calls out the naming quirk so this doesn't get re-broken.
 
 3. **sudo: fingerprint prompts first, Ctrl+C falls to password, PIN never
    offered.** The live sudo stack has fprintd at line 1 *above* pam_pinpam
