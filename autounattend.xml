@@ -30,7 +30,12 @@
 				</RunSynchronousCommand>
 				<RunSynchronousCommand wcm:action="add">
 					<Order>6</Order>
-					<Path>cmd.exe /c &gt;&gt;X:\pe.cmd (echo:^(echo 0^)^&gt;X:\target-disk.txt)</Path>
+					<!-- Samsung-by-size detection. Emits a powershell.exe line into pe.cmd that
+					     picks the unique disk in the 500-600 GB window (the Samsung SSD 840 PRO
+					     512GB per decisions.md §Q9) and writes its number to X:\target-disk.txt.
+					     Aborts (exit 1 + pause) if zero or multiple disks match, so we never
+					     silently clobber the Netac or a Ventoy virtual disk. -->
+					<Path>cmd.exe /c &gt;&gt;X:\pe.cmd (echo:powershell.exe -NoProfile -Command "$d = Get-Disk ^| Where-Object { $_.Size -gt 500GB -and $_.Size -lt 600GB }; if ^($d.Count -ne 1^) { exit 1 }; $d.Number ^| Out-File -Encoding ascii X:\target-disk.txt" ^|^| ^( echo Samsung SSD not uniquely detected ^(expected one 500-600 GB disk^). ^&amp; pause ^&amp; exit /b 1 ^))</Path>
 				</RunSynchronousCommand>
 				<RunSynchronousCommand wcm:action="add">
 					<Order>7</Order>
