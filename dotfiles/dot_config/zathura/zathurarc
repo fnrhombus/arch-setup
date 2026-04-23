@@ -1,0 +1,30 @@
+# zathura — PDF viewer. Colors come from matugen-rendered file (it's
+# overwritten by the matugen template directly, so this file is the
+# template's destination).
+#
+# Matugen renders directly here; sourcing-pattern not needed.
+# Non-color settings below are stable.
+
+set selection-clipboard          clipboard
+set adjust-open                  best-fit
+set pages-per-row                1
+set scroll-page-aware            true
+set scroll-step                  100
+set guioptions                   ""
+set window-title-basename        true
+set window-title-page            true
+set statusbar-basename           true
+set statusbar-home-tilde         true
+set incremental-search           true
+set abort-clear-search           false
+set sandbox                      strict
+set font                         "JetBrainsMono Nerd Font 11"
+
+# Modal-key conventions: vim-ish nav already default in zathura.
+map [normal]    <C-h>  navigate previous
+map [normal]    <C-l>  navigate next
+map [normal]    R      reload
+map [fullscreen] q     toggle_fullscreen
+
+# Recolor toggle (hi/lo readability)
+map r recolor
