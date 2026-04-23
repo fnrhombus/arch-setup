@@ -28,19 +28,13 @@ greetd greetd-regreet
 waybar swaync fuzzel
 
 # Clipboard, wallpaper, screenshots
-cliphist wl-clipboard awww          # awww = continuation of archived swww (Codeberg/LGFae 2025-10)
-grim slurp satty hyprshot
+cliphist wl-clipboard            # extra
+grim slurp satty hyprshot        # extra
 
-# Theming + cursor + icon
-matugen                          # AUR — wallpaper-derived palette
-nwg-look qt5ct qt6ct             # GTK + Qt theme managers
-papirus-icon-theme               # icon theme (max app coverage)
-# Bibata cursors: install BOTH the hyprcursor build AND the Xcursor build.
-# Xwayland apps (Edge, VSCode, zathura) can't read hyprcursor format and
-# fall back to XCURSOR_THEME. The bibata-cursor AUR package is Xcursor only;
-# the hyprcursor format comes from a community fork.
-bibata-cursor                    # AUR — Xcursor (Xwayland fallback)
-bibata-cursor-translated         # AUR — hyprcursor format (~6.6 MB)
+# Theming managers (matugen-rendered colors land here; for the matugen
+# package itself, see the AUR section below)
+nwg-look qt5ct qt6ct             # GTK + Qt theme managers (extra)
+papirus-icon-theme               # icon theme (max app coverage, extra)
 
 # OSD popups (volume / brightness / caps-lock)
 swayosd
@@ -50,7 +44,7 @@ nwg-displays                     # display config
 network-manager-applet           # provides nm-connection-editor
 overskride                       # AUR — Bluetooth (GTK4)
 pwvucontrol                      # PipeWire-native audio mixer
-mission-center                   # AUR — resource/process monitor (GUI)
+mission-center                   # extra — resource/process monitor (GUI)
 pacseek                          # AUR — TUI package install/remove
 
 # Daily-use viewers
@@ -58,16 +52,27 @@ imv                              # image viewer
 zathura zathura-pdf-poppler      # PDF viewer (Xwayland; modal keys)
 
 # Power menu, color picker
-wleave hyprpicker                # both AUR
+wleave                           # AUR — GTK4 logout/power menu
+hyprpicker                       # extra — color picker
 
-# Hyprland plugins
-hyprexpo                         # Mission-Control-style overview
+# Hyprland plugins (loaded via hyprpm at install time, not pacman)
+# - hyprexpo (workspace overview)
+# - hyprgrass (touch gestures)
 
 # Portals
 xdg-desktop-portal-gtk xdg-desktop-portal-hyprland
 
 # 2-in-1 hardware
-iio-hyprland-git hyprgrass wvkbd
+iio-hyprland-git                 # AUR (no tagged release)
+hyprgrass                        # via hyprpm, not pacman
+wvkbd                            # AUR — on-screen keyboard
+
+# Wallpaper engine — awww-bin in AUR (provides=awww). Replaces archived swww.
+awww-bin matugen-bin             # AUR
+
+# Cursors — both packages: Xcursor for Xwayland, hyprcursor variant manually
+# from LOSEARDES77/Bibata-Cursor-hyprcursor (no AUR pkg as of 2026-04).
+bibata-cursor-theme              # AUR — Xcursor format only
 ```
 
 ## Greeter
@@ -92,7 +97,7 @@ template target).
 ## Visual
 
 - **Transparency / blur** via Hyprland's `decoration { blur, active_opacity, rounded }`.
-- **Wallpaper rotation** — `swww` driven by a systemd user timer pointed at
+- **Wallpaper rotation** — `awww` driven by a systemd user timer pointed at
   a wallpaper folder. Each rotation regenerates the matugen palette and
   reloads dependent components.
 - **Dynamic accent** — matugen derives the full palette from the current

@@ -122,7 +122,8 @@ sudo pacman -Syu --noconfirm --needed \
     nwg-look nwg-displays \
     qt5ct qt6ct papirus-icon-theme \
     imv zathura zathura-pdf-poppler \
-    iio-sensor-proxy libwacom wvkbd \
+    iio-sensor-proxy libwacom \
+    mission-center \
     remmina freerdp \
     ufw \
     azure-cli certbot python-pipx \
@@ -199,27 +200,38 @@ fi
 # build (Anthropic ships no official Linux binary). `-native` variant is the
 # community-recommended one — `-bin` has recurring ffmpeg dep issues. Lags
 # official releases; expect occasional breakage on Anthropic updates.
-log "Installing AUR-exclusive apps (VSCode, Edge, Claude, awww, matugen, mission-center, overskride, wleave, Bibata, pinpam, iio-hyprland, powershell)..."
-# iio-hyprland: AUR-only (iio-hyprland-git, no tagged release).
-# certbot-dns-azure: PyPI-only, installed via pipx in §3a.
-# awww: continuation of archived swww (LGFae moved to Codeberg 2025-10-29).
-# bibata-cursor: Xcursor-only build for Xwayland fallback;
-#   bibata-cursor-translated: hyprcursor-format build (~6.6 MB) for Hyprland-native.
+log "Installing AUR-exclusive apps (VSCode, Edge, Claude, awww, matugen, overskride, wleave, Bibata, wvkbd, pinpam, iio-hyprland, powershell)..."
+# Verified existence on AUR 2026-04-23 — package names below are the
+# actual AUR slugs, NOT the upstream project names.
+#
+# Notes per package:
+#   - awww-bin       — continuation of archived swww (LGFae, Codeberg);
+#                      provides=awww so binaries `awww` + `awww-daemon`
+#                      end up on PATH.
+#   - sesh-bin       — was once available as bare `sesh` somewhere;
+#                      currently AUR-only as `sesh-bin`.
+#   - wvkbd          — moved here from §1 pacman: NOT in extra, AUR-only.
+#   - bibata-cursor-theme  — Xcursor format. Used as Xwayland fallback.
+#   - hyprcursor-format Bibata: NO clean AUR package as of 2026-04. The
+#     LOSEARDES77/Bibata-Cursor-hyprcursor github repo is the source;
+#     install manually via:
+#       git clone https://github.com/LOSEARDES77/Bibata-Cursor-hyprcursor ~/.icons/Bibata-hyprcursor
+#     Until then, Hyprland falls back to the Xcursor build (works fine,
+#     just larger ~44 MB resident vs ~6.6 MB hyprcursor).
 yay -S --noconfirm --needed \
     visual-studio-code-bin \
     microsoft-edge-stable-bin \
     claude-desktop-native \
     pinpam-git \
-    sesh \
+    sesh-bin \
+    wvkbd \
     iio-hyprland-git \
     powershell-bin \
-    awww \
+    awww-bin \
     matugen-bin \
-    mission-center \
     overskride \
     wleave \
-    bibata-cursor \
-    bibata-cursor-translated \
+    bibata-cursor-theme \
     pacseek
 
 # ---------- 3a. certbot-dns-azure plugin (pipx — not packaged for Arch) ----------

@@ -20,17 +20,28 @@ emit_cheatsheet=0
 
 [[ -r "$entry" ]] || { echo "validate-hypr-binds: missing $entry" >&2; exit 2; }
 
-# ---- Resolve sourced files (one level — Hyprland configs aren't typically nested deeper) ----
+# ---- Resolve sourced files. Hyprland's `source = path` accepts both
+# absolute paths and ~-prefixed; we also fall back to the entry file's
+# dirname so the validator works against a chezmoi source tree (where
+# binds.conf etc. live next to hyprland.conf, not under ~/.config/hypr/).
 files=("$entry")
+entry_dir="$(dirname "$entry")"
 while IFS= read -r src; do
-    expanded="${src/#~/$HOME}"
-    [[ -r "$expanded" ]] && files+=("$expanded")
+    src_trimmed="${src%# *}"; src_trimmed="${src_trimmed%%[[:space:]]}"
+    expanded="${src_trimmed/#~/$HOME}"
+    if [[ -r "$expanded" ]]; then
+        files+=("$expanded")
+    elif [[ -r "${entry_dir}/$(basename "$expanded")" ]]; then
+        files+=("${entry_dir}/$(basename "$expanded")")
+    fi
 done < <(grep -hE '^\s*source\s*=' "$entry" 2>/dev/null \
     | sed -E 's/^\s*source\s*=\s*//' )
 
 # ---- Extract binds. Tolerate bind / bindm / bindel / bindl / binde variants. ----
 # Grammar (Hyprland docs): bind[flags] = MOD, KEY, dispatcher[, args]
-declare -A seen_bind     # key = "MOD|KEY", value = "file:line"
+# `set -u` errors on first access of an empty associative array; explicit
+# init bypasses that.
+declare -A seen_bind=()  # key = "MOD|KEY", value = "file:line"
 declare -a issues=()
 
 # Known good dispatchers — refreshed against
