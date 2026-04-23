@@ -132,6 +132,7 @@ sudo pacman -Syu --noconfirm --needed \
     azure-cli certbot python-pipx \
     memtest86+ memtest86+-efi \
     smartmontools \
+    sbctl \
     mise chezmoi github-cli \
     docker docker-compose docker-buildx \
     snapper snap-pac
@@ -1297,6 +1298,8 @@ echo "-- DDNS + Let's Encrypt --"
 check "azure-cli"           "command -v az"
 check "memtest86+ entry"   "sudo grep -qE '^/Memtest86\\+' /boot/limine.conf"
 check "limine-snapper-sync" "pacman -Q limine-snapper-sync"
+check "sbctl installed"    "command -v sbctl"
+check "limine-redeploy hook" "test -x /usr/local/sbin/limine-redeploy"
 check "smartd enabled"      "systemctl is-enabled smartd.service"
 check "metis-ddns binary"   "test -x /usr/local/bin/metis-ddns"
 check "metis-ddns service"  "systemctl is-enabled metis-ddns.service 2>/dev/null || systemctl cat metis-ddns.service >/dev/null 2>&1"

@@ -152,10 +152,10 @@ The script self-mounts the Ventoy data partition at `/run/ventoy` (for `chroot.s
 It will:
 1. Size-detect the Samsung (500–600 GB) and Netac (100–150 GB). **Aborts loudly if either is missing** — don't blindly retry, fix it.
 2. Show the plan and ask `[yes/NO]`. Type **`yes`** exactly.
-3. **Prompt once up-front for three secrets** (all confirmed twice; nothing else will ask you for input until install is done):
-   - **root password** — account recovery.
-   - **tom's password** — your daily login. Make it strong; you'll bypass it with TPM-PIN and fingerprint later.
-   - **LUKS passphrase** — unlocks both the Samsung root and Netac /var at boot until TPM2 autounlock is wired in Phase 3. **Stash this in Bitwarden now** (next to the BitLocker key) as a Secure Note called "Metis LUKS passphrase". 8+ chars, 12+ recommended. If PCR values ever drift, this is what gets you back in.
+3. **Prompt once up-front** for the two account passwords, then **display an auto-generated LUKS recovery key** for you to photograph (BitLocker model — no typing). Nothing else will ask for input until install is done.
+   - **root password** — account recovery; type + confirm.
+   - **tom's password** — your daily login; type + confirm. Make it strong; you'll bypass it with TPM-PIN and fingerprint later.
+   - **LUKS recovery key** — install.sh generates a 48-char hex key (8 groups of 6, hyphen-separated, ~192 bits entropy) and prints it in a yellow banner. **Photograph it now** with your phone. Same as BitLocker: you only need this if the TPM ever loses its seal (firmware update, secure-boot toggle, motherboard swap). The script pauses until you type **`I HAVE THE KEY`** verbatim — don't skip past, you can't get the key back. Later, transcribe to Bitwarden as a Secure Note called **"Metis LUKS recovery"** (parallel to "Metis BitLocker recovery").
 4. LUKS-format both data partitions, mkfs, pacstrap (~15 min — biggest wait, fully unattended).
 5. Enter chroot (passwords + LUKS UUIDs handed in via mode-600 files), allocate TPM2 SHA-256 PCR bank, install **limine** + greetd + greetd-regreet, write `/etc/crypttab.initramfs` (cryptroot + cryptswap with TPM2) + `/etc/crypttab` (cryptvar via keyfile), add `sd-encrypt` to mkinitcpio HOOKS, install greetd config from `/root/arch-setup/phase-3-arch-postinstall/system-files/`, install pacman post-upgrade hook for TPM2 reseal on kernel/limine updates, wire greetd PAM for gnome-keyring auto-unlock.
 6. `dd` the Arch ISO onto the Netac recovery partition (~1 min, unencrypted by design so it still boots from F12 if Arch is hosed).
@@ -712,17 +712,25 @@ lsmod | grep -iE 'nvidia|nouveau'     # expect empty output
 ```
 If modules still load: check `/etc/mkinitcpio.conf` — `MODULES=(btrfs)` should NOT contain `nvidia` or `nouveau`. Check `/etc/modules-load.d/` for any file forcing them.
 
-### M-luks. LUKS prompt rejects your passphrase at boot
+### M-luks. LUKS prompt rejects your recovery key at boot
 
-**Cause:** Most likely you fat-fingered it during Phase 2d (same failure mode as the account passwords below — the `prompt_luks` helper in `install.sh` only confirms against its own re-entry, never against reality). Less likely: initramfs keyboard layout is wrong, so a symbol you're typing is different from what the kernel receives.
+The key is auto-generated 48 hex chars in 8 groups of 6 (BitLocker model). Reading wrong from the photo is the only realistic failure mode here — typo recovery isn't possible (the install never re-asks, so what got generated IS what's in the LUKS header).
 
-**Fix (still have the passphrase in Bitwarden, typo was at install time):** you don't — if both copies were typed wrong identically, the LUKS header's slot 0 holds that typo as the real passphrase. Continue reading — there's no magic recovery.
+**Fix (you misread the photo):**
+- Hex chars are `0-9 a-f` only — no `o`/`O`, no `l`/`I`, no `s`/`5` confusion possible. Compare carefully:
+  - `0` (zero) vs `o` — there's no `o` in the key
+  - `b` vs `8` — both can appear; check the photo at higher zoom
+  - `e` vs `c` — same
+- Hyphens are pure separators; the key would still work without them, but typing them in keeps you on track of which group you're in.
+- Initramfs keyboard layout: hex chars are layout-invariant on a QWERTY US keyboard, so layout shouldn't be the culprit. (No symbols in this key.)
 
-**Fix (typo at install, no backup):** boot the Ventoy USB → Arch ISO → live env. The Samsung data is unreachable without the passphrase. Full reinstall is the only path — re-run Phase 2 with the corrected passphrase, being careful to type it slowly both times.
+**Fix (you lost the photo + haven't transcribed it to Bitwarden yet):** the encrypted disks are unrecoverable. Full reinstall — boot Ventoy USB → Arch ISO → re-run Phase 2; a fresh key will be generated. Same outcome as losing the BitLocker recovery key.
 
-**Fix (passphrase is correct, layout issue):** at the LUKS prompt, try typing slowly. If your passphrase contains symbols (`!@#$%^&*`), the initramfs may be using a US layout even if your physical keyboard is something else. Workaround: reinstall with a passphrase that's ASCII letters + digits only until greetd, then change it later with `sudo cryptsetup luksChangeKey /dev/disk/by-partlabel/ArchRoot`.
-
-**Preventive note for re-running Phase 2:** `install.sh` enforces an 8+ character minimum and re-prompts on mismatch, but it cannot catch a consistent typo. Type slowly; verify against Bitwarden before hitting Enter the second time.
+**Once unlocked**: if you'd prefer a memorable passphrase to the random hex string, you can replace key-slot 0 (without losing your data):
+```
+sudo cryptsetup luksChangeKey /dev/disk/by-partlabel/ArchRoot
+```
+You'll be asked for the current key (the random hex), then the new passphrase + confirmation. Repeat for `ArchVarLUKS` and `ArchSwapLUKS`. **Stash the new passphrase in Bitwarden BEFORE rebooting** — same destruction-on-loss model applies.
 
 ### N-luks. TPM autounlock didn't kick in — still getting the passphrase prompt every boot
 

@@ -322,4 +322,26 @@ Everything listed below is installed automatically by the phase-2 + phase-3 scri
 - **fuzzel → walker / anyrun**: Other Wayland launchers if fuzzel turns out limiting (it hasn't so far for any documented user).
 - **Single channel → Dual channel RAM**: Add matching 16GB DDR4-2400 SODIMM stick.
 - **Replace dead battery**: Lid-close hibernate flips from dead-code to active automatically (logind config is forward-compat).
-- **Secure Boot via sbctl**: Currently disabled. Enable in firmware (Setup Mode), enroll keys via `sbctl create-keys && sbctl enroll-keys --microsoft`. Then sign **all** boot artifacts: `sbctl sign -s /boot/EFI/BOOT/BOOTX64.EFI && sbctl sign -s /usr/share/limine/BOOTX64.EFI && sbctl sign -s /boot/vmlinuz-linux && sbctl sign -s /boot/vmlinuz-linux-lts`. The pacman `95-limine-redeploy.hook` then copies the signed source binary to the ESP on every limine update; the kernel signatures regenerate on each `sbctl sign -a` (run after kernel updates if the auto-sign hook isn't wired). Finally re-enroll TPM2 PCR slots against the new SB-on PCR state.
+- **Secure Boot via sbctl**: Currently disabled. The reinstall pre-installs `sbctl` (postinstall §1) and the `95-limine-redeploy.hook` is already SB-aware (`/usr/local/sbin/limine-redeploy` calls `sbctl sign -s` after copy if SB is enrolled, no-op otherwise). To enable end-to-end:
+  1. **Reboot, BIOS, set Secure Boot to "Setup Mode"** (clears stored keys, lets sbctl enroll custom ones).
+  2. **From Arch**, enroll keys + Microsoft KEK (so Windows still chainloads):
+     ```
+     sudo sbctl create-keys
+     sudo sbctl enroll-keys --microsoft
+     ```
+  3. **Sign every boot artifact** (sbctl tracks them after the first `-s` and its own pacman hook keeps them signed across upgrades):
+     ```
+     sudo sbctl sign -s /boot/EFI/BOOT/BOOTX64.EFI
+     sudo sbctl sign -s /usr/share/limine/BOOTX64.EFI
+     sudo sbctl sign -s /boot/vmlinuz-linux
+     sudo sbctl sign -s /boot/vmlinuz-linux-lts
+     sudo sbctl verify     # confirm all 4 say "Signed"
+     ```
+  4. **Reboot, BIOS, flip Secure Boot to "User Mode" (enabled)**. First boot will prompt for the LUKS recovery key — PCR 7 changed (SB toggled on), so the TPM seal is invalid.
+  5. **Type the LUKS recovery key** from the photograph you took during install. System unlocks.
+  6. **Re-enroll TPM against the new PCR state**:
+     ```
+     sudo /usr/local/sbin/tpm2-reseal-luks
+     sudo reboot
+     ```
+  7. Subsequent boots are silent again. Next BitLocker boot on the Windows side will also prompt once (PCR 7 changed there too) — same recovery flow as the original install.

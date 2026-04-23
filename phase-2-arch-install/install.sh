@@ -10,8 +10,9 @@
 #                          random key per boot) + LUKS2 ext4 (~110 GB, keyfile-unlocked)
 #
 # Full-disk encryption per decisions.md §Q11 — parity with Windows BitLocker.
-# One passphrase unlocks both LUKS volumes at install; post-install phase 3
-# enrolls TPM2 so boot becomes silent (passphrase stays as recovery fallback).
+# Recovery key is auto-generated (BitLocker model: 48 hex chars, displayed
+# once for the user to photograph); post-install phase 3 enrolls TPM2 so
+# boot becomes silent (recovery key stays as fallback).
 #
 # All disk operations are size-gated: the script aborts if the expected
 # disks are absent or if anything looks off. Never silently clobbers.
@@ -52,24 +53,57 @@ prompt_password() {
     openssl passwd -6 "$p1"
 }
 
-# Prompt twice for a LUKS passphrase and print the plaintext on stdout.
-# Unlike prompt_password above (which hashes for /etc/shadow), cryptsetup needs
-# the plaintext — it hashes internally via argon2id. Caller must keep it in
-# memory only; never let it touch disk.
-prompt_luks() {
-    local label="$1" p1 p2
+# Auto-generate a BitLocker-style LUKS recovery key (48 hex chars in 8 groups
+# of 6, hyphen-separated). Display it to the user, pause for them to
+# photograph, and only continue when they explicitly acknowledge.
+#
+# Why generated, not user-typed:
+#   - Eliminates the fat-finger-twice-and-not-know-it failure mode the old
+#     prompt_luks had (mismatch only catches typos *between* the two entries,
+#     not consistent typos in both).
+#   - High entropy (~192 bits) — comparable to BitLocker's 48-digit key.
+#   - Symmetric UX with BitLocker: photograph once, transcribe to Bitwarden
+#     at leisure, never type again unless the TPM seal breaks.
+gen_and_show_luks_passphrase() {
+    # 24 random bytes → 48 hex chars → grouped 6-by-6 with hyphens.
+    local raw key
+    raw=$(openssl rand -hex 24)            # 48 chars, 0-9a-f, ~192 bits entropy
+    key=$(printf '%s' "$raw" | sed 's/.\{6\}/&-/g; s/-$//')
+
+    {
+        printf '\n'
+        printf '\033[1;33m'   # yellow bold for visibility on the live-ISO TTY
+        printf '================================================================\n'
+        printf '   LUKS RECOVERY KEY  --  PHOTOGRAPH THIS NOW\n'
+        printf '================================================================\n'
+        printf '\n'
+        printf '       \033[1;37m%s\033[1;33m\n' "$key"
+        printf '\n'
+        printf '================================================================\n'
+        printf '\033[0m\n'
+        printf '  This unlocks every encrypted volume on Metis (cryptroot,\n'
+        printf '  cryptvar, cryptswap) at boot if the TPM ever loses its seal\n'
+        printf '  -- same model as the BitLocker recovery key you stashed during\n'
+        printf '  the Windows install.\n\n'
+        printf '  WHAT TO DO RIGHT NOW:\n'
+        printf '    1. Take a phone photo of the key above. Make sure it'"'"'s sharp.\n'
+        printf '    2. Later, transcribe it to Bitwarden as "Metis LUKS recovery"\n'
+        printf '       (parallel to "Metis BitLocker recovery").\n\n'
+        printf '  IF YOU LOSE THIS KEY: the encrypted disks become unrecoverable\n'
+        printf '  the moment the TPM seal breaks (firmware update, secure-boot\n'
+        printf '  toggle, motherboard swap). No backdoor, no recovery -- same as\n'
+        printf '  BitLocker.\n\n'
+        printf '  Type \033[1mI HAVE THE KEY\033[0m (case-sensitive, exactly) to continue:\n'
+    } >&2
+
+    local ack
     while :; do
-        read -rsp "LUKS passphrase for $label: " p1 </dev/tty; printf '\n' >&2
-        read -rsp "  confirm $label passphrase: " p2 </dev/tty; printf '\n' >&2
-        if [[ ${#p1} -lt 8 ]]; then
-            warn "  (too short — 8+ chars; 12+ recommended. This is your recovery fallback if the TPM loses its seal.)"
-        elif [[ "$p1" != "$p2" ]]; then
-            warn "  (didn't match — try again)"
-        else
-            break
-        fi
+        read -rp '> ' ack </dev/tty
+        [[ "$ack" == "I HAVE THE KEY" ]] && break
+        printf '  (didn'"'"'t match — type "I HAVE THE KEY" exactly to confirm you photographed it)\n' >&2
     done
-    printf '%s' "$p1"
+
+    printf '%s' "$key"
 }
 
 # Cleanup trap: on any failure, unmount /mnt and close LUKS mappers so a
@@ -259,12 +293,12 @@ timedatectl set-ntp true
 # LUKS passphrase stays in an in-memory variable for the duration of this
 # script — used to luksFormat both volumes and to luksAddKey the cryptvar
 # keyfile — then unset before exit. Never touches disk.
-command -v openssl >/dev/null || die "openssl not found in live env — needed for password hashing."
-log "Collecting passwords + LUKS passphrase now (you won't be prompted again during install)."
-log "The LUKS passphrase is what you'll type at boot if the TPM ever loses its seal — stash it in Bitwarden."
+command -v openssl >/dev/null || die "openssl not found in live env — needed for password hashing + LUKS key generation."
+log "Collecting passwords now (you won't be prompted again during install)."
+log "After the two account passwords, a 48-char LUKS recovery key will be generated and displayed for you to photograph."
 ROOT_PW_HASH=$(prompt_password "root")
 TOM_PW_HASH=$(prompt_password "tom")
-LUKS_PW=$(prompt_luks "disk encryption (used for both Samsung root and Netac /var)")
+LUKS_PW=$(gen_and_show_luks_passphrase)
 
 # ---------- 3. confirm ----------
 cat <<EOF

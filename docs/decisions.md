@@ -334,10 +334,13 @@ Parity with Windows BitLocker on the same machine. "Stolen laptop" becomes "bric
 - **Netac `ArchRecovery`** — **unencrypted by design.** It's a raw Arch ISO meant to be bootable from F12 when the main install is hosed; encrypting it would defeat that purpose and there's nothing sensitive on it.
 - **Samsung EFI** — unencrypted (UEFI spec requires the ESP to be FAT32 and unencrypted). The kernel + initramfs on it are public data, same as any normal install.
 
-**Key management:**
-- One passphrase set at install time (Phase 2d `install.sh`) unlocks both LUKS containers. Stored in a bash variable in install.sh, never touches disk. Used for `luksFormat` both volumes and `luksAddKey` for the cryptvar keyfile; then `unset` at end of install.
-- TPM2 enrollment happens in Phase 3 (`systemd-cryptenroll --tpm2-device=auto --tpm2-pcrs=0+7`). After that, `cryptroot` unseals silently unless the boot chain changes.
-- The passphrase is **the recovery mechanism.** Stash it in Bitwarden parallel to the BitLocker key.
+**Key management — BitLocker model:**
+- **Auto-generated** at install time (Phase 2d `install.sh` `gen_and_show_luks_passphrase`): 24 bytes from `openssl rand -hex` → 48 hex chars → grouped 6-by-6 with hyphens. ~192 bits of entropy. Same shape and UX as the BitLocker recovery key.
+- Displayed once in a yellow-banner panel; install.sh blocks until the user types `I HAVE THE KEY` verbatim. User photographs the screen, transcribes to Bitwarden as **"Metis LUKS recovery"** later (parallel to "Metis BitLocker recovery").
+- Held in an in-memory bash variable for the rest of install.sh — used for `luksFormat` of all three volumes (cryptroot, cryptvar, cryptswap) and `luksAddKey` for the cryptvar keyfile; then `unset` at end of install. Never touches disk.
+- TPM2 enrollment happens in Phase 3 (`systemd-cryptenroll --tpm2-device=auto --tpm2-pcrs=0+7` against cryptroot AND cryptswap, postinstall §7.5). After that, both unseal silently at boot unless the boot chain changes.
+- The recovery key is **the only fallback.** Lose the photo before transcribing to Bitwarden → encrypted disks are unrecoverable. No backdoor. Same destruction-on-loss model as BitLocker.
+- If you'd prefer a memorable passphrase to the random hex string, swap key-slot 0 *after* unlocking once: `sudo cryptsetup luksChangeKey /dev/disk/by-partlabel/ArchRoot` (and same for `ArchVarLUKS`, `ArchSwapLUKS`). Stash the new passphrase in Bitwarden BEFORE rebooting.
 
 **PCR choice — 0+7:**
 - PCR 0 = UEFI firmware code. PCR 7 = Secure Boot policy (on/off + key hashes).
@@ -353,7 +356,10 @@ Parity with Windows BitLocker on the same machine. "Stolen laptop" becomes "bric
 
 **Kernel cmdline:** `root=/dev/mapper/cryptroot rootflags=subvol=@ resume=/dev/mapper/cryptswap rw quiet` in all three limine entries (`/Arch Linux`, `/Arch Linux (LTS)`, `/Arch Linux (Fallback)`) at `/boot/limine.conf`. No `rd.luks.name=` needed — crypttab.initramfs is the single source of truth. `resume=` enables S4 hibernate.
 
+**Secure Boot readiness:**
+- Secure Boot stays **off** at install time. The reinstall pre-installs `sbctl` (postinstall §1) and the `95-limine-redeploy.hook` is SB-aware — `/usr/local/sbin/limine-redeploy` calls `sbctl sign -s` after copy if SB is enrolled, no-op otherwise. Same for sbctl's own pacman hook (ships with the package), which auto-resigns kernels on every linux/linux-lts upgrade.
+- Enabling SB later: BIOS → Setup Mode → from Arch run `sbctl create-keys && sbctl enroll-keys --microsoft && sbctl sign -s {/boot/EFI/BOOT/BOOTX64.EFI,/usr/share/limine/BOOTX64.EFI,/boot/vmlinuz-linux,/boot/vmlinuz-linux-lts}` → reboot, BIOS → User Mode (SB on) → at the LUKS prompt enter the recovery key (PCR 7 changed → TPM seal invalid) → `sudo /usr/local/sbin/tpm2-reseal-luks` → reboot, silent unlock again. Full sequence in `runbook/phase-3-handoff.md` "Upgrade Paths". Same one-time recovery-key prompt cycle on the Windows side (BitLocker also seals to PCR 7).
+
 **Known limitations:**
-- Secure Boot stays off until post-phase-3 `sbctl` wiring. PCR 7 still has a consistent hash for "Secure Boot off," so the TPM seal is stable — but re-enabling Secure Boot later will invalidate the seal and require a re-enrollment.
 - Recovery partition on Netac is unencrypted. A motivated attacker with physical access could swap the raw ISO for a malicious one. Mitigated by physical security of the laptop (no battery, stashed under a desk, no shared network access).
-- If the TPM is reset (firmware reset, motherboard replacement), the sealed slot is dead and the passphrase is the only way in. Hence the "stash in Bitwarden" step is mandatory, not optional.
+- If the TPM is reset (firmware reset, motherboard replacement), every sealed slot is dead and the recovery key is the only way in. Hence the "transcribe to Bitwarden" step is mandatory, not optional.

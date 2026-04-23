@@ -245,6 +245,11 @@ EOF
 # Pacman hook: re-deploy limine BIOS/UEFI binaries when the limine package
 # updates. Without this, a limine package upgrade leaves /boot/EFI/BOOT/
 # pointed at a stale copy.
+#
+# Secure Boot ready: the helper script also re-signs the deployed binary if
+# sbctl is set up + SB is enrolled (no-op otherwise). Without this, a limine
+# upgrade after enabling SB would brick the next boot — firmware refuses to
+# load an unsigned binary even at the fallback path.
 install -d /etc/pacman.d/hooks
 cat > /etc/pacman.d/hooks/95-limine-redeploy.hook <<'EOF'
 [Trigger]
@@ -255,8 +260,40 @@ Target = limine
 [Action]
 Description = Re-deploying limine UEFI binary to ESP after upgrade...
 When = PostTransaction
-Exec = /usr/bin/install -m 644 /usr/share/limine/BOOTX64.EFI /boot/EFI/BOOT/BOOTX64.EFI
+Exec = /usr/local/sbin/limine-redeploy
 EOF
+
+cat > /usr/local/sbin/limine-redeploy <<'BASH'
+#!/usr/bin/env bash
+# Triggered by /etc/pacman.d/hooks/95-limine-redeploy.hook after a `limine`
+# package upgrade. Copies the fresh BOOTX64.EFI to the ESP fallback path and,
+# if Secure Boot is enrolled via sbctl, re-signs the deployed binary so the
+# next boot still passes firmware verification.
+set -euo pipefail
+
+SRC=/usr/share/limine/BOOTX64.EFI
+DST=/boot/EFI/BOOT/BOOTX64.EFI
+
+[[ -f "$SRC" ]] || { echo "limine-redeploy: $SRC missing"; exit 1; }
+
+install -m 644 "$SRC" "$DST"
+echo "limine-redeploy: copied $SRC → $DST"
+
+# Secure Boot resign step (no-op when sbctl isn't set up). sbctl status exits 0
+# whether SB is on or off; we look for the explicit "Secure Boot: ✓ Enabled"
+# line. `sbctl sign -s <file>` is idempotent — safe on re-runs.
+if command -v sbctl >/dev/null 2>&1; then
+    if sbctl status 2>/dev/null | grep -qE 'Secure Boot:.*Enabled'; then
+        echo "limine-redeploy: Secure Boot enrolled — signing $DST"
+        sbctl sign -s "$DST" || echo "limine-redeploy: sbctl sign failed (non-fatal)"
+        # Also sign the source so future redeploys start from a signed copy
+        # — sbctl's own pacman hook keeps tracked files signed across upgrades,
+        # but it only knows about files it's been told about with -s.
+        sbctl sign -s "$SRC" 2>/dev/null || true
+    fi
+fi
+BASH
+chmod 755 /usr/local/sbin/limine-redeploy
 
 # ---------- Pacman hook: TPM2 PCR re-enrolment after kernel/UKI/limine upgrades ----------
 # Every upgrade to linux / linux-lts / mkinitcpio / limine changes PCR 4
