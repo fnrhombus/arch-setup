@@ -35,7 +35,12 @@ grim slurp satty hyprshot
 matugen                          # AUR — wallpaper-derived palette
 nwg-look qt5ct qt6ct             # GTK + Qt theme managers
 papirus-icon-theme               # icon theme (max app coverage)
-bibata-cursor-theme-hyprcursor   # AUR — hyprcursor format, ~6.6 MB
+# Bibata cursors: install BOTH the hyprcursor build AND the Xcursor build.
+# Xwayland apps (Edge, VSCode, zathura) can't read hyprcursor format and
+# fall back to XCURSOR_THEME. The bibata-cursor AUR package is Xcursor only;
+# the hyprcursor format comes from a community fork.
+bibata-cursor                    # AUR — Xcursor (Xwayland fallback)
+bibata-cursor-translated         # AUR — hyprcursor format (~6.6 MB)
 
 # OSD popups (volume / brightness / caps-lock)
 swayosd
