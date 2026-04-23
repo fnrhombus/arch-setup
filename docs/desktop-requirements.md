@@ -94,12 +94,28 @@ hotkey opens a searchable list of recent items, pick one to paste.
 ## Power policy
 
 - **systemd-logind drop-in** at `/etc/systemd/logind.conf.d/00-arch-setup.conf`:
-  - `HandleLidSwitch=hibernate`           # battery
+  - `HandleLidSwitch=hibernate`           # battery — dead code today, live when battery returns
   - `HandleLidSwitchExternalPower=ignore` # AC, clamshell under desk
   - `HandleLidSwitchDocked=ignore`
 - **hypridle** — lock on idle, DPMS off on longer idle. **No** idle-hibernate
   timer — the user explicitly does not want hibernation triggered while on AC
   regardless of activity.
+
+### Manual hibernate workflow (current, until battery is replaced)
+
+The internal battery is dead/disconnected (`decisions.md:13`), so when AC
+unplugs the laptop hard-cuts instantly — no graceful hibernate is possible
+on lid-close-then-unplug. Until a battery is swapped in, hibernate must be
+**user-invoked** before unplugging:
+
+- Hotkey: `Super+Shift+H` → `systemctl hibernate`
+- Same action exposed in the fuzzel control-panel script (Power → Hibernate)
+- Optional waybar power button (custom module) for click-to-hibernate
+
+The logind config above is intentionally future-correct: the `HandleLidSwitch`
+branch fires only on battery state and is harmless dead code without one.
+When the user swaps in a new battery, lid-close-on-battery starts firing
+hibernate automatically — no reconfiguration required.
 
 ### Hibernate, not suspend
 
