@@ -27,16 +27,18 @@ die()  { printf '\033[1;31m[chroot ✗]\033[0m %s\n' "$*" >&2; exit 1; }
 [[ -n "$ROOT_PW_HASH" && -n "$TOM_PW_HASH" ]] || die "/root/.pw is missing one or both hashes."
 trap 'shred -u /root/.pw /root/.luks 2>/dev/null || rm -f /root/.pw /root/.luks' EXIT
 
-# ---------- LUKS UUIDs from install.sh ----------
-# install.sh wrote /root/.luks with LUKS_ROOT_UUID + LUKS_VAR_UUID +
-# SWAP_PARTUUID so this script can write crypttab + loader entries without
-# re-querying blkid (partition devices aren't directly visible from inside
-# the chroot anyway).
-[[ -s /root/.luks ]] || die "/root/.luks missing — install.sh should have written LUKS UUIDs."
+# ---------- LUKS UUIDs + Samsung disk path from install.sh ----------
+# install.sh wrote /root/.luks with LUKS_{ROOT,VAR,SWAP}_UUID and SAMSUNG_DISK
+# so this script can write crypttab + register the limine NVRAM entry on the
+# correct disk without re-querying blkid (partition devices aren't directly
+# visible from inside the chroot anyway).
+[[ -s /root/.luks ]] || die "/root/.luks missing — install.sh should have written LUKS UUIDs + SAMSUNG_DISK."
 # shellcheck disable=SC1091
 . /root/.luks
 [[ -n "${LUKS_ROOT_UUID:-}" && -n "${LUKS_VAR_UUID:-}" && -n "${LUKS_SWAP_UUID:-}" ]] \
     || die "/root/.luks is missing one or more UUIDs."
+[[ -n "${SAMSUNG_DISK:-}" && -b "$SAMSUNG_DISK" ]] \
+    || die "/root/.luks is missing SAMSUNG_DISK or it isn't a block device."
 
 # ---------- timezone + clock ----------
 log "Timezone → America/New_York (adjust in /etc/localtime if wrong)..."
@@ -197,7 +199,7 @@ install -m 644 /usr/share/limine/BOOTX64.EFI /boot/EFI/BOOT/BOOTX64.EFI
 # isn't mounted — install.sh handles the EFI vars mount.
 if [[ -d /sys/firmware/efi/efivars ]]; then
     efibootmgr --quiet --create-only \
-        --disk /dev/sda --part 1 \
+        --disk "$SAMSUNG_DISK" --part 1 \
         --label "Limine Boot Manager" \
         --loader '\EFI\BOOT\BOOTX64.EFI' 2>/dev/null \
         || log "  efibootmgr NVRAM entry skipped (may already exist or efivars unavailable)"
