@@ -246,11 +246,11 @@ popup on every dispatched bind, so an unbound key is visually obvious
   - `HandleLidSwitch=hibernate`           # battery — dead code today, live when battery returns
   - `HandleLidSwitchExternalPower=ignore` # AC, clamshell under desk
   - `HandleLidSwitchDocked=ignore`
-- **hypridle** — both lock and DPMS-off fire at **30 minutes idle**. No
-  idle-hibernate timer — the user explicitly does not want hibernation
+- **hypridle** — DPMS-off at **28 min** idle, screen lock at **30 min**.
+  No idle-hibernate timer — the user explicitly does not want hibernation
   triggered while on AC regardless of activity.
-  - `timeout 1800 → loginctl lock-session` (lock)
-  - `timeout 1800 → hyprctl dispatch dpms off` (display power off)
+  - `timeout 1680 → hyprctl dispatch dpms off` (display off, 28 min)
+  - `timeout 1800 → loginctl lock-session` (lock, 30 min)
   - `on-resume → hyprctl dispatch dpms on`
   - On `before-sleep` (manual hibernate path): also lock first.
 
