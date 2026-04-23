@@ -206,19 +206,31 @@ for sidecar in "$REPO_ROOT"/assets/archlinux-x86_64.iso.sig "$REPO_ROOT"/assets/
     [[ -f "$sidecar" ]] && cp -v "$sidecar" "$MNT/"
 done
 
-log "Mirroring repo into Ventoy data partition (excluding .git, node_modules, assets, PDFs)..."
-rsync -a --info=progress2 \
-    --exclude='.git' \
-    --exclude='node_modules' \
-    --exclude='assets' \
-    --exclude='runbook/*.pdf' \
-    --exclude='dotfiles/' \
-    "$REPO_ROOT/" "$MNT/"
+log "Mirroring repo into Ventoy data partition (excluding .git, node_modules, assets, PDFs, phase-1-iso/airootfs)..."
+log "  (exFAT can't store unix perms/owner/symlinks — rsync errors on those are expected and ignored.)"
+# rsync flag breakdown:
+#   -r recursive, -t times — what we actually need
+#   --no-perms / --no-owner / --no-group — exFAT has no concept of these
+#   (no -l): drop symlinks entirely; phase-1-iso/airootfs is excluded for the
+#   same reason (heavy symlinks into /usr/share/zoneinfo, /dev/null, etc., all
+#   only needed for the `pnpm iso` build path on the dev machine, not for
+#   running the install from the Netac).
+if ! rsync -rt --info=progress2 \
+        --no-perms --no-owner --no-group \
+        --exclude='.git' \
+        --exclude='node_modules' \
+        --exclude='assets' \
+        --exclude='runbook/*.pdf' \
+        --exclude='dotfiles/' \
+        --exclude='phase-1-iso/airootfs' \
+        "$REPO_ROOT/" "$MNT/"; then
+    warn "rsync exited non-zero — likely exFAT metadata-only errors (Operation not permitted on chown/symlink). File content should be intact; verify by spot-checking $MNT/."
+fi
 
-# dotfiles/ is staged separately by Phase 2's install.sh into /root/arch-setup/
-# during chroot — also copy here so post-install chezmoi has a source path.
+# dotfiles/ is staged separately so chezmoi has a source path. cp -r with
+# --no-preserve handles exFAT cleanly without the rsync flag dance.
 log "Copying dotfiles/ tree (chezmoi source for postinstall §13)..."
-rsync -a "$REPO_ROOT/dotfiles" "$MNT/"
+cp -r --no-preserve=mode,ownership "$REPO_ROOT/dotfiles" "$MNT/"
 
 log "Syncing to disk (this may take a minute on a 119 GB partition)..."
 sync
