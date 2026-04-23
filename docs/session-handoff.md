@@ -1,111 +1,83 @@
 # Session handoff — continue on Metis
 
-You are picking up a conversation that was running on Claude Code on the web (web session, scoped to `fnrhombus/arch-setup`) and is now moving to a Claude Code session running **on the Metis laptop itself**. Everything below is state you inherit cold — no shared context with the prior session.
+You are picking up a conversation on Claude Code running **on the Metis laptop itself**, in the `/tmp/arch-setup/` checkout. Everything below is state you inherit cold — no shared context with the prior session.
 
-## ⚠ Reinstall redesign in flight (2026-04-22)
+## Current state (2026-04-23)
 
-A clean-slate reinstall of the desktop stack is in planning on branch `desktop-design`. Source of truth for the new design:
+**Branch**: `desktop-design`. The clean-slate reinstall design is locked-in across `docs/decisions.md`, `docs/desktop-requirements.md`, the phase-2/phase-3 install scripts, the chezmoi `dotfiles/` tree, and the printed runbook. **The actual reinstall has NOT happened yet** — Metis is still running the prior `main`-branch install (HyDE / SDDM / Catppuccin / systemd-boot / mako) until the user kicks off phase 1.
 
-- `docs/decisions.md` — locked decisions (recently updated: greeter, theme, notifications, hibernate, full component picks)
-- `docs/desktop-requirements.md` — full spec for the bare-Hyprland + chezmoi-managed approach (matugen theming, manual hibernate workflow, GTK-CSS pipeline end to end)
+What the new design is, in one paragraph:
 
-What's locked-and-different from the live system:
-- Greeter: SDDM → greetd + ReGreet
-- Theme: Catppuccin Mocha → matugen (Material You from wallpaper)
-- Notifications: mako → swaync
-- Bootloader: systemd-boot → limine (per `reinstall-planning.md` §3)
-- Hibernate: previously disabled → enabled (S4) with TPM2-sealed swap + pacman reseal hook
-- Dotfile pack: HyDE → none (Claude-authored configs in chezmoi)
+> Dual-boot Windows 11 + Arch on a Dell Inspiron 7786. Arch boots via **limine** (replaced systemd-boot — snapshot-rollback boot menu via `limine-snapper-sync`), greeted by **greetd + ReGreet** (replaced SDDM), running **bare Hyprland** with Claude-authored configs in chezmoi (no opinionated dotfile pack). Theme is **matugen / Material You** derived from the wallpaper (replaced Catppuccin), rendered into every component (waybar, swaync, fuzzel, ghostty, helix, hypr-colors, tmux, gtk, qt, hyprlock, regreet). Notifications via **swaync** (replaced mako). Wallpaper daemon **awww** (continuation of archived swww). **S4 hibernate enabled** with persistent LUKS2-encrypted swap, TPM2-sealed (PCRs 0+7), `resume=/dev/mapper/cryptswap` in the limine cmdline. Pacman post-upgrade hooks reseal the TPM on linux/limine/mkinitcpio updates and redeploy the limine UEFI binary.
 
-Documents that still reflect **pre-reinstall state** and will be rewritten alongside the script-implementation pass:
-- This file (`docs/session-handoff.md`) — Working / Drifted / Pending sections below describe the live system, not the redesign target.
-- `runbook/phase-3-handoff.md` — describes post-install learning under HyDE+SDDM+Catppuccin.
-- `runbook/INSTALL-RUNBOOK.md` — describes the current install flow (`pnpm i` → Ventoy USB → SDDM).
-- `runbook/SURVIVAL.md` — recovery recipes assume SDDM.
-- `runbook/GLOSSARY.md` — SDDM entry needs replacing with greetd.
+## Source-of-truth hierarchy
 
-`docs/reinstall-planning.md` was the bridging memo from the prior session; §1 (desktop layer) recommended KDE Plasma 6 + Polonium, but the user picked **bare Hyprland with Claude-authored configs** instead after clarifying that "no excessive config tweaking" should be filtered through "Claude does the tweaking." That section carries a SUPERSEDED notice; the rest of `reinstall-planning.md` (Secure Boot, limine, ISO build) is still current.
+If two documents disagree, the higher-priority one wins:
 
-## Where things stand on Metis (as of 2026-04-21, pre-reinstall)
+1. **`docs/decisions.md`** — locked design decisions with rationale. Edit this when a decision changes.
+2. **`docs/desktop-requirements.md`** — implementation spec for §K matugen pipeline, §Hibernate, GTK-CSS pipeline end-to-end.
+3. **`CLAUDE.md`** — project guide (file roles, working style, commit discipline).
+4. **`runbook/INSTALL-RUNBOOK.md`** — what the user reads at the laptop during install.
+5. **`runbook/phase-3-handoff.md`** — fed to the next Claude session inside the booted Arch.
+6. **`runbook/SURVIVAL.md`** + **`runbook/GLOSSARY.md`** + **`runbook/keybinds.md`** + **`runbook/phase-3.5-hardware-handoff.md`** — references.
 
-### Working
-- Dual-boot Windows 11 + Arch install completed from USB (Ventoy + autounattend + install.sh + chroot.sh + postinstall.sh).
-- BitLocker on Windows side (recovery key path documented when PCRs mismatch — see runbook/INSTALL-RUNBOOK.md §C).
-- LUKS + btrfs + snapper on Arch side, TPM2 autounlock enrolled, fallback passphrase + recovery keys stored in Bitwarden.
-- Fingerprint reader (Goodix 538C) working via `libfprint-goodix-53xc` on `libfprint-tod-git` with `!lto`. 5 fingers enrolled by postinstall.
-- TPM-PIN via pinpam wired into sudo / polkit / hyprlock.
-- NetworkManager, SDDM, Bluetooth, PipeWire, Docker service, snapper, smartmontools, memtest86+(-efi) loader entry — all installed and enabled.
-- sshd hardened (key-only, no root, `AllowUsers tom`), Callisto pubkey in `~/.ssh/authorized_keys`.
-- `ufw` active: default deny in, default allow out, `22/tcp ALLOW`.
-- nwg-displays layout confirmed: Vizio V505-G9 (DP-1) at `(0,0)` scale 1.5, eDP-1 at `(0,1440)` scale 1. Mouse flows across the full shared edge after the X=0 fix.
-- Systemd-boot NVRAM entry was deleted by Windows first-boot but Arch EFI fallback (`/EFI/BOOT/BOOTX64.EFI`) still boots via F12 → "Samsung Partition 1". Fix is queued (see Pending).
+The phase-2 / phase-3 scripts MUST match the design above. As of 2026-04-23 they do — verified by the cleanup pass that produced commits `5edfb04`, `2d52f61`, `3e0dc14`, and the current commit (verify block, header comments, package names, idle timeouts, hostname, limine paths, hibernate cryptswap, all consistent).
 
-### Drifted / being rolled forward
-- **Dotfiles**: user was on end-4/illogical-impulse; postinstall now installs **HyDE-Project/HyDE** instead. The most recent postinstall run aborted at `target not found: wvkbd` (wvkbd is AUR, fix pushed on this branch). Next `fnpostinstall` will attempt the HyDE swap. HyDE will clobber `~/.config/hypr/*` and back the old tree up to `~/.config/cfg_backups/<timestamp>/`. See `docs/decisions.md` §Q3 for rationale.
-- **Shell**: something in the end-4 stack left `tom` running fish despite decisions.md §Q8 locking zsh. postinstall §18 uses `usermod` to re-assert zsh as login shell, and new sed logic strips `shell fish` overrides from kitty/foot/ghostty configs.
-- **p10k config**: we previously pre-shipped `~/.p10k.zsh` from fnwsl. That sidecar was deleted this session; first zsh launch now fires the `p10k configure` wizard so the user authors their own.
+## Where things stand on Metis
 
-### Pending on Metis
+### What's ready
+- `phase-2-arch-install/install.sh` + `chroot.sh` — limine + greetd + hibernate-cryptswap + TPM2 + Samsung disk path passed through `/root/.luks` to chroot.
+- `phase-3-arch-postinstall/postinstall.sh` — pacman + AUR lists verified live; bare-Hyprland chezmoi apply at §13; CUPS + gutenprint for the user's Canon Pro 9000 Mk II at §1-print; Azure DDNS via `setup-azure-ddns.sh` (works around the Python 3.14 `az ad sp create-for-rbac --years` argparse bug); verify block sweeps for greetd / matugen / hyprgrass / cups; `limine-snapper-sync` installed.
+- `phase-3-arch-postinstall/setup-azure-ddns.sh` — idempotent SP rotation, writes `/etc/metis-ddns.env` + `/etc/letsencrypt/azure.ini`.
+- `dotfiles/` — full chezmoi source tree: 9 hyprland fragments, matugen config + 14 templates (incl. tmux), waybar / swaync / fuzzel / ghostty / yazi / helix / imv / zathura / qt / matugen, helper scripts (theme-toggle, wallpaper-rotate, control-panel, validate-hypr-binds), wallpaper-rotate systemd timer.
+- Runbook PDFs renderable via `pnpm pdf` (Edge headless on Linux works with `EDGE=/usr/bin/microsoft-edge-stable`).
 
-In rough priority:
+### What's pending — user actions
+Order matters; some are USB-side, some are on Metis itself.
 
-1. **Re-run `fnpostinstall`**. Latest push to this branch includes the wvkbd fix. First pass will:
-   - Install the AUR tail including wvkbd + iio-hyprland + claude-desktop-native + python-certbot-dns-azure.
-   - Run HyDE installer (interactive — skip NVIDIA with `-n`).
-   - Re-apply §13a customizations (monitors.conf source, lid switch bindl, touch gestures, hyprgrass plugin).
-   - Run `p10k configure` wizard on the first zsh that loads after the run.
-2. **Fix BitLocker re-prompt loop.** Runbook §C — elevated PowerShell in Windows: `manage-bde -protectors -disable C: -RebootCount 0` → reboot → `manage-bde -protectors -enable C:`. Runbook §C's Fast Startup precheck uses `powercfg /a` (don't grep `hybrid` — that matches Hybrid Sleep, not Fast Startup).
-3. **Re-register systemd-boot in NVRAM.** Windows deleted the entry; EFI fallback via Samsung Partition 1 still works. From Arch:
-   ```
-   sudo bootctl install
-   sudo efibootmgr -v | grep -iE 'Manager'
-   # Replace YYYY with the hex ID of the new Linux Boot Manager entry:
-   sudo efibootmgr -o YYYY,0000
-   ```
-4. **Fill `/etc/metis-ddns.env` with Azure SP credentials** (one-time `az ad sp create-for-rbac --name metis-ddns --role "DNS Zone Contributor" --scopes <zone-id> --years 2`), then `sudo systemctl start metis-ddns.service`. Detailed in runbook §3e-bis. `DDNS_DISABLE_IPV4=1` is the default (router doesn't expose v4).
-5. **Issue Let's Encrypt cert** for `metis.rhombus.rocks` after step 4 succeeds. Mirror the same SP creds into `/etc/letsencrypt/azure.ini` (different INI keys — see template). `certbot certonly --authenticator dns-azure ...`. Detailed in runbook §3e-ter. `certbot-renew.timer` is already enabled.
-6. **Test SSH from Callisto** against metis. Should accept the key in the vault item named "Callisto", refuse passwords.
-7. **Phase-3.5 2-in-1 hardware validation** (full list in `docs/remaining-work.md`): confirm touch-panel chipset via `dmesg`, test iio-hyprland rotation, test wvkbd OSK, write tablet-mode udev rule, palm rejection tuning, Wacom AES pressure/tilt test.
-8. **memtest86+ full pass** if not already completed (user was running it when this session ended).
+1. **Pre-reinstall on current install**: `fwupdmgr update` for Dell BIOS 1.16 → 1.18+; back up keepers from `/home/tom` not in Bitwarden.
+2. **Stage USB on dev machine**: `pnpm i` (downloads Arch + Win11 + Ventoy ISOs, robocopies repo + autounattend onto Ventoy USB).
+3. **Phase 1 — Windows install**: F12 → Ventoy → Win11 ISO; `autounattend.xml` runs unattended (~30 min). Stash BitLocker recovery key in Bitwarden as "Metis BitLocker recovery". (Note: hostname for both OSes is now `metis` — Windows also gets `Metis`. INSTALL-RUNBOOK §D documents the rename escape hatches if collision matters.)
+4. **Phase 2 — Arch install**: F12 → Ventoy → Arch ISO → `git clone https://github.com/fnrhombus/arch-setup /tmp/arch-setup && bash /tmp/arch-setup/phase-2-arch-install/install.sh`. ~40 min, mostly unattended after the password prompts.
+5. **Phase 3 — postinstall on Metis**: TTY login as `tom`, `~/postinstall.sh`. ~25 min (yay builds dominate). Includes printer driver install + chezmoi apply + matugen seed.
+6. **One-time post-postinstall**:
+   - `~/setup-azure-ddns.sh` (after `az login` device-code flow).
+   - `sudo certbot certonly --authenticator dns-azure ...` for `metis.rhombus.rocks` (cert).
+   - Bitwarden: launch, log in, enable "Unlock with system keyring", enable SSH agent.
+   - Re-seal BitLocker on Windows side (INSTALL-RUNBOOK §C: `manage-bde -protectors -disable/-enable C:`).
+   - Test SSH from Callisto.
 
-## Working branch
-
-As of this handoff the branch `claude/fix-linux-boot-issue-9ps2s` has been **merged into main** and deleted. **Work off `main` going forward.**
-
-## Key docs for grounding
-
-- `docs/decisions.md` — source of truth for all locked-in decisions. Read before suggesting any architectural change.
-- `docs/remaining-work.md` — full todo list across the laptop install, phase-3.5 hardware, and the azure-ddns split-out.
-- `runbook/INSTALL-RUNBOOK.md` — step-by-step install + troubleshooting; §3e-bis (DDNS), §3e-ter (Let's Encrypt), §3e-quater (firewall), §C (BitLocker PCR reseal) are the ones most relevant right now.
-- `runbook/phase-3-handoff.md` — the long-form teaching-oriented handoff for a Claude session on the laptop. This doc (`docs/session-handoff.md`) is the short bridge; that one is the reference.
-- `staged-azure-ddns/HANDOFF.md` — only relevant if user asks about the split-out. Otherwise ignore.
+### What's pending — phase 3.5 (deferred 2-in-1 hardware tuning)
+See `runbook/phase-3.5-hardware-handoff.md`. The relevant packages (iio-sensor-proxy, iio-hyprland-git, hyprgrass, libwacom, wvkbd) are already installed by postinstall — phase-3.5 is per-device tuning + tablet-mode wiring + pen calibration, not bulk install.
 
 ## User preferences (carried forward)
 
-- Decisive over cautious. Pick the opinionated default; discuss only if truly ambiguous.
-- Terminal + Claude Code (CLI) + RDP client + VSCode + browser workflow. Future Windows VM.
-- Ghostty as daily terminal. Catppuccin Mocha everywhere it can be applied.
-- **tmux is required** (Ctrl+a prefix) for Claude Code's worktree workflow.
-- Dotfiles managed by chezmoi eventually — don't propose stow/symlinks.
-- User does NOT enjoy config tweaking. Opinionated defaults with sane upgrade paths.
-- Always commit on task completion; atomic commits (one logical change per commit); push on feature completion. Commit messages explain the "why", not the "what".
-- Work in parallel when tasks are independent. Single message with multiple tool calls, not serialized.
+- **Decisive over cautious.** Pick the opinionated default; discuss only if truly ambiguous.
+- **Terminal + Claude Code (CLI) + RDP client + VSCode + browser** workflow. Future Windows VM.
+- **Ghostty** as daily terminal. Theme is **matugen** (Material You from wallpaper) — Catppuccin is gone everywhere.
+- **tmux required** (Ctrl+a prefix) for Claude Code's worktree workflow. Config in chezmoi at `dotfiles/dot_tmux.conf`; colors come from a matugen-rendered template; sesh handles the worktree-per-session picker.
+- **Sudo cache 4h**, NOT Claude-as-root. Run `sudo -v` to refresh — there's no command to check remaining time.
+- Dotfiles managed by **chezmoi** — no stow/symlinks.
+- User does NOT enjoy config tweaking — but Claude doing it is fine. Result: bare Hyprland + chezmoi, NOT an opinionated dotfile pack.
+- Always commit on task completion; **atomic commits** (one logical change per commit); push on feature completion. Commit messages explain the "why", not the "what".
+- **Work in parallel** when tasks are independent. Single message with multiple tool calls, not serialized.
 - User uses dictation — expect occasional "memory test" ↔ "speed test", "zsh" ↔ "this is zsh" confusions. Trust the user's stated intent over the dictation surface.
 
-## Known gotchas seen this session
+## Known gotchas (current design)
 
-- **`nwg-displays` canvas**: defaults monitor X positions to non-zero values (~2000 for the 4K rectangle) even when rectangles look snapped. Type `0` into X fields manually for both monitors or the mouse only transitions at a corner.
-- **BitLocker doesn't auto-reseal** on recovery-key entry. Must manually `manage-bde -protectors -disable/-enable` after boot-chain changes.
-- **Windows deletes EFI NVRAM entries** for non-Windows bootloaders on first boot / feature updates. Samsung Partition 1 fallback (EFI `BOOTX64.EFI`) still works even when NVRAM only shows Windows. Re-register with `bootctl install`.
-- **HyDE prompts for shell** during install. Fish is an option on its list; if user accepts, we end up in fish despite decisions.md §Q8. postinstall §18 re-asserts zsh via `usermod`.
-- **wvkbd is AUR, not [extra]** — common footgun when adding 2-in-1 touch packages. Same goes for `iio-hyprland`, `libfprint-goodix-53xc`, `python-certbot-dns-azure`, `claude-desktop-native`, `pinpam-git`.
-- **systemd-boot has no auto-scan** for memtest86+ even when the EFI package is installed. Must write `/boot/loader/entries/memtest86+.conf` manually (postinstall §1c does this).
-- **Ghostty theme file name** is literally `"Catppuccin Mocha"` (capital C, space), not `catppuccin-mocha`. Wrong form is a silent no-op.
+- **`pnpm pdf` on Linux** needs `EDGE=/usr/bin/microsoft-edge-stable` — the script's locateEdge() only checks Windows paths.
+- **SSH-signed commits** require `SSH_AUTH_SOCK=/home/tom/.bitwarden-ssh-agent.sock` exported before `git commit`. Bitwarden desktop must be running with the SSH-agent toggle on.
+- **BitLocker doesn't auto-reseal** on recovery-key entry. Must manually `manage-bde -protectors -disable/-enable` after boot-chain changes (limine install, kernel update with chained signing). Pacman hook `95-tpm2-reseal.hook` automates Linux side; Windows side is manual once.
+- **Goodix touchscreen** uses `hid-multitouch`, NOT IPTS. IPTS is Surface-only; the prior `iptsd` recommendation in older `phase-3.5-hardware-handoff.md` revisions was wrong, has been corrected.
+- **Wacom on Wayland**: `libwacom` + kernel `wacom` driver only. NOT `xf86-input-wacom`.
+- **`pinpam-git`** ships its module as `libpinpam.so` (not `pam_pinpam.so`). PAM stack files reference `libpinpam.so` literally — the wrong name dlopen-fails silently.
+- **`az ad sp create-for-rbac --years 2`** is broken under Python 3.14 + azure-cli 2.85.0 (argparse `%Y` bug). `setup-azure-ddns.sh` works around this with the piecemeal `ad app` / `ad sp` / `app credential reset` flow.
+- **TPM PIN setup can succeed silently while the NV write fails** (NV index conflict with BitLocker / LUKS-TPM2). postinstall §7 runs `pinutil test < /dev/null` after setup as a smoke test.
 
-## Commit signing note
+## Working branch
 
-This branch's commits are unsigned. The Claude Code web harness has `commit.gpgsign=true` in git config but `/home/claude/.ssh/commit_signing_key.pub` was empty — key material wasn't provisioned. Per-session issue; the laptop-side Claude session may or may not have the same problem. If signed history matters, investigate before the first commit.
+As of this handoff: **`desktop-design`** (not yet merged to main). Once the reinstall is verified end-to-end on Metis, merge to main and delete the branch.
 
 ## Starter prompt you can paste to the new session
 
-> Read `docs/session-handoff.md` end-to-end, then `docs/decisions.md` and `docs/remaining-work.md`. Confirm you understand the current state and the next priority (re-run `fnpostinstall`), then wait for my next instruction.
+> Read `docs/session-handoff.md` end-to-end, then `docs/decisions.md` and `runbook/INSTALL-RUNBOOK.md`. Confirm you understand the current state — the design is locked-in on the `desktop-design` branch but the actual reinstall hasn't run yet. Then wait for my next instruction.

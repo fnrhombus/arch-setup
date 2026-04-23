@@ -8,7 +8,7 @@
 - **Target Drive**: Samsung SSD 840 PRO 512GB (currently D: + V:)
 - **WiFi**: Dell Wireless 1801 (Qualcomm Atheros) + BT 4.0
 - **Display**: Integrated touch + external Vizio via USB DisplayLink dock
-- **Boot**: UEFI, GPT. *Current BIOS state*: Secure Boot ON, SATA in RAID mode. *Before phase 1 runs*: flip SATA → **AHCI** (RAID hides the NVMe from every Linux installer + the Windows setup USB), disable **Secure Boot** (systemd-boot + unsigned initramfs = easier path; can re-enable later with `sbctl` signing if wanted).
+- **Boot**: UEFI, GPT. *Current BIOS state*: Secure Boot ON, SATA in RAID mode. *Before phase 1 runs*: flip SATA → **AHCI** (RAID hides the NVMe from every Linux installer + the Windows setup USB), disable **Secure Boot** (limine UEFI binary isn't signed out of the box; can re-enable later with `sbctl` signing — see `runbook/phase-3-handoff.md` Upgrade Paths).
 - **Peripherals**: Touchscreen, touchpad, fingerprint reader, active pen
 - **Battery**: NONE *currently* — the internal battery is dead / removed; user plans to replace it. Laptop is always on AC power, lives stashed under a desk. Downstream consequences:
   - Lid-close "hibernate on battery" branch in `logind.conf` is dead code today (no battery state for logind to see). Configured anyway for forward-compat — fires automatically when a battery returns, no reconfig.
@@ -70,25 +70,26 @@
 - **Tiling Window Manager** — keyboard-driven, no overlapping windows
 
 ### Q3: Compositor
-- **Hyprland** — eye-candy king, GPU-accelerated animations, blur, rounding
-- **Dotfiles: HyDE-Project/HyDE** (switched from end-4/illogical-impulse on 2026-04-20).
-  - Why HyDE: bootloader-agnostic (we keep systemd-boot — see §A), ships
-    Catppuccin-Mocha as a bundled theme, works as an overlay on existing Arch
-    + Hyprland, has a `theme-switch` CLI for one-shot theme application.
-  - Why not Omarchy (the closer fit on opinionatedness + Ghostty defaults +
-    keyboard-ninja UX): Omarchy mandates the **`limine` bootloader** via a hard
-    preflight guard, which would require redoing phase 2. Defer until/unless
-    the bootloader migration is on the table.
-  - Why not stay on end-4: the end-4 first-launch wizard requires the user to
-    answer multiple prompts and the dotfiles do not bundle a theme switcher;
-    Catppuccin Mocha alignment is manual. HyDE's `theme-switch.sh` makes the
-    theme idempotent under postinstall.
-  - HyDE clobbers `~/.config/hypr/`, `~/.config/waybar/`, etc. on install,
-    but backs the prior tree up to `~/.config/cfg_backups/<timestamp>/` first.
-    Do NOT layer HyDE over end-4 — pick one.
-  - HyDE's default terminal is **kitty**, not Ghostty. `postinstall.sh`
-    13a sed-rewrites the `$term` / `$TERMINAL` / `$terminal` variable in
-    `hyprland.conf` + `keybindings.conf` to ghostty.
+- **Hyprland** — eye-candy king, GPU-accelerated animations, blur, rounding.
+- **Dotfiles: bare Hyprland + Claude-authored configs in chezmoi.** No
+  pre-built dotfile pack (HyDE, end-4/illogical-impulse, Caelestia, Omarchy
+  all rejected — see `docs/reinstall-planning.md` for the comparison).
+  - Why not a pack: the user doesn't enjoy config tweaking, but is fine with
+    Claude doing it. Once Claude becomes the editor, opinionated packs lose
+    their value (saved-time argument evaporates) and add cost (you don't own
+    the config; future "change X" means fighting upstream defaults).
+  - Configs live at `dotfiles/dot_config/hypr/` in this repo, split into
+    fragments (monitors, workspaces, binds, decoration, animations, plugins,
+    exec, hypridle, hyprlock). Applied via `chezmoi apply` from postinstall §13.
+  - Theme via **matugen** (Material You from wallpaper) — see §Q10-K. Every
+    component (waybar, swaync, fuzzel, ghostty, helix, hypr-colors, tmux, gtk,
+    qt) reads colors from a matugen-rendered template under
+    `dotfiles/dot_config/matugen/templates/`.
+  - Default terminal is **Ghostty** (set directly in `binds.conf` —
+    `bind = SUPER, Return, exec, ghostty`). No kitty involved.
+  - Keybindings (~85 of them, validated by `dot_local/bin/validate-hypr-binds`
+    on every chezmoi apply — duplicate-MOD-KEY conflicts and unknown-dispatcher
+    typos block the apply).
 
 ### Q4: DisplayLink / External Monitor
 - **Monitor via HDMI** direct to laptop (bypasses DisplayLink video — avoids Wayland issues)
@@ -109,7 +110,7 @@
 ### Q7: Terminal Multiplexer
 - **tmux** — required for Claude Code worktree support (Zellij not yet supported)
 - Worktree workflow: one session per worktree, fuzzy-switch via sesh/fzf
-- Plugins (managed by tpm): tmux-sensible, catppuccin/tmux. Session switching lives in `sesh` (installed via pacman), not a plugin. Worktree-per-session is a workflow, not a plugin — one sesh entry per worktree.
+- Config in chezmoi at `dotfiles/dot_tmux.conf`. No tpm — colors come from a matugen-rendered template (`dotfiles/dot_config/matugen/templates/tmux-colors.conf` → `~/.config/tmux/colors.conf`, sourced by `~/.tmux.conf`); session switching lives in **`sesh`** (`sesh-bin` from AUR), which IS the worktree-per-session workflow primitive (one sesh entry per worktree, fuzzy-pick).
 
 ### Q8: Shell
 - **zsh** with zgenom plugin manager (same setup as fnwsl, adapted for Arch)
@@ -131,10 +132,11 @@
 
 **Netac 128GB SSD (secondary — non-speed-critical):**
 ```
-[Arch recovery ISO ~1.5GB] [swap 16GB] [/var/log + /var/cache ~110GB ext4]
+[Arch recovery ISO ~1.5GB unencrypted] [swap 16GB LUKS2] [/var/log + /var/cache ~110GB LUKS2 ext4]
 ```
-- Recovery partition: Arch live ISO written to partition, bootable via systemd-boot entry
-- Replaces need for live USB after initial install
+- Recovery partition: stock Arch live ISO `dd`'d to partition, bootable from the F12 firmware menu (Dell shows the Netac's EFI boot entry directly). Replaces need for live USB after initial install.
+- Swap is **persistent LUKS2** (not random-key dm-crypt) — required for hibernate. TPM2-enrolled in postinstall §7.5 so it auto-unseals at boot.
+- /var/log + /var/cache also LUKS2-wrapped (cryptvar mapper); keyfile-unlocked from the TPM-unsealed cryptroot. See §Q11 for the full encryption design.
 
 - **btrfs subvolumes**: @, @home, @snapshots
 - **Mount options**: `noatime,compress=zstd:3,space_cache=v2,ssd` (level-3 zstd is the Arch-wiki default — good ratio, negligible CPU cost; `space_cache=v2` + `ssd` are the modern defaults for SATA SSDs).
@@ -145,41 +147,37 @@
 
 ### Q10: Other Needs
 
-#### A) Bootloader: systemd-boot
-- Simplest, fastest, already part of systemd
-- Arch recovery ISO written to a dedicated 1.5 GB partition on the Netac; systemd-boot entry points at it, so it boots straight from the menu without hunting for a USB stick.
-- USB is only needed for the *initial* Windows + Arch install. All later rescue work (including `phase-6-grow-windows.sh`, which must run from a live environment with the btrfs unmounted) can boot the recovery entry instead.
-- **Why not limine** (Omarchy's required bootloader, considered 2026-04-20):
-  - Limine *would* gain us first-class snapper-snapshot rollback in the boot
-    menu (`limine-snapper-sync` + `limine-mkinitcpio-hook`) and a branded
-    splash. systemd-boot has neither — snapshot rollback today requires booting
-    the recovery ISO and `arch-chroot`-ing to manage subvolumes manually.
-  - Cost: migration is a 30–60 min btrfs-aware exercise (`pacman -S limine`,
-    `cp /usr/share/limine/BOOTX64.EFI /boot/EFI/limine/`, write `limine.conf`
-    with `rootflags=subvol=@`, add an `efibootmgr` NVRAM entry, optionally
-    `bootctl remove`) — recoverable as long as the systemd-boot NVRAM entry is
-    kept until the limine boot succeeds.
-  - Trade-off: systemd-boot is in the `systemd` package (zero AUR), wider
-    ArchWiki coverage, and auto-discovers the Windows EFI loader for dual-boot.
-    Limine needs an explicit `/EFI/Microsoft/Boot/bootmgfw.efi` chainload stanza.
-  - Verdict: the only motivating use case is enabling Omarchy. Migration is
-    NOT worth it just to run a dotfiles distro — HyDE achieves 80 % of
-    Omarchy's UX without touching the bootloader. Revisit if one-keystroke
-    snapshot rollback becomes load-bearing.
+#### A) Bootloader: limine
+- Single config file (`/boot/limine.conf`), modern actively-developed.
+- First-class snapper-snapshot rollback in the boot menu via the AUR
+  `limine-snapper-sync` package (installed by postinstall §3) — pick yesterday's
+  snapshot from the menu when a `pacman -Syu` breaks userspace, no chroot
+  recovery dance.
+- Bootable-ISO-from-disk via efi_chainload: the Netac's recovery-ISO partition
+  shows up in the F12 firmware menu directly (limine doesn't have to know
+  about it). `phase-6-grow-windows.sh` and any other "needs an unmounted root"
+  rescue can boot from there without a USB stick.
+- UEFI binary deployed to the ESP fallback path (`/boot/EFI/BOOT/BOOTX64.EFI`)
+  so Windows NVRAM resets don't kill the entry — firmware always finds it.
+- Pacman post-upgrade hook (`/etc/pacman.d/hooks/95-limine-redeploy.hook`)
+  re-copies the binary on every limine package update, so the deployed copy
+  never goes stale.
+- Windows Boot Manager is registered explicitly in `/boot/limine.conf` as an
+  `efi_chainload` stanza pointing at `/EFI/Microsoft/Boot/bootmgfw.efi`.
+- **Switched from systemd-boot 2026-04-22**: snapshot-rollback wasn't
+  available without a chroot dance, and `limine-snapper-sync` is the cleanest
+  way in. systemd-boot is the boring-but-fine fallback if limine ever proves
+  problematic — see `docs/reinstall-planning.md` for the swap rationale.
 
 #### B) AUR helper: yay
 - Less strict about PKGBUILD review prompts, better fit for user who won't read them
 
 #### C) Terminal emulator: Ghostty
-- GPU-accelerated, great defaults, Kitty graphics protocol support
-- Pairs with tmux for splits/sessions
-- **`foot` stays installed** as a fallback / minimal Wayland-native terminal
-  for cases where Ghostty hasn't started yet (TTY-launched recovery, theme
-  reset). Originally added as an end-4 wizard shim; retained on the HyDE swap
-  because it costs ~2 MB and is a useful safety net when Ghostty config is in
-  flux. HyDE's default is **kitty** which we sed-out, so `foot` is the only
-  pre-Ghostty fallback that lives in pacman `[extra]`.
-- **Ghostty theme config gotcha**: the bundled theme file name is `Catppuccin Mocha` (capital C, literal space), not `catppuccin-mocha`. `theme = "Catppuccin Mocha"` in `~/.config/ghostty/config`.
+- GPU-accelerated, great defaults, Kitty graphics protocol support.
+- Pairs with tmux for splits/sessions; `binds.conf` binds `Super+Return` to it directly.
+- Theme: `theme = matugen` in `~/.config/ghostty/config`. The matugen pipeline
+  renders to `~/.config/ghostty/themes/matugen` and SIGUSR2's Ghostty on
+  every wallpaper change for live-reload.
 
 #### D) Login screen: greetd + ReGreet
 - Wayland-native, themeable via plain GTK CSS (matugen drops in directly)
@@ -209,15 +207,15 @@
 - Bitwig-ready if audio production hobby returns
 
 #### J) Fonts: JetBrains Mono Nerd Font (default)
-- Install all: JetBrains Mono, FiraCode, CascadiaCode, Hack, MesloLGS (all Nerd Font variants)
-- Configure JetBrains Mono as default in Ghostty, Helix, VSCode, Waybar, SDDM
-- Others available for swapping
+- Installed via postinstall §1: `ttf-jetbrains-mono-nerd` + `ttf-firacode-nerd` (Nerd Font variants), plus `noto-fonts` + `noto-fonts-emoji` for Unicode/emoji coverage.
+- Configure JetBrains Mono as default in Ghostty, Helix, VSCode, Waybar, greetd-regreet, hyprlock.
+- Add `ttf-cascadia-code-nerd`, `ttf-hack-nerd`, `ttf-meslo-nerd`, etc. via pacman if you want to swap.
 
 #### K) Theme: matugen (Material You, wallpaper-derived)
 - Palette generated dynamically from the current wallpaper.
-- Templates render: Hyprland colors, waybar CSS, swaync CSS, ReGreet CSS, Ghostty, GTK (gsettings), Qt (qt5ct/qt6ct), mako/swaync, fuzzel, VSCode.
+- Templates render: Hyprland colors, waybar CSS, swaync CSS, ReGreet CSS, Ghostty, GTK (3 + 4 CSS), Qt (qt5ct/qt6ct), fuzzel, helix, hyprlock, yazi, zathura, tmux. See `dotfiles/dot_config/matugen/config.toml` for the full list.
 - Master dark/light switch via `~/.local/bin/theme-toggle` — three entry points: Super+Shift+T hotkey, waybar sun/moon icon, fuzzel control-panel entry.
-- **Switched from Catppuccin Mocha 2026-04-22**: Catppuccin was a default-of-the-day pick, never load-bearing. The user wanted dynamic accent from wallpaper + an easy dark/light master switch — matugen delivers both natively. References to `catppuccin-sddm-theme-mocha`, `Catppuccin Mocha` ghostty theme, etc. are stale and need cleanup in the script-implementation pass.
+- **Switched from Catppuccin Mocha 2026-04-22**: Catppuccin was a default-of-the-day pick, never load-bearing. The user wanted dynamic accent from wallpaper + an easy dark/light master switch — matugen delivers both natively. The script-implementation pass was completed 2026-04-23: scripts, dotfiles, and verify checks no longer reference Catppuccin anywhere (legacy mentions in `runbook/GLOSSARY.md`, this document, and `docs/reinstall-planning.md` are intentional history).
 
 #### L) Dotfiles: chezmoi
 - Template-based, git-backed, Bitwarden integration for secrets
@@ -238,7 +236,7 @@
 
 #### Q-file) File manager: yazi (primary) + nautilus (GUI fallback)
 - **yazi** — terminal file manager, keyboard-first, vim-style keybinds, Rust-native, rich previews (images/PDF/code). Fits the terminal-heavy workflow (tmux/helix/ghostty). Daily driver.
-- **nautilus** — GTK4 GUI file manager, Wayland-tested, picks up the Catppuccin GTK theme for free, minimal-friction for drag/drop, network mounts (smb://, sftp://). The deliberate polar opposite of yazi for "sit back, click around" mode.
+- **nautilus** — GTK4 GUI file manager, Wayland-tested, inherits the matugen-rendered GTK theme automatically, minimal-friction for drag/drop, network mounts (smb://, sftp://). The deliberate polar opposite of yazi for "sit back, click around" mode.
 - **Not Dolphin/Nemo/Thunar/PCManFM**: Dolphin adds a Qt/KDE theming tax while being philosophically the same dense-power-user tool as yazi; Thunar's Wayland support is X11-first; PCManFM is a low-RAM pick we don't need; Nemo's maintenance velocity lags Nautilus.
 
 #### Desktop component picks (locked 2026-04-22, validation pass)
@@ -257,71 +255,73 @@ and accepted on the "clean-slate, no bias" principle. See
 - **PDF viewer**: zathura + zathura-pdf-poppler — Xwayland but the modal-keys UX wins. Sioyek is the Wayland-native alternative if Xwayland ever bites.
 - **GTK theme manager**: nwg-look (GTK3/libadwaita settings; matugen overwrites the resulting CSS).
 - **Qt theme manager**: qt6ct + qt5ct, with `QT_QPA_PLATFORMTHEME=qt6ct`. Matugen ships a Qt template.
-- **Cursor**: Bibata-Modern-Classic in **hyprcursor** format (~6.6 MB vs 44 MB Xcursor). Phinger is the alternative if Bibata feels too neutral.
+- **Cursor**: Bibata-Modern-Classic in **Xcursor** format (`bibata-cursor-theme` from AUR, ~44 MB resident). The hyprcursor-format variant (~6.6 MB) has no clean AUR package as of 2026-04 — manual install from LOSEARDES77/Bibata-Cursor-hyprcursor github if the size matters; Hyprland falls back to Xcursor automatically. Phinger is the alternative if Bibata feels too neutral.
 - **Icon theme**: Papirus-Dark — best app coverage. Tela is the runner-up if a more uniform "modern" feel matters more than coverage.
-- **Resource monitor (GUI)**: mission-center (AUR) — one piece the per-tool launcher genuinely misses; complements btop in the terminal.
+- **Resource monitor (GUI)**: mission-center (now in `extra` as of early 2026 — was AUR previously) — one piece the per-tool launcher genuinely misses; complements btop in the terminal.
 
 #### P) Installer password handoff: pre-hashed via mode-600 file
 - `phase-2-arch-install/install.sh` reads the root + `tom` passwords once at the top of the run, hashes them immediately with `openssl passwd -6` (SHA-512), and hands the hashes to `chroot.sh` via a mode-600 file under `/mnt/tmp/`. The plaintext values never touch disk.
 - **Caveat**: while the installer is still running, the `openssl passwd` invocation does briefly appear in `ps` (as the process argument) on the live ISO. The live environment is single-user and ephemeral, so this is acceptable — but don't run the installer on a shared/networked machine. After chroot finishes, the hash file is deleted and only the hashed values remain in `/etc/shadow`.
 
-### Q13: HyDE-Project/HyDE config layout (observed)
-- **Install root**: clone to `~/HyDE` (we use `~/HyDE`, the upstream-recommended path), installer at `~/HyDE/Scripts/install.sh`.
-- **Helper binaries**: HyDE drops its own scripts into `~/.local/share/bin/`
-  (`theme-switch.sh`, `Hyde.sh`) and a shared lib into `~/.local/lib/hyde/`.
-  These are the postinstall idempotency markers — if either exists, we skip
-  re-running `install.sh`.
-- **Hyprland config root**: `~/.config/hypr/` — `hyprland.conf` is the entry
-  point, but HyDE splits binds and animations into `~/.config/hypr/keybindings.conf`
-  and friends, all sourced from `hyprland.conf`.
-- **Terminal variable**: HyDE's keybinds reference a variable for the terminal
-  (commonly `$term` or `$TERMINAL`) defaulting to `kitty`. `postinstall.sh`
-  §13a sed-rewrites it to `ghostty` across both `hyprland.conf` and
-  `keybindings.conf`. If a future HyDE rev changes the variable name, the
-  pattern stops matching and the rewrite becomes a no-op — sanity check
-  `hyprctl getoption -j misc:disable_hyprland_logo` and the visible Super+Return
-  behaviour after install.
-- **Bar**: HyDE uses **Waybar** (multi-themed); no `quickshell` involved.
-- **Theme switcher**: `~/.local/share/bin/theme-switch.sh -s "Catppuccin-Mocha"`
-  (idempotent — re-run is a no-op if the theme is already active). `Ctrl+Super+T`
-  cycles through bundled themes.
-- **Backups**: every install run snapshots prior configs to `~/.config/cfg_backups/<timestamp>/`.
-- **Reload after edit**: `hyprctl reload` (no logout needed).
+### Q13: bare-Hyprland config layout
 
-### Q12: HyDE-Project/HyDE runtime dependencies
+- **Source of truth**: `dotfiles/dot_config/hypr/` in this repo. Applied to
+  `~/.config/hypr/` by `chezmoi apply` (postinstall §13).
+- **Entry point**: `hyprland.conf` — sources nine fragments via `source =`
+  directives (one per concern):
+  - `colors.conf` — matugen-rendered palette ($primary, $on_surface, etc.)
+  - `monitors.conf` — eDP-1 + DP-1 placement, scaling, transforms
+  - `workspaces.conf` — monitor-bound workspace assignments (1-5 → DP-1, 6-9 → eDP-1, 10 = scratch)
+  - `input.conf` — keyboard layout, touchpad behavior, libinput tuning
+  - `decoration.conf` — rounding, blur, shadows
+  - `animations.conf` — bezier curves + per-event animation timings
+  - `plugins.conf` — hyprexpo + hyprgrass (loaded via hyprpm)
+  - `exec.conf` — `exec-once` daemons (waybar, swaync, hypridle, awww-daemon, iio-hyprland, …)
+  - `binds.conf` — ~85 keybindings; validated on every chezmoi apply
+- **Helper binaries** at `~/.local/bin/` (chezmoi-managed):
+  - `validate-hypr-binds` — parses every `bind = ...` line, flags
+    duplicate-(MOD,KEY) pairs and unknown dispatchers; exits non-zero on
+    any conflict (chezmoi pre-apply hook blocks the apply).
+  - `wallpaper-rotate` — picks next wallpaper, runs `awww img`, runs
+    `matugen image` so every component re-themes.
+  - `theme-toggle` — flips dark/light by re-running matugen with the
+    opposite mode.
+  - `control-panel` — fuzzel-driven menu of system actions.
+- **Reload after edit**: `chezmoi apply` re-renders all dotfiles + the
+  matugen post_hooks fire (waybar SIGUSR2, swaync-client --reload-css,
+  ghostty SIGUSR2, hyprctl reload, etc.). Manual `hyprctl reload` for
+  one-off tweaks works too.
 
-HyDE's `Scripts/install.sh` pulls most of its own runtime deps via pacman/yay
-during install, but `postinstall.sh` pre-installs the keys ones from `[extra]`
-ahead of time so the verify block can prove them present and so the network
-churn is front-loaded.
+### Q12: bare-Hyprland runtime dependencies
 
-**Packages HyDE expects (and which we explicitly install):**
-- **Authentication agent**: `hyprpolkitagent` — must be activated via
-  `systemctl --user enable --now hyprpolkitagent.service` (the unit's preset
-  is `enabled` but doesn't auto-activate on a fresh install; without it
-  Bitwarden's "Unlock with system keyring" stays grayed out).
-- **Terminal**: Ghostty (daily driver, §Q10-C). HyDE's default is **kitty**;
-  postinstall §13a sed-rewrites the `$term` / `$TERMINAL` variable.
-- **File manager**: yazi (primary) + nautilus (GUI), §Q10-Q-file.
-- **Notification daemon**: `mako` (§Q10-E).
-- **Wallpaper**: `swww` (HyDE expects it for theme switches).
-- **XDG Desktop Portal**: `xdg-desktop-portal-hyprland` (phase 2 pacstrap) +
-  `xdg-desktop-portal-gtk` (phase 3 postinstall).
-- **Application launcher**: `fuzzel` (HyDE itself defaults to rofi but accepts
-  fuzzel; we keep §Q10-F).
-- **Clipboard**: `wl-clipboard` (§Q10-H).
-- **Pipewire**: §Q10-I.
+The chezmoi-applied configs reference these packages; postinstall §1 (pacman)
+and §3 (yay) install them explicitly so the verify block can prove them
+present.
 
-**2-in-1 hardware additions (new, postinstall §1):**
-- `iio-sensor-proxy` — pacman; reads accelerometer.
-- `iio-hyprland` — AUR; bridges accelerometer → `hyprctl monitor` transforms.
-- `wvkbd` — pacman; provides `wvkbd-mobintl` on-screen keyboard for tablet mode.
-- `libwacom` — pacman; tablet metadata (pressure curves, button maps).
-- **hyprgrass** — Hyprland plugin (installed via `hyprpm add` in postinstall §13a)
-  for long-press, edge swipes, and OSK-toggle gestures beyond Hyprland's
-  built-in 3-finger workspace swipe.
+**Pacman (`extra`):**
+- **Compositor + lock + idle**: `hyprland`, `hyprlock`, `hypridle`, `hyprpolkitagent`, `hyprpicker`. hyprpolkitagent must be `systemctl --user enable --now`'d (preset is enabled but doesn't auto-activate on fresh install) — without it Bitwarden's keyring unlock prompt stays grayed out.
+- **Bar + notifications + launcher + OSD**: `waybar`, `swaync`, `fuzzel`, `swayosd`.
+- **Screenshots + clipboard**: `hyprshot`, `satty`, `wl-clipboard`, `cliphist`.
+- **XDG portals**: `xdg-desktop-portal-hyprland` (phase-2 pacstrap), `xdg-desktop-portal-gtk` (phase-3 postinstall).
+- **Network + audio UIs**: `network-manager-applet` (provides nm-connection-editor), `pwvucontrol`.
+- **Theme tooling**: `nwg-look` (GTK3/4 settings), `qt5ct` + `qt6ct` (Qt theme), `papirus-icon-theme`.
+- **Apps**: `imv` (image viewer), `zathura` + `zathura-pdf-poppler`.
+- **Audio**: `pipewire`, `pipewire-pulse`, `pipewire-jack`, `wireplumber`.
 
-**The wizard's color legend**: red = not installed, green = installed but not running, blue = installed AND running. Hover on each component to see its accepted-package list. `postinstall.sh` bakes the above list into sections 1 (pacman) + 3 (yay) + 1b (systemctl --user enable hyprpolkitagent).
+**AUR (yay):**
+- **Wallpaper + theme**: `awww-bin`, `matugen-bin`.
+- **Bluetooth + power UIs**: `overskride`, `wleave`.
+- **Cursor**: `bibata-cursor-theme` (Xcursor; hyprcursor variant unpackaged — see §Desktop component picks).
+- **AUR-only utils**: `pacseek`, `wvkbd` (on-screen keyboard for tablet mode).
+
+**2-in-1 hardware (mixed pacman + AUR + hyprpm):**
+- `iio-sensor-proxy` (pacman) — accelerometer service.
+- `iio-hyprland-git` (AUR) — bridges accelerometer → `hyprctl monitor` transforms; spawned via `exec-once`.
+- `libwacom` (pacman) — tablet metadata.
+- `wvkbd` (AUR) — `wvkbd-mobintl` on-screen keyboard.
+- `hyprgrass` (hyprpm plugin) — long-press, edge swipes, OSK-toggle gestures beyond Hyprland's built-in 3-finger workspace swipe.
+
+**Validator hook**: `dotfiles/.chezmoiscripts/run_before_validate-binds.sh.tmpl` runs `validate-hypr-binds` before every `chezmoi apply`. A keybind conflict or unknown dispatcher fails the validator → fails the apply, so a broken config can never reach `~/.config/hypr/`.
 
 ### Q11: Full-Disk Encryption (LUKS2 + TPM2 autounlock)
 
@@ -330,7 +330,7 @@ Parity with Windows BitLocker on the same machine. "Stolen laptop" becomes "bric
 **Scope of encryption:**
 - **Samsung `ArchRoot`** (btrfs + @ / @home / @snapshots subvolumes) — LUKS2 container named `cryptroot`. Passphrase slot + TPM2 slot (PCRs 0+7).
 - **Netac `ArchVar`** (ext4 — /var/log + /var/cache) — LUKS2 container named `cryptvar`. Passphrase slot + keyfile slot reading from `/etc/cryptsetup-keys.d/cryptvar.key` on the (TPM-unlocked) cryptroot.
-- **Netac `ArchSwap`** — plain dm-crypt with a random `/dev/urandom` key generated per boot (`cryptswap`). Swap never needs to survive reboots, so a persistent LUKS header is pointless.
+- **Netac `ArchSwap`** — **persistent LUKS2** container named `cryptswap` with a passphrase slot + TPM2 slot (PCRs 0+7), enrolled by postinstall §7.5. Random-key swap was rejected: hibernate (S4) needs the swap contents to survive a power-off, and the kernel's `resume=` mechanism needs a stable mapper path. TPM2-sealed gives us silent unseal at boot just like cryptroot.
 - **Netac `ArchRecovery`** — **unencrypted by design.** It's a raw Arch ISO meant to be bootable from F12 when the main install is hosed; encrypting it would defeat that purpose and there's nothing sensitive on it.
 - **Samsung EFI** — unencrypted (UEFI spec requires the ESP to be FAT32 and unencrypted). The kernel + initramfs on it are public data, same as any normal install.
 
@@ -346,12 +346,12 @@ Parity with Windows BitLocker on the same machine. "Stolen laptop" becomes "bric
 - This matches BitLocker's default PCR profile on the Windows side, so the security properties mirror each other across dual-boot.
 
 **crypttab layout:**
-- `/etc/crypttab.initramfs` — baked into initramfs by mkinitcpio's `sd-encrypt` hook. Contains cryptroot only.
-- `/etc/crypttab` — read post-init by systemd-cryptsetup generators. Contains cryptvar (keyfile) + cryptswap (random key).
+- `/etc/crypttab.initramfs` — baked into initramfs by mkinitcpio's `sd-encrypt` hook. Contains **both** cryptroot and cryptswap (cryptswap needs to be open before `resume=` runs, which is initramfs-time).
+- `/etc/crypttab` — read post-init by systemd-cryptsetup generators. Contains cryptvar (keyfile from cryptroot).
 
 **mkinitcpio HOOKS ordering:** `sd-encrypt` sits between `block` and `filesystems`. Without this, initramfs can't open cryptroot before trying to mount `/`.
 
-**Kernel cmdline:** `root=/dev/mapper/cryptroot rootflags=subvol=@` in all three systemd-boot loader entries (arch.conf, arch-fallback.conf, arch-lts.conf). No `rd.luks.name=` needed — crypttab.initramfs is the single source of truth.
+**Kernel cmdline:** `root=/dev/mapper/cryptroot rootflags=subvol=@ resume=/dev/mapper/cryptswap rw quiet` in all three limine entries (`/Arch Linux`, `/Arch Linux (LTS)`, `/Arch Linux (Fallback)`) at `/boot/limine.conf`. No `rd.luks.name=` needed — crypttab.initramfs is the single source of truth. `resume=` enables S4 hibernate.
 
 **Known limitations:**
 - Secure Boot stays off until post-phase-3 `sbctl` wiring. PCR 7 still has a consistent hash for "Secure Boot off," so the TPM seal is stable — but re-enabling Secure Boot later will invalidate the seal and require a re-enrollment.

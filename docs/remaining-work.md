@@ -1,30 +1,44 @@
 # Remaining work
 
-Ordered snapshot of what's still open across the arch-setup repo as of 2026-04-21. Update as items land. Format: `- [ ]` for open, `- [x]` for done — same convention as `decisions.md`.
+Ordered snapshot of what's still open across the arch-setup repo as of 2026-04-23. Update as items land. Format: `- [ ]` for open, `- [x]` for done — same convention as `decisions.md`.
 
-## On the laptop (after next `fnpostinstall` run)
+## On the dev machine (Phase 0 — USB prep)
 
-- [ ] Re-run `postinstall.sh` after the end-4 → HyDE swap. HyDE will clobber `~/.config/hypr/*` into `~/.config/cfg_backups/<timestamp>/`. The sed for `$term → ghostty` may not match if HyDE's actual variable name differs — confirm Super+Return launches Ghostty after reboot. Fallback: edit `~/.config/hypr/keybindings.conf` by hand.
-- [ ] Verify pass with `./postinstall.sh` (no `--no-verify`). Expect some items to FAIL the first time — Bitwarden desktop has to unlock once before `ssh-add -l` works, `/etc/metis-ddns.env` has to be filled before the DDNS service runs, the LE cert only exists after issuance. Re-run after each one-time action lands.
-- [ ] Bitwarden desktop unlock + SSH agent toggle on.
-- [ ] Azure DDNS one-time SP creation (runbook §3e-bis). Fill `/etc/metis-ddns.env`, kick `metis-ddns.service`, confirm `dig AAAA metis.rhombus.rocks` resolves externally.
-- [ ] Let's Encrypt cert issuance for `metis.rhombus.rocks` (runbook §3e-ter). Only useful once DDNS resolves.
-- [ ] Test SSH from Callisto against the laptop. `ssh tom@metis.rhombus.rocks` should accept the Callisto key and refuse passwords.
+- [ ] `pnpm i` to download Arch ISO + Win11 ISO + Ventoy + stage everything onto the Ventoy USB.
+- [ ] (Optional) `pnpm iso` to bake the custom Arch ISO with the repo pre-staged into `/root/arch-setup/`. Skipped if Ventoy USB approach is fine.
+
+## On Metis (Phase 1-3 — fresh install)
+
+- [ ] Pre-flight: `fwupdmgr update` (Dell BIOS 1.16 → 1.18+); back up keepers from `/home/tom` not in Bitwarden; confirm Samsung 840 PRO + Netac 128 GB both present.
+- [ ] **Phase 1 (Windows)**: F12 → Ventoy → Win11 ISO → unattended install via `autounattend.xml` (~30 min). Stash BitLocker recovery key in Bitwarden as **"Metis BitLocker recovery"** during phase-1 step 7.
+- [ ] **Phase 2 (Arch)**: F12 → Ventoy → Arch ISO → live env. `git clone https://github.com/fnrhombus/arch-setup /tmp/arch-setup && bash /tmp/arch-setup/phase-2-arch-install/install.sh`. ~40 min, mostly unattended after the password prompts.
+- [ ] **Phase 3 (postinstall on Metis)**: TTY login as `tom`, `~/postinstall.sh`. ~25 min (yay builds dominate). Includes printer driver install (Canon Pro 9000 Mk II via gutenprint) + chezmoi apply + matugen seed.
+
+## On Metis (post-postinstall one-time actions)
+
+- [ ] `~/setup-azure-ddns.sh` after `az login` device-code flow. Confirm `dig AAAA metis.rhombus.rocks` resolves.
+- [ ] `sudo certbot certonly --authenticator dns-azure ...` for `metis.rhombus.rocks`.
+- [ ] Bitwarden desktop: log in once, enable "Unlock with system keyring", enable SSH agent.
+- [ ] Re-seal BitLocker on Windows side (INSTALL-RUNBOOK §C: `manage-bde -protectors -disable/-enable C:`) so subsequent boots don't keep prompting for the recovery key.
+- [ ] Test SSH from Callisto to `tom@metis.rhombus.rocks` (Callisto pubkey already in `~/.ssh/authorized_keys`).
+- [ ] Verify pass with `~/postinstall.sh` (no `--no-verify`). Re-run after each one-time action lands; expect a few items to FAIL until they're done (DDNS env file empty pre-`setup-azure-ddns.sh`, LE cert absent until issuance, etc.).
 - [ ] Tick the fingerprint / lid / RDP checkboxes in `decisions.md` if everything tests clean.
 - [ ] (Deferred) Pick a live-desktop remote tool (wayvnc vs Sunshine vs RustDesk) and wire it into postinstall. Research already done — user is punting for now.
 
-## Phase-3.5 (2-in-1 hardware validation on real hardware)
+## Phase 3.5 (2-in-1 hardware validation on real hardware)
 
-- [ ] Confirm touch-panel chipset via `dmesg | grep -i -E 'wacom|goodix|hid-multitouch'`. `decisions.md` assumes Wacom AES but the 7786 revision varies.
+See `runbook/phase-3.5-hardware-handoff.md` for the full handoff. Packages are already installed by postinstall §1 + §3; this phase is per-device tuning + tablet-mode wiring + pen calibration.
+
+- [ ] Confirm touch-panel chipset via `dmesg | grep -i -E 'wacom|goodix|hid-multitouch'`.
 - [ ] Test `iio-hyprland` auto-rotation when flipping to tablet mode.
 - [ ] Test `wvkbd-mobintl` on-screen keyboard toggle (ideally via a hyprgrass long-press gesture).
 - [ ] Tablet-mode detection: write udev rule binding `SW_TABLET_MODE` events to an OSK-toggle + keyboard/touchpad-disable script.
 - [ ] Palm rejection: `LIBINPUT_ATTR_PALM_PRESSURE_THRESHOLD` quirk + Hyprland `input:touchpad:disable_while_typing = true`.
 - [ ] Confirm Wacom AES stylus pressure/tilt in Krita or Xournal++. Eraser end may need a udev quirk.
 
-## Pre-existing todos carried forward
+## Pre-existing carry-forwards
 
-- [ ] memtest86+ full pass (boot from Arch recovery partition).
+- [ ] memtest86+ full pass (boot the limine `/Memtest86+` chainload entry).
 - [ ] Fan inspection / clean (laptop has a thermal-throttle quirk flagged earlier in the session but never documented as a decision).
 - [ ] Write up the thermal-threshold quirk in `decisions.md` once observed behavior is clear.
 
@@ -34,8 +48,6 @@ The `staged-azure-ddns/` directory in this repo is the shape of the future stand
 
 User asked to keep the new repo private initially (AUR / public release after one-user success).
 
-**I (Claude on Claude-Code-on-the-web) cannot create the repo** — my GitHub MCP tools are scoped to `fnrhombus/arch-setup` only. The user (or a Claude Code session with broader scope) needs to do the create step.
-
 - [ ] Create private repo `fnrhombus/azure-ddns` on GitHub.
 - [ ] Copy `staged-azure-ddns/*` to the new repo's root (keep directory structure).
 - [ ] Hand the new session `staged-azure-ddns/HANDOFF.md` — it takes over from there.
@@ -43,5 +55,5 @@ User asked to keep the new repo private initially (AUR / public release after on
 
 ## Repo hygiene
 
-- [ ] Once HyDE is confirmed working on the laptop, remove the "end-4 wizard shim" language everywhere in `decisions.md` / `runbook/` / `CLAUDE.md` — most already flipped, but there may be a straggler or two I missed.
-- [ ] `INSTALL-RUNBOOK.pdf` regeneration (`pnpm pdf`) after any `runbook/*.md` changes since last render. The print-ready PDF is the "at the laptop" artifact; markdown drift without PDF re-render makes the physical printout stale.
+- [ ] Once the reinstall is verified end-to-end on Metis, merge `desktop-design` → `main` and delete the branch.
+- [ ] `INSTALL-RUNBOOK.pdf` regeneration (`pnpm pdf`) after any `runbook/*.md` changes since last render. The print-ready PDF is the "at the laptop" artifact; markdown drift without PDF re-render makes the physical printout stale. (On Linux, set `EDGE=/usr/bin/microsoft-edge-stable`.)

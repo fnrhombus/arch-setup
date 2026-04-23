@@ -241,7 +241,7 @@ popup on every dispatched bind, so an unbound key is visually obvious
 
 ## Package management
 
-- `pacseek` for the Omarchy-style fuzzy install/remove TUI. Decide during
+- `pacseek` for fuzzy install/remove TUI (drives both pacman and yay). Decide during
   implementation whether to also wrap it in a fuzzel launcher for the
   master "Software" entry in the control-panel script.
 
@@ -334,17 +334,13 @@ Hyprland monitor config needs `workspace=N,monitor:DP-1` fallbacks for any
 workspace currently bound to eDP-1, so workspaces migrate to the external
 display when the lid closes rather than orphaning.
 
-## Carry-forwards (cleanup when dotfiles land)
+## Carry-forwards (completed 2026-04-23)
 
-References to Catppuccin in the rest of the repo become stale once matugen
-takes over and need to be reworked:
-
-- `phase-3-arch-postinstall/postinstall.sh` — drops `catppuccin-sddm-theme-mocha`
-  from the AUR list and the verify check; ghostty config no longer pinned to
-  `Catppuccin Mocha`.
-- `docs/decisions.md` — §Q on theme.
-- `runbook/GLOSSARY.md` — Catppuccin entry.
-- SDDM theme — pick a matugen-driven theme or a neutral default.
+The Catppuccin → matugen sweep across scripts and verify checks was
+completed in commits `5edfb04` + `2d52f61`. Surviving Catppuccin mentions
+are intentional history (`docs/decisions.md` §Q-K "Switched from",
+`runbook/GLOSSARY.md` "older fixed palette" entry, `docs/reinstall-planning.md`
+historical memo). SDDM was replaced by greetd + ReGreet in the same pass.
 
 ## Carried 2-in-1 packages (still required)
 

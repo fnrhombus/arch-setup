@@ -37,11 +37,10 @@ are authored by Claude end-to-end and managed by `chezmoi`.
 4. **`CLAUDE.md`** — repo layout + conventions (atomic commits, parallel
    tool calls, never push without asking, etc.).
 
-5. **`phase-3-arch-postinstall/postinstall.sh`** §13 (currently the HyDE
-   install block) — what postinstall does today around chezmoi. Will need
-   a rewrite to invoke `chezmoi init` + `chezmoi apply` against the new
-   source. Out of scope for this task — the user will swap §13 out
-   separately once your output exists.
+5. **`phase-3-arch-postinstall/postinstall.sh`** §13 — already invokes
+   `chezmoi init --source=/root/arch-setup/dotfiles && chezmoi apply --force`
+   against the in-repo dotfiles tree. No rewrite needed; this is the
+   active code path.
 
 ## Architectural questions to resolve with the user before writing
 
@@ -220,8 +219,9 @@ Group G — **Cheat sheet output**:
   your work here or on a fresh branch.
 - **`reinstall-plan`** is stale — pre-libpinpam fix and pre-design
   changes. Don't base off it.
-- **`main`** is the published baseline (HyDE-era). Definitely
-  don't base off it.
+- **`main`** is the published baseline at the moment of writing
+  (the prior HyDE-era install on Metis). The active design lives on
+  `desktop-design`; merge to main once the reinstall is verified.
 
 ## Open question to surface in your first reply
 
