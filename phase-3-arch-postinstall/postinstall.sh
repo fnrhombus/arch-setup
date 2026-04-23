@@ -113,10 +113,16 @@ sudo pacman -Syu --noconfirm --needed \
     xdg-user-dirs pipewire pipewire-pulse pipewire-jack wireplumber \
     noto-fonts noto-fonts-emoji ttf-jetbrains-mono-nerd ttf-firacode-nerd \
     bitwarden bitwarden-cli \
-    ghostty fuzzel cliphist mako satty hyprshot \
-    foot nautilus yazi \
-    hyprpolkitagent swww xdg-desktop-portal-gtk \
-    iio-sensor-proxy libwacom \
+    ghostty fuzzel cliphist satty hyprshot \
+    nautilus yazi \
+    hyprland hyprlock hypridle hyprpolkitagent hyprpicker \
+    waybar swaync swayosd \
+    xdg-desktop-portal-gtk xdg-desktop-portal-hyprland \
+    network-manager-applet pwvucontrol \
+    nwg-look nwg-displays \
+    qt5ct qt6ct papirus-icon-theme \
+    imv zathura zathura-pdf-poppler \
+    iio-sensor-proxy libwacom wvkbd \
     remmina freerdp \
     ufw \
     azure-cli certbot python-pipx \
@@ -193,21 +199,28 @@ fi
 # build (Anthropic ships no official Linux binary). `-native` variant is the
 # community-recommended one — `-bin` has recurring ffmpeg dep issues. Lags
 # official releases; expect occasional breakage on Anthropic updates.
-log "Installing AUR-exclusive apps (VSCode, Edge, Claude desktop, pinpam-git, SDDM theme, iio-hyprland-git, powershell-bin)..."
-# iio-hyprland is published on AUR as `iio-hyprland-git` (no tagged release).
-# certbot-dns-azure is NOT in AUR — installed via pipx inject below (step 4d).
-# powershell-bin: Microsoft's prebuilt pwsh tarball. `powershell` (source)
-# builds from .NET SDK and takes noticeably longer; bin is the pragmatic pick.
+log "Installing AUR-exclusive apps (VSCode, Edge, Claude, awww, matugen, mission-center, overskride, wleave, Bibata, pinpam, iio-hyprland, powershell)..."
+# iio-hyprland: AUR-only (iio-hyprland-git, no tagged release).
+# certbot-dns-azure: PyPI-only, installed via pipx in §3a.
+# awww: continuation of archived swww (LGFae moved to Codeberg 2025-10-29).
+# bibata-cursor: Xcursor-only build for Xwayland fallback;
+#   bibata-cursor-translated: hyprcursor-format build (~6.6 MB) for Hyprland-native.
 yay -S --noconfirm --needed \
     visual-studio-code-bin \
     microsoft-edge-stable-bin \
     claude-desktop-native \
-    catppuccin-sddm-theme-mocha \
     pinpam-git \
     sesh \
-    wvkbd \
     iio-hyprland-git \
-    powershell-bin
+    powershell-bin \
+    awww \
+    matugen-bin \
+    mission-center \
+    overskride \
+    wleave \
+    bibata-cursor \
+    bibata-cursor-translated \
+    pacseek
 
 # ---------- 3a. certbot-dns-azure plugin (pipx — not packaged for Arch) ----------
 # certbot-dns-azure is PyPI-only: not in extra, not in AUR, not community-
@@ -1043,155 +1056,72 @@ select = "underline"
 render = true
 HXEOF
 
-# ---------- 13. Hyprland dotfiles (HyDE-Project/HyDE) ----------
-# Switched away from end-4/illogical-impulse to HyDE on 2026-04-20 (decisions.md
-# §Q10/§Q14): HyDE is bootloader-agnostic (we keep systemd-boot), ships
-# Catppuccin-Mocha as a bundled theme, doesn't require a fresh-install boot
-# (works as an overlay on existing Arch + Hyprland), and has a `theme-switch`
-# CLI for one-shot theme application. Trade-off vs Omarchy: Omarchy is a closer
-# fit (Ghostty default + opinionated keyboard-ninja UX) but mandates the
-# `limine` bootloader — out of scope until/unless we redo phase 2.
+# ---------- 13. Hyprland configs via chezmoi (bare-Hyprland design) ----------
+# Switched from HyDE → bare-Hyprland 2026-04-22 (decisions.md §Q10 + §Q-K +
+# desktop-requirements.md). Reasons in the memo: HyDE writes a wall of
+# upstream config we don't own, contaminates /boot loader entries on
+# install, and the "saves user time" value evaporated when the user said
+# "Claude does the tweaking." Now: Claude-authored configs live in
+# /root/arch-setup/dotfiles, applied via chezmoi.
 #
-# HyDE clobbers ~/.config/hypr/, ~/.config/waybar/, ~/.config/rofi/, etc.
-# It backs the prior tree up to ~/.config/cfg_backups/<timestamp>/ before
-# overwriting. Do NOT layer HyDE on top of end-4 — pick one and commit; if
-# end-4 was previously installed, this script's HyDE install will replace it
-# (the backup is your safety net).
+# Theme is matugen (Material You from wallpaper). Catppuccin references
+# in old code paths are stale — see desktop-requirements.md "Carry-forwards".
 #
-# Clone fresh at run time so the dots stay current and the repo stays lean.
-# GIT_TEMPLATE_DIR="" is the wsl-setup-lessons.md mitigation for stale
-# user-dir template hooks.
-if [[ ! -d "$HOME/HyDE" ]]; then
-    log "Cloning HyDE-Project/HyDE..."
-    GIT_TEMPLATE_DIR="" git clone --depth 1 https://github.com/HyDE-Project/HyDE.git \
-        "$HOME/HyDE" \
-        || warn "HyDE clone failed — network? Retry manually later: \
-GIT_TEMPLATE_DIR=\"\" git clone --depth 1 https://github.com/HyDE-Project/HyDE.git ~/HyDE"
+# Idempotent: chezmoi's `apply` is a no-op when source matches dest.
+DOTFILES_SRC="/root/arch-setup/dotfiles"
+if [[ ! -d "$DOTFILES_SRC" ]]; then
+    # Local fallback: dotfiles checkout co-located with this script
+    # (works when postinstall is run from /home/tom/arch-setup/ rather than
+    # the chroot-staged /root/arch-setup/).
+    DOTFILES_SRC="$SCRIPT_DIR/../dotfiles"
 fi
 
-if [[ -d "$HOME/HyDE/Scripts" ]]; then
-    # Idempotency guard: HyDE drops a marker into ~/.local/share/bin/ on first
-    # successful install (theme-switch.sh, Hyde.sh helpers). Skip re-run if
-    # those exist — re-running install.sh would re-clobber configs and bury
-    # the most-recent backup behind a useless overwrite-of-an-overwrite.
-    if [[ -x "$HOME/.local/share/bin/theme-switch.sh" ]] || [[ -d "$HOME/.local/lib/hyde" ]]; then
-        log "HyDE already installed (theme-switch.sh / .local/lib/hyde present) — skipping re-install."
-    else
-        log "Running HyDE install.sh (-drsn: noconfirm install + restore configs + enable services, skip NVIDIA)..."
-        # Pre-empt HyDE's own interactive prompts — `-d` covers pacman/yay
-        # --noconfirm but NOT HyDE's own bash `read` calls:
-        #   1. install_pre.sh chaotic-AUR prompt — prompt_timer 120, default
-        #      case installs chaotic-AUR. We don't want it. Feed 'n'.
-        #   2. install_pst.sh SDDM theme prompt (Candy vs Corners) — we use
-        #      catppuccin-sddm-theme-mocha (§1 pacman list) and don't want
-        #      HyDE's themes. Pre-create backup_the_hyde_project.conf — HyDE
-        #      checks for this file and skips the whole SDDM config block.
-        #   3. install.sh end-of-run reboot prompt — empty input → no reboot.
-        sudo install -d -m 755 /etc/sddm.conf.d
-        sudo touch /etc/sddm.conf.d/backup_the_hyde_project.conf
-        pushd "$HOME/HyDE/Scripts" >/dev/null
-        # HyDE's flag semantics: bare `-n` only marks nvidia as skipped and
-        # does NOTHING else. We need -d (install + noconfirm via
-        # use_default=--noconfirm), -r (restore configs), -s (enable services),
-        # -n (skip nvidia wiring — MX250 blacklisted per decisions.md §Q5).
-        # -d is used instead of -i so pacman/yay runs are non-interactive —
-        # this script is invoked from contexts (claude code, re-run loop)
-        # where interactive prompts hang.
-        printf 'n\n\n\n' | ./install.sh -drsn \
-            || warn "HyDE install.sh exited non-zero; review manually"
-        popd >/dev/null
-    fi
+if [[ ! -d "$DOTFILES_SRC" ]]; then
+    warn "dotfiles tree not found at /root/arch-setup/dotfiles or alongside this script."
+    warn "  Custom-ISO install bakes it in; Ventoy install copies it via install.sh §11."
+    warn "  Skipping chezmoi apply — Hyprland will start with empty config."
+elif ! command -v chezmoi >/dev/null; then
+    warn "chezmoi not installed — was it dropped from §1 pacman list?"
 else
-    warn "HyDE not available at ~/HyDE/Scripts — Hyprland config skipped."
-    warn "  Fix: GIT_TEMPLATE_DIR=\"\" git clone --depth 1 https://github.com/HyDE-Project/HyDE.git ~/HyDE"
-    warn "       then re-run this script."
+    log "Initializing chezmoi from $DOTFILES_SRC..."
+    chezmoi init --source="$DOTFILES_SRC" >/dev/null 2>&1 \
+        || warn "chezmoi init failed (already initialized? — non-fatal, continuing)."
+    log "Applying chezmoi (writes ~/.config, ~/.local/bin, ~/.local/share)..."
+    chezmoi apply --force \
+        || warn "chezmoi apply reported issues — check 'chezmoi status' and 'chezmoi diff'."
 fi
 
-# Force Catppuccin-Mocha theme. HyDE ships Catppuccin-Mocha in its bundled
-# theme list; theme-switch.sh is idempotent (no-op if already set).
-if [[ -x "$HOME/.local/share/bin/theme-switch.sh" ]]; then
-    log "Setting HyDE theme to Catppuccin-Mocha..."
-    "$HOME/.local/share/bin/theme-switch.sh" -s "Catppuccin-Mocha" \
-        || warn "theme-switch.sh failed — set manually with Ctrl+Super+T."
-fi
-
-# Defang end-4 / HyDE / kitty configs that hardcode `shell fish` or similar —
-# chroot.sh creates tom with zsh as login shell (and §18 below re-asserts if
-# anything drifted), but a terminal emulator config with `shell fish` inside
-# Hyprland would still spawn fish on every launch. Neutralize any such
-# override back to the user's login shell.
-for f in "$HOME/.config/kitty/kitty.conf" "$HOME/.config/foot/foot.ini" "$HOME/.config/ghostty/config"; do
-    if [[ -f "$f" ]] && grep -qE '^\s*shell\s*=?\s*(fish|/usr/bin/fish)' "$f"; then
-        log "Removing hardcoded fish shell override in $f..."
-        sed -i -E '/^\s*shell\s*=?\s*(fish|\/usr\/bin\/fish)\s*$/d' "$f"
+# Initial wallpaper render: chezmoi's run_once script downloads from callisto;
+# theme-toggle's first run picks one and renders matugen. Triggered manually
+# here so the first Hyprland launch has a complete palette.
+if command -v matugen >/dev/null && [[ -d "$HOME/Pictures/Wallpapers" ]]; then
+    log "Seeding initial matugen palette..."
+    if [[ -x "$HOME/.local/bin/wallpaper-rotate" ]]; then
+        "$HOME/.local/bin/wallpaper-rotate" --first \
+            || warn "wallpaper-rotate --first failed — Hyprland may start with default colors."
     fi
-done
-
-# ---------- 13a. Hyprland customizations layered on top of HyDE ----------
-# HyDE's install.sh overwrites ~/.config/hypr/* on every run. We patch + append
-# idempotently so re-runs restore our overrides. The marker comment makes the
-# append a one-shot.
-HYPR_CONF="$HOME/.config/hypr/hyprland.conf"
-
-# HyDE defaults the terminal var (`$term` or `$TERMINAL`) to kitty. The
-# daily-driver terminal is Ghostty (decisions.md §Q10-C). Rewrite both common
-# spellings so every keybind that uses the var launches Ghostty. sed is
-# inherently idempotent: once the line already says ghostty the pattern stops
-# matching.
-if [[ -f "$HYPR_CONF" ]]; then
-    sed -i -E 's#^\$(term|TERMINAL|terminal)\s*=\s*kitty\s*$#$\1 = ghostty#' "$HYPR_CONF"
-fi
-# HyDE may also keep the terminal pin in keybindings.conf — patch there too.
-HYPR_KEYBINDS="$HOME/.config/hypr/keybindings.conf"
-if [[ -f "$HYPR_KEYBINDS" ]]; then
-    sed -i -E 's#^\$(term|TERMINAL|terminal)\s*=\s*kitty\s*$#$\1 = ghostty#' "$HYPR_KEYBINDS"
 fi
 
-if [[ -f "$HYPR_CONF" ]] && ! grep -q '# arch-setup-customizations' "$HYPR_CONF"; then
-    log "Appending arch-setup customizations to $HYPR_CONF..."
-    cat >> "$HYPR_CONF" <<'HYPREOF'
-
-# arch-setup-customizations (do not remove this marker — postinstall.sh skips re-append on its presence)
-# Monitor layout is authored via `nwg-displays` → writes ~/.config/hypr/monitors.conf,
-# which hyprland.conf sources. Intended layout: Vizio V505-G9 (4K 50", DP-1) at
-# (0,0) scale 1.5 → logical 2560x1440; Dell Inspiron 7786 internal panel (eDP-1)
-# at (0, 1440) scale 1 → left edges aligned, laptop directly below the TV.
-# Do NOT pin `monitor = ...` lines here — the kernel-reported name for the TV is
-# DP-1 (DisplayPort-over-HDMI alt-mode), which varies by port/cable, and monitors.conf
-# is the single source of truth.
-#
-# nwg-displays gotcha: its visual canvas defaults monitor X positions to non-zero
-# values (~2000 for the 4K rectangle) even when the rectangles look "snapped" to
-# each other in the GUI. That makes the two screens overlap only at a corner
-# pixel and the cursor only transitions there. Fix: type `0` into the X field
-# for BOTH monitors explicitly, then Apply + Save.
-source = ~/.config/hypr/monitors.conf
-#
-# Lid close → disable internal panel; lid open → reload hyprland.conf so monitors.conf
-# reapplies the nwg-displays-authored layout. Laptop lives under a desk most of the
-# time; closing the lid is the normal "kiosk mode" signal.
-bindl = , switch:on:Lid Switch,  exec, hyprctl keyword monitor "eDP-1, disable"
-bindl = , switch:off:Lid Switch, exec, hyprctl reload
-#
-# 2-in-1 touch: 3-finger swipe = workspace switch (Hyprland built-in);
-# extra touch gestures (long-press, edge swipe to toggle wvkbd) come from the
-# hyprgrass plugin installed via `hyprpm` below.
-gestures {
-    workspace_swipe = true
-    workspace_swipe_fingers = 3
-}
-#
-# Screen rotation on tablet-mode flip via iio-hyprland (AUR). Reads the IIO
-# accelerometer and emits `hyprctl keyword monitor` transforms.
-exec-once = iio-hyprland
-HYPREOF
+# Enable user systemd timer for wallpaper rotation (every 6h).
+if [[ -f "$HOME/.config/systemd/user/wallpaper-rotate.timer" ]]; then
+    log "Enabling wallpaper-rotate.timer..."
+    systemctl --user daemon-reload
+    systemctl --user enable --now wallpaper-rotate.timer 2>/dev/null \
+        || warn "wallpaper-rotate.timer enable failed — re-run inside a graphical session."
 fi
 
-# Install hyprgrass touch-gesture plugin via hyprpm. Idempotent: hyprpm checks
-# if the plugin is already added before re-cloning.
-if command -v hyprpm >/dev/null && [[ -d "$HOME/.config/hypr" ]]; then
-    log "Ensuring hyprgrass plugin (touch gestures) is installed..."
+# Hyprland plugins via hyprpm. hyprexpo + hyprgrass per desktop-requirements.md.
+# Must run inside a Hyprland session to actually load (hyprpm enable signals
+# the live compositor). On first install, the user runs this section again
+# from inside Hyprland; on re-runs, the `add` is idempotent.
+if command -v hyprpm >/dev/null; then
+    log "Ensuring Hyprland plugins (hyprexpo + hyprgrass)..."
     hyprpm update >/dev/null 2>&1 || true
+    if ! hyprpm list 2>/dev/null | grep -q hyprexpo; then
+        hyprpm add https://github.com/hyprwm/hyprland-plugins \
+            && hyprpm enable hyprexpo \
+            || warn "hyprexpo install failed — re-run inside a Hyprland session."
+    fi
     if ! hyprpm list 2>/dev/null | grep -q hyprgrass; then
         hyprpm add https://github.com/horriblename/hyprgrass \
             && hyprpm enable hyprgrass \
@@ -1199,27 +1129,8 @@ if command -v hyprpm >/dev/null && [[ -d "$HOME/.config/hypr" ]]; then
     fi
 fi
 
-# ---------- 14. Ghostty Catppuccin ----------
-log "Writing Ghostty config..."
-mkdir -p "$HOME/.config/ghostty"
-cat > "$HOME/.config/ghostty/config" <<'GSEOF'
-font-family = "JetBrainsMono Nerd Font"
-font-size = 12
-theme = "Catppuccin Mocha"
-cursor-style = block
-cursor-style-blink = false
-window-decoration = false
-window-padding-x = 8
-window-padding-y = 8
-mouse-hide-while-typing = true
-copy-on-select = clipboard
-GSEOF
-
-# ---------- 15. SDDM Catppuccin theme ----------
-if pacman -Qi catppuccin-sddm-theme-mocha >/dev/null 2>&1; then
-    sudo mkdir -p /etc/sddm.conf.d
-    echo -e "[Theme]\nCurrent=catppuccin-mocha" | sudo tee /etc/sddm.conf.d/theme.conf >/dev/null
-fi
+# Ghostty config + Catppuccin SDDM theme are now part of dotfiles/system-files —
+# no separate §14 / §15 needed. The legacy blocks were removed in this rewrite.
 
 # ---------- 16. Snapper: baseline snapshot of / ----------
 # NOTE: install.sh already created the @snapshots subvolume and mounted it at
