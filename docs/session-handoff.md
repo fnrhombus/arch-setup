@@ -2,7 +2,31 @@
 
 You are picking up a conversation that was running on Claude Code on the web (web session, scoped to `fnrhombus/arch-setup`) and is now moving to a Claude Code session running **on the Metis laptop itself**. Everything below is state you inherit cold — no shared context with the prior session.
 
-## Where things stand on Metis (as of 2026-04-21)
+## ⚠ Reinstall redesign in flight (2026-04-22)
+
+A clean-slate reinstall of the desktop stack is in planning on branch `desktop-design`. Source of truth for the new design:
+
+- `docs/decisions.md` — locked decisions (recently updated: greeter, theme, notifications, hibernate, full component picks)
+- `docs/desktop-requirements.md` — full spec for the bare-Hyprland + chezmoi-managed approach (matugen theming, manual hibernate workflow, GTK-CSS pipeline end to end)
+
+What's locked-and-different from the live system:
+- Greeter: SDDM → greetd + ReGreet
+- Theme: Catppuccin Mocha → matugen (Material You from wallpaper)
+- Notifications: mako → swaync
+- Bootloader: systemd-boot → limine (per `reinstall-planning.md` §3)
+- Hibernate: previously disabled → enabled (S4) with TPM2-sealed swap + pacman reseal hook
+- Dotfile pack: HyDE → none (Claude-authored configs in chezmoi)
+
+Documents that still reflect **pre-reinstall state** and will be rewritten alongside the script-implementation pass:
+- This file (`docs/session-handoff.md`) — Working / Drifted / Pending sections below describe the live system, not the redesign target.
+- `runbook/phase-3-handoff.md` — describes post-install learning under HyDE+SDDM+Catppuccin.
+- `runbook/INSTALL-RUNBOOK.md` — describes the current install flow (`pnpm i` → Ventoy USB → SDDM).
+- `runbook/SURVIVAL.md` — recovery recipes assume SDDM.
+- `runbook/GLOSSARY.md` — SDDM entry needs replacing with greetd.
+
+`docs/reinstall-planning.md` was the bridging memo from the prior session; §1 (desktop layer) recommended KDE Plasma 6 + Polonium, but the user picked **bare Hyprland with Claude-authored configs** instead after clarifying that "no excessive config tweaking" should be filtered through "Claude does the tweaking." That section carries a SUPERSEDED notice; the rest of `reinstall-planning.md` (Secure Boot, limine, ISO build) is still current.
+
+## Where things stand on Metis (as of 2026-04-21, pre-reinstall)
 
 ### Working
 - Dual-boot Windows 11 + Arch install completed from USB (Ventoy + autounattend + install.sh + chroot.sh + postinstall.sh).

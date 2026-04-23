@@ -89,7 +89,27 @@ and extensions break across GNOME major versions. Skip.
 **COSMIC DE** — still alpha in April 2026. Pop!_OS's long-awaited Wayland
 DE; not ready for a primary machine. Revisit in a year.
 
-### Verdict
+### Verdict — SUPERSEDED 2026-04-22
+
+**The Plasma 6 + Polonium recommendation below was overridden** in a
+follow-up conversation. The user clarified that "I don't enjoy config
+tweaking" should be filtered through "Claude does the tweaking" — which
+removes the case for picking an opinionated dotfile pack or DE just to
+save the *user* tweaking time. Picking a pre-bundled stack only adds
+drift-prone upstream layers.
+
+**Actual decision: bare Hyprland + hand-picked components + Claude-authored
+configs in chezmoi.** Tiling is a hard requirement (excludes Polonium-
+on-non-tiling-DE). Full component spec at `docs/desktop-requirements.md`.
+Locked component picks at `docs/decisions.md` §K + the "Desktop component
+picks" section.
+
+The KDE/ml4w/HyDE analysis below is preserved as research artifact — the
+trade-off framing is still useful, just the verdict landed elsewhere.
+
+---
+
+**Original verdict (now historical):**
 
 **Top pick: KDE Plasma 6 + Polonium**. The user said "I'm not trying to make
 rice" and "I don't enjoy config tweaking." Plasma 6 is the DE that takes
@@ -369,6 +389,12 @@ once Secure Boot + limine are proven on real hardware.
 ---
 
 ## 5. Authentication stacks (PIN / password / fingerprint)
+
+> **Note (2026-04-22):** the greeter changed from SDDM to greetd+ReGreet
+> (see `decisions.md` §D). The PAM design below applies unchanged —
+> substitute `/etc/pam.d/greetd` for `/etc/pam.d/sddm` everywhere. The
+> "Root cause of each observed bug" subsection refers to the live SDDM
+> install and is historical context for what NOT to repeat.
 
 Three auth methods are in play:
 - **Password** — `pam_unix.so` reading `/etc/shadow`.
