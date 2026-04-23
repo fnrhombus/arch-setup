@@ -213,8 +213,11 @@
 - Configure JetBrains Mono as default in Ghostty, Helix, VSCode, Waybar, SDDM
 - Others available for swapping
 
-#### K) Theme: Catppuccin Mocha
-- Applied across: Ghostty, Helix, VSCode, Waybar, GTK, Qt, SDDM, browser, btop, tmux
+#### K) Theme: matugen (Material You, wallpaper-derived)
+- Palette generated dynamically from the current wallpaper.
+- Templates render: Hyprland colors, waybar CSS, swaync CSS, ReGreet CSS, Ghostty, GTK (gsettings), Qt (qt5ct/qt6ct), mako/swaync, fuzzel, VSCode.
+- Master dark/light switch via `~/.local/bin/theme-toggle` — three entry points: Super+Shift+T hotkey, waybar sun/moon icon, fuzzel control-panel entry.
+- **Switched from Catppuccin Mocha 2026-04-22**: Catppuccin was a default-of-the-day pick, never load-bearing. The user wanted dynamic accent from wallpaper + an easy dark/light master switch — matugen delivers both natively. References to `catppuccin-sddm-theme-mocha`, `Catppuccin Mocha` ghostty theme, etc. are stale and need cleanup in the script-implementation pass.
 
 #### L) Dotfiles: chezmoi
 - Template-based, git-backed, Bitwarden integration for secrets
