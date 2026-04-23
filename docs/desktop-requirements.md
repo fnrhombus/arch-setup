@@ -18,15 +18,51 @@ comprehensive at any one time.
 ## Components (pacman / AUR)
 
 ```
+# Compositor + core
 hyprland hypridle hyprlock hyprpolkitagent
-greetd greetd-regreet      # greeter (replaces SDDM)
-waybar fuzzel swaync cliphist wl-clipboard
-swww grim slurp satty hyprshot
+
+# Greeter
+greetd greetd-regreet
+
+# Bar, notifications, launcher
+waybar swaync fuzzel
+
+# Clipboard, wallpaper, screenshots
+cliphist wl-clipboard swww
+grim slurp satty hyprshot
+
+# Theming + cursor + icon
+matugen                          # AUR — wallpaper-derived palette
+nwg-look qt5ct qt6ct             # GTK + Qt theme managers
+papirus-icon-theme               # icon theme (max app coverage)
+bibata-cursor-theme-hyprcursor   # AUR — hyprcursor format, ~6.6 MB
+
+# OSD popups (volume / brightness / caps-lock)
+swayosd
+
+# Reachable from the fuzzel control-panel
+nwg-displays                     # display config
+network-manager-applet           # provides nm-connection-editor
+overskride                       # AUR — Bluetooth (GTK4)
+pwvucontrol                      # PipeWire-native audio mixer
+mission-center                   # AUR — resource/process monitor (GUI)
+pacseek                          # AUR — TUI package install/remove
+
+# Daily-use viewers
+imv                              # image viewer
+zathura zathura-pdf-poppler      # PDF viewer (Xwayland; modal keys)
+
+# Power menu, color picker
+wleave hyprpicker                # both AUR
+
+# Hyprland plugins
+hyprexpo                         # Mission-Control-style overview
+
+# Portals
 xdg-desktop-portal-gtk xdg-desktop-portal-hyprland
-iio-hyprland-git wvkbd     # 2-in-1 (rotation, OSK)
-matugen                    # AUR — wallpaper-derived theme generator
-hyprexpo                   # Hyprland plugin — Mission-Control-style overview
-pacseek                    # TUI fuzzy package installer (or a fuzzel-launched yay wrapper)
+
+# 2-in-1 hardware
+iio-hyprland-git hyprgrass wvkbd
 ```
 
 ## Greeter

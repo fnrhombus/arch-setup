@@ -238,6 +238,26 @@
 - **nautilus** — GTK4 GUI file manager, Wayland-tested, picks up the Catppuccin GTK theme for free, minimal-friction for drag/drop, network mounts (smb://, sftp://). The deliberate polar opposite of yazi for "sit back, click around" mode.
 - **Not Dolphin/Nemo/Thunar/PCManFM**: Dolphin adds a Qt/KDE theming tax while being philosophically the same dense-power-user tool as yazi; Thunar's Wayland support is X11-first; PCManFM is a low-RAM pick we don't need; Nemo's maintenance velocity lags Nautilus.
 
+#### Desktop component picks (locked 2026-04-22, validation pass)
+
+Rapid-fire small picks. All recommended by the validation research agent
+and accepted on the "clean-slate, no bias" principle. See
+`docs/desktop-requirements.md` for full component list.
+
+- **OSD popups**: SwayOSD — GTK4, in extra; volume/brightness/caps-lock; CSS themed via matugen.
+- **Network UI**: nm-connection-editor for full config + a custom waybar nmcli module for at-a-glance state. Skip nm-applet (the tray icon is redundant).
+- **Bluetooth UI**: overskride (AUR) — GTK4/libadwaita, Wayland-native. Blueman is the GTK3 fallback.
+- **Audio mixer GUI**: pwvucontrol — PipeWire-native (no PulseAudio shim). pavucontrol is the legacy fallback.
+- **Color picker**: hyprpicker — Wayland-native, magnifier loupe, autocopy.
+- **Power menu**: wleave (AUR) — GTK4 fork of wlogout, themes via matugen.
+- **Image viewer**: imv — fast, reliable, modal keys. (Loupe rejected: libadwaita ignores GTK theming, won't follow matugen.)
+- **PDF viewer**: zathura + zathura-pdf-poppler — Xwayland but the modal-keys UX wins. Sioyek is the Wayland-native alternative if Xwayland ever bites.
+- **GTK theme manager**: nwg-look (GTK3/libadwaita settings; matugen overwrites the resulting CSS).
+- **Qt theme manager**: qt6ct + qt5ct, with `QT_QPA_PLATFORMTHEME=qt6ct`. Matugen ships a Qt template.
+- **Cursor**: Bibata-Modern-Classic in **hyprcursor** format (~6.6 MB vs 44 MB Xcursor). Phinger is the alternative if Bibata feels too neutral.
+- **Icon theme**: Papirus-Dark — best app coverage. Tela is the runner-up if a more uniform "modern" feel matters more than coverage.
+- **Resource monitor (GUI)**: mission-center (AUR) — one piece the per-tool launcher genuinely misses; complements btop in the terminal.
+
 #### P) Installer password handoff: pre-hashed via mode-600 file
 - `phase-2-arch-install/install.sh` reads the root + `tom` passwords once at the top of the run, hashes them immediately with `openssl passwd -6` (SHA-512), and hands the hashes to `chroot.sh` via a mode-600 file under `/mnt/tmp/`. The plaintext values never touch disk.
 - **Caveat**: while the installer is still running, the `openssl passwd` invocation does briefly appear in `ps` (as the process argument) on the live ISO. The live environment is single-user and ephemeral, so this is acceptable — but don't run the installer on a shared/networked machine. After chroot finishes, the hash file is deleted and only the hashed values remain in `/etc/shadow`.
