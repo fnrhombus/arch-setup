@@ -109,16 +109,50 @@ no ventilation, this overheats. **S4 hibernate** dumps RAM to swap and
 fully powers off. Wake is ~5–10 sec; state preserved. This is the only
 correct answer for the user's bag-stuff-it-and-go workflow.
 
-### Hibernate infrastructure (touches `chroot.sh` — architectural change)
+**This reverses `docs/decisions.md:15`** ("Hibernation is disabled — dual-boot
++ BitLocker would make it risky anyway"). The cited dual-boot/BitLocker risk
+doesn't actually apply: Linux swap lives on the Netac (sdb2), Windows has
+no driver for LUKS or btrfs and never touches sdb. Worst-case if Windows
+boots between hibernate and resume is a TPM2 PCR drift → passphrase
+fallback at resume. Not corrupting. `decisions.md:15` needs to be flipped
+when these scripts land.
 
-- **Persistent** swap encryption (current cryptswap regenerates a random
-  key per boot — can't decrypt on resume). Two viable patterns:
-  1. LUKS swap unlocked by a TPM2-sealed keyfile (same model as cryptvar).
-  2. LUKS swap unlocked by the same keyfile as root.
+### Hibernate infrastructure (touches `chroot.sh` + `install.sh` — architectural change)
+
+- **Persistent LUKS swap, unlocked by a TPM2-sealed keyfile** — mirrors the
+  existing cryptvar pattern (`/etc/cryptsetup-keys.d/cryptvar.key`). Replaces,
+  not augments, the current random-key cryptswap (`install.sh:334-337`,
+  `chroot.sh:136`).
 - Swap ≥ RAM. Metis: 16 GB RAM, 16 GB swap partition — exactly enough
   (tight but workable for typical workloads on a fresh-cache hibernate).
-- Kernel cmdline: add `resume=UUID=<swap-LUKS-mapper>`.
-- mkinitcpio: add `resume` hook before `filesystems` in HOOKS.
+- Kernel cmdline: add `resume=/dev/mapper/cryptswap`.
+- mkinitcpio: add `resume` hook AFTER `block`/`sd-encrypt` and BEFORE
+  `filesystems` in HOOKS.
+- **Pacman post-transaction hook** to re-run `systemd-cryptenroll
+  --tpm2-pcrs=0+7` on every `linux`, `mkinitcpio`, and `limine` upgrade.
+  Without this, every kernel bump shifts PCR 4 and demands the LUKS
+  passphrase on next resume. Hook drops in `/etc/pacman.d/hooks/`.
+
+### TPM2 prep — one-time, before any cryptenroll
+
+The current install seals against the SHA-1 PCR bank because Intel PTT
+firmware on Whiskey Lake ships with only `pcr-sha1` allocated and
+`systemd-cryptenroll` silently falls back. SHA-1 still works but is
+trending toward deprecation. Since the reinstall is fresh, do it right:
+
+1. **Before reinstall**, on the current Arch: `fwupdmgr refresh && fwupdmgr update`
+   to take Dell BIOS from 1.16 → ~1.18. Picks up any PTT firmware fixes
+   since 2022.
+2. **Early in `install.sh`**, before any `systemd-cryptenroll` call:
+   `tpm2_pcrallocate sha256:all+sha1:all`, then reboot the TPM (or whole
+   machine — simpler). Verify `tpm2_getcap pcrs` shows both banks
+   populated. If Intel PTT only allows one active bank at a time on this
+   model, choose `sha256` over `sha1`.
+3. Then enrol root, var, and swap LUKS — all will pick up
+   `tpm2-pcr-bank: sha256` automatically.
+
+Slot inventory headroom: 17 free persistent handles, 2039 free NV indices.
+No slot exhaustion risk for any planned sealing.
 
 ### Monitor handoff on lid close
 
