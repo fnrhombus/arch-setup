@@ -1,0 +1,22 @@
+# Paths that matugen renders to at runtime. Chezmoi MUST NOT manage these
+# or it'll fight with matugen on every wallpaper change / theme-toggle.
+#
+# These ignore entries are listed in source-tree form (path inside dotfiles/)
+# but they ALSO must not appear in destination state — never add files at
+# these paths to the source tree.
+#
+# If you find yourself wanting to template one of these, do it through
+# matugen's template system (dot_config/matugen/templates/<file>) instead.
+
+dot_config/waybar/colors.css
+dot_config/swaync/colors.css
+dot_config/fuzzel/colors.ini
+dot_config/hypr/colors.conf
+dot_config/hypr/hyprlock.colors.conf
+dot_config/ghostty/themes/matugen
+dot_config/gtk-3.0/gtk.css
+dot_config/gtk-4.0/gtk.css
+dot_config/qt5ct/colors/matugen.conf
+dot_config/qt6ct/colors/matugen.conf
+dot_config/yazi/theme.toml
+dot_config/helix/themes/matugen.toml
