@@ -647,26 +647,31 @@ SDDMPAMEOF
 # the "the boot chain was tampered with" signal we want to gate unsealing
 # on. PCRs 4/5/8/9 (bootloader + kernel measurements) change every kernel
 # upgrade, which would force the passphrase after every `pacman -Syu`.
-# Only cryptroot is TPM-enrolled. cryptvar auto-unlocks from a keyfile on
-# the (TPM-unlocked) cryptroot filesystem — a second TPM slot would burn
-# LUKS budget without adding at-rest protection.
+# cryptroot AND cryptswap are TPM-enrolled. cryptswap is opened in the
+# initramfs (crypttab.initramfs) BEFORE resume runs, so it needs a TPM
+# slot or every boot prompts for the LUKS passphrase to unlock swap.
+# cryptvar auto-unlocks from a keyfile on the (TPM-unlocked) cryptroot —
+# a second TPM slot would burn LUKS budget without adding at-rest
+# protection (the keyfile is only readable post-cryptroot-unlock).
 if [[ -c /dev/tpm0 || -c /dev/tpmrm0 ]] && [[ -z "${SKIP_TPM_LUKS:-}" ]]; then
-    dev="/dev/disk/by-partlabel/ArchRoot"
-    if [[ -b "$dev" ]]; then
+    for partlabel in ArchRoot ArchSwap; do
+        dev="/dev/disk/by-partlabel/$partlabel"
+        if [[ ! -b "$dev" ]]; then
+            warn "$dev not found — skipping TPM enroll for $partlabel."
+            continue
+        fi
         # systemd-cryptenroll with no action flag prints "SLOT TYPE" header
         # plus one line per key slot. Check for an existing tpm2 slot so a
         # re-run is idempotent (otherwise a second enroll adds a second
         # tpm2 slot, wastes LUKS slot budget, and silently succeeds).
         if sudo systemd-cryptenroll "$dev" 2>/dev/null | awk 'NR>1 && $2=="tpm2"{f=1} END{exit !f}'; then
-            log "TPM2 already enrolled on ArchRoot — skipping."
+            log "TPM2 already enrolled on $partlabel — skipping."
         else
-            log "Enrolling TPM2 autounlock for ArchRoot (enter the LUKS passphrase when prompted)..."
+            log "Enrolling TPM2 autounlock for $partlabel (enter the LUKS passphrase when prompted)..."
             sudo systemd-cryptenroll --tpm2-device=auto --tpm2-pcrs=0+7 "$dev" \
-                || warn "TPM enroll failed — boot still works with passphrase."
+                || warn "TPM enroll failed for $partlabel — boot still works with passphrase."
         fi
-    else
-        warn "$dev not found — skipping TPM enroll."
-    fi
+    done
 else
     warn "No TPM device (or SKIP_TPM_LUKS set) — boot will continue to prompt for the LUKS passphrase."
 fi
