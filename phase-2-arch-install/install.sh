@@ -429,7 +429,7 @@ pacstrap -K /mnt \
     efibootmgr \
     man-db man-pages texinfo \
     pipewire pipewire-pulse pipewire-jack wireplumber \
-    sddm hyprland xdg-desktop-portal-hyprland \
+    hyprland xdg-desktop-portal-hyprland xdg-desktop-portal-gtk \
     polkit \
     noto-fonts noto-fonts-emoji ttf-jetbrains-mono-nerd \
     mesa intel-media-driver vulkan-intel libva-intel-driver \
