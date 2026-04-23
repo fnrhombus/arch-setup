@@ -6,12 +6,13 @@ Branch to work on: **`claude/fix-linux-boot-issue-9ps2s`** — pull the latest b
 
 ## TL;DR
 
-1. **Today's unblock**: Rufus a plain Win11 25H2 installer onto a dedicated USB. No Ventoy, no autounattend. User manually clicks through Setup at the laptop. Loses auto-OOBE (~10 min of clicks); gains a working Windows.
-2. **Repo fixes** (commit separately on this branch regardless of path):
+1. **Today's unblock, try first**: Fresh `Ventoy2Disk.exe` install (NOT upgrade) on the SanDisk from this Windows dev machine, then `pnpm stage`. **This exact Ventoy+autounattend combo installed Windows successfully 2 days ago.** Only things that changed since: CMOS battery replaced → BIOS reset, and Ventoy was upgraded from 1.0.99 → 1.1.12 via `Ventoy2Disk.sh -u` on Linux. A Windows-native fresh install resets any state drift from both.
+2. **If #1 fails, escalate to Rufus** on a second USB. No Ventoy, no autounattend. User manually clicks through Setup at the laptop. Loses auto-OOBE (~10 min of clicks); gains a working Windows.
+3. **Repo fixes** (commit separately on this branch regardless of path):
    - Order 6 in `autounattend.xml` is silently broken (hardcoded DISK=0 instead of the documented PowerShell size match).
    - Order 11 still has `/CheckIntegrity /Verify`, which interacts badly with Ventoy wimboot.
    - `docs/autounattend-oobe-patch.md` and `CLAUDE.md` both describe behavior that doesn't exist in the XML — fix the drift.
-3. **Don't chase** the "upgrade Ventoy to 1.1.12" fix — already done on both sticks (visible on boot screen), doesn't help.
+4. **Don't just re-upgrade Ventoy** via the Linux script — already done, doesn't help, may be part of the problem.
 
 ## What's happening
 
@@ -76,9 +77,25 @@ Strip the flags. They don't help (Error 13 still fires without them) and they ca
 
 Update `docs/autounattend-oobe-patch.md` §1 and `CLAUDE.md` to match whatever disk-detection behavior actually ends up in the XML. Don't let docs claim features that aren't there.
 
-## Recommended path — Rufus on a second USB
+## Recommended path A — Fresh Ventoy2Disk.exe reinstall (try first)
 
-Fastest unblock. User has been willing to sacrifice OOBE automation in prior fallback plans we've discussed — this just commits to that trade. Ventoy stays on SanDisk + Netac for the Arch install (phase 2).
+**User's data point: same stack worked 2 days ago.** The only changes since are CMOS battery reset (BIOS reconfigured — AHCI/FastBoot/SecureBoot verified correct at the laptop) and a Linux-side `Ventoy2Disk.sh -u` upgrade. A full Windows-native reinstall of Ventoy resets any state drift from the Linux upgrade.
+
+### Steps
+
+1. `git pull` on the repo.
+2. Inspect `scripts/fetch-assets.ps1` — confirm the Ventoy version pin. Bump to 1.1.12 if still on 1.0.99.
+3. Run `pnpm restore:force` to re-fetch ISOs + the pinned Ventoy release. Fresh download eliminates any corruption from prior staging.
+4. Plug the SanDisk into the dev machine.
+5. Run `Ventoy2Disk.exe` (from the extracted Ventoy release in `assets/`). **Click "Install" (not "Update")** — a full reinstall wipes the stick's Ventoy state entirely. Confirm the prompts (stick gets wiped).
+6. Run `pnpm stage` to robocopy ISOs + configs + phase scripts onto the fresh Ventoy data partition.
+7. User brings USB to laptop, F12 → SanDisk UEFI → Ventoy menu → Win11 ISO → **normal mode first**.
+
+If Win11 installs cleanly, unblocked. Done for today. Repo fixes (below) can still land on this branch.
+
+## Recommended path B — Rufus (if path A fails)
+
+Fallback. User has been willing to sacrifice OOBE automation in prior discussions — this commits to that trade. Ventoy stays on SanDisk + Netac for the Arch install (phase 2).
 
 ### Steps
 
@@ -107,9 +124,9 @@ Because we lose the autounattend's 160GB Windows partition limit, the Arch insta
 
 Document this deviation in `docs/decisions.md` §Q9 or a new §Q9-bis.
 
-## Alternative paths (if user rejects Rufus)
+## Alternative paths (if paths A + B both fail)
 
-### B. Regenerate Schneegans XML without disk repartitioning
+### C. Regenerate Schneegans XML without disk repartitioning
 
 1. Visit https://schneegans.de/windows/unattend-generator/
 2. Generate a 25H2-compatible unattend with the following choices:
@@ -120,7 +137,7 @@ Document this deviation in `docs/decisions.md` §Q9 or a new §Q9-bis.
 4. User picks Samsung in Setup's GUI; Windows Setup uses default partitioning.
 5. After Windows install, same shrink step as above for Arch.
 
-### C. Keep Ventoy + autounattend, downgrade the ISO path
+### D. Keep Ventoy + autounattend, downgrade the ISO path
 
 Install from a **Win11 23H2 ISO** with `install.wim` swapped from 25H2 (legacy Setup runs → autounattend works → 25H2 gets installed). This is the workaround documented in the elevenforum thread above. ~1-2 hr. Keeps full automation. User would have to source a 23H2 ISO (not trivial — Microsoft doesn't host them anymore; needs UUP dump or similar).
 
