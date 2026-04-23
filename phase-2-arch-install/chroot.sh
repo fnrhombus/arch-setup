@@ -95,11 +95,15 @@ blacklist nvidia_uvm
 EOF
 
 # ---------- lid-close policy (decisions.md Requirements) ----------
-log "Lid-close: ignore on AC, suspend on battery..."
+# HandleLidSwitch=hibernate is dead code today (battery is dead) but live
+# the moment a battery returns — no reconfiguration needed. AC remains
+# clamshell-friendly via External=ignore. See docs/decisions.md "Battery"
+# bullet for full reasoning.
+log "Lid-close: ignore on AC, hibernate on battery..."
 mkdir -p /etc/systemd/logind.conf.d
 cat > /etc/systemd/logind.conf.d/10-lid.conf <<EOF
 [Login]
-HandleLidSwitch=suspend
+HandleLidSwitch=hibernate
 HandleLidSwitchExternalPower=ignore
 HandleLidSwitchDocked=ignore
 EOF
@@ -159,47 +163,150 @@ sed -i 's/^MODULES=.*/MODULES=(btrfs)/' /etc/mkinitcpio.conf
 sed -i 's/^HOOKS=.*/HOOKS=(base systemd autodetect modconf kms keyboard sd-vconsole block sd-encrypt filesystems fsck)/' /etc/mkinitcpio.conf
 mkinitcpio -P
 
-# ---------- systemd-boot ----------
-log "Installing systemd-boot to /boot (shared EFI)..."
-bootctl --path=/boot install
+# ---------- limine bootloader (replaces systemd-boot) ----------
+# limine chosen for: snapshot-rollback boot menu via limine-snapper-sync
+# (matches our btrfs+snapper setup), bootable-ISO-from-disk support
+# (Netac recovery partition becomes reachable), modern actively-developed
+# bootloader. Decision: docs/decisions.md §A + reinstall-planning.md §3.
+#
+# Phase 2 installs limine itself; phase-3 postinstall installs the AUR
+# limine-snapper-sync package + enables its hook for auto-regenerating
+# entries from new snapper snapshots.
+log "Installing limine bootloader..."
+pacman -S --noconfirm --needed limine
 
-# With sd-encrypt + crypttab.initramfs, cryptroot is opened inside the
-# initramfs before filesystems hook runs, so root= can safely point at
-# /dev/mapper/cryptroot (deterministic mapper name). No rd.luks.* cmdline
-# needed — crypttab.initramfs is the source of truth for the initramfs.
-cat > /boot/loader/loader.conf <<EOF
-default arch.conf
-timeout 3
-console-mode max
-editor yes
+# UEFI install: copy the limine EFI binary to the ESP fallback path
+# (\EFI\BOOT\BOOTX64.EFI). Firmware boots this without needing an NVRAM
+# entry — crucial because Windows periodically wipes NVRAM entries for
+# non-Windows loaders (per autounattend-oobe-patch.md).
+install -d /boot/EFI/BOOT
+install -m 644 /usr/share/limine/BOOTX64.EFI /boot/EFI/BOOT/BOOTX64.EFI
+
+# Also register a NVRAM entry so it shows in the boot menu by name.
+# `|| true` because efibootmgr can fail in a chroot if /sys/firmware/efi
+# isn't mounted — install.sh handles the EFI vars mount.
+if [[ -d /sys/firmware/efi/efivars ]]; then
+    efibootmgr --quiet --create-only \
+        --disk /dev/sda --part 1 \
+        --label "Limine Boot Manager" \
+        --loader '\EFI\BOOT\BOOTX64.EFI' 2>/dev/null \
+        || log "  efibootmgr NVRAM entry skipped (may already exist or efivars unavailable)"
+fi
+
+# Limine config — written to /boot/limine.conf (limine searches the ESP
+# root for this filename). Three entries: linux (default), linux-lts
+# (fallback for kernel regressions), linux fallback initramfs.
+#
+# SYNTAX-CHECK: limine 8.x config format. If syntax has drifted by the
+# time this runs, see https://github.com/limine-bootloader/limine/blob/trunk/CONFIG.md
+log "Writing /boot/limine.conf..."
+cat > /boot/limine.conf <<EOF
+timeout: 3
+default_entry: 1
+
+/Arch Linux
+    protocol: linux
+    kernel_path: boot():/vmlinuz-linux
+    module_path: boot():/intel-ucode.img
+    module_path: boot():/initramfs-linux.img
+    cmdline: root=/dev/mapper/cryptroot rootflags=subvol=@ rw quiet
+
+/Arch Linux (LTS)
+    protocol: linux
+    kernel_path: boot():/vmlinuz-linux-lts
+    module_path: boot():/intel-ucode.img
+    module_path: boot():/initramfs-linux-lts.img
+    cmdline: root=/dev/mapper/cryptroot rootflags=subvol=@ rw quiet
+
+/Arch Linux (Fallback)
+    protocol: linux
+    kernel_path: boot():/vmlinuz-linux
+    module_path: boot():/intel-ucode.img
+    module_path: boot():/initramfs-linux-fallback.img
+    cmdline: root=/dev/mapper/cryptroot rootflags=subvol=@ rw
+
+/Windows Boot Manager
+    protocol: efi_chainload
+    image_path: boot():/EFI/Microsoft/Boot/bootmgfw.efi
 EOF
-cat > /boot/loader/entries/arch.conf <<EOF
-title   Arch Linux
-linux   /vmlinuz-linux
-initrd  /intel-ucode.img
-initrd  /initramfs-linux.img
-options root=/dev/mapper/cryptroot rootflags=subvol=@ rw quiet
+
+# Pacman hook: re-deploy limine BIOS/UEFI binaries when the limine package
+# updates. Without this, a limine package upgrade leaves /boot/EFI/BOOT/
+# pointed at a stale copy.
+install -d /etc/pacman.d/hooks
+cat > /etc/pacman.d/hooks/95-limine-redeploy.hook <<'EOF'
+[Trigger]
+Operation = Upgrade
+Type = Package
+Target = limine
+
+[Action]
+Description = Re-deploying limine UEFI binary to ESP after upgrade...
+When = PostTransaction
+Exec = /usr/bin/install -m 644 /usr/share/limine/BOOTX64.EFI /boot/EFI/BOOT/BOOTX64.EFI
 EOF
-cat > /boot/loader/entries/arch-fallback.conf <<EOF
-title   Arch Linux (fallback)
-linux   /vmlinuz-linux
-initrd  /intel-ucode.img
-initrd  /initramfs-linux-fallback.img
-options root=/dev/mapper/cryptroot rootflags=subvol=@ rw
+
+# ---------- Pacman hook: TPM2 PCR re-enrolment after kernel/UKI/limine upgrades ----------
+# Every upgrade to linux / linux-lts / mkinitcpio / limine changes PCR 4
+# (bootloader/kernel measurement). LUKS volumes sealed against a frozen
+# PCR state will refuse to unlock at next boot, falling back to passphrase.
+# This hook re-runs systemd-cryptenroll on every TPM2-enrolled LUKS device
+# after such an upgrade, picking up the fresh PCR values.
+#
+# Auto-discovers devices by scanning /etc/crypttab for entries with
+# tpm2-device=auto — works even after we add cryptswap to the TPM-sealed
+# set in the hibernate refactor.
+log "Installing pacman post-upgrade TPM2 reseal hook..."
+cat > /etc/pacman.d/hooks/95-tpm2-reseal.hook <<'EOF'
+[Trigger]
+Operation = Upgrade
+Type = Package
+Target = linux
+Target = linux-lts
+Target = mkinitcpio
+Target = limine
+
+[Action]
+Description = Re-enrolling TPM2 PCR slots on TPM-sealed LUKS volumes...
+When = PostTransaction
+Exec = /usr/local/sbin/tpm2-reseal-luks
 EOF
-# LTS kernel entry — insurance against a mainline-kernel regression that
-# prevents boot. Pick "Arch Linux (LTS)" from the systemd-boot menu if the
-# default entry panics/hangs. linux-lts is pacstrapped alongside linux in
-# install.sh so the kernel + initramfs files are already at /boot.
-cat > /boot/loader/entries/arch-lts.conf <<EOF
-title   Arch Linux (LTS)
-linux   /vmlinuz-linux-lts
-initrd  /intel-ucode.img
-initrd  /initramfs-linux-lts.img
-options root=/dev/mapper/cryptroot rootflags=subvol=@ rw quiet
-EOF
-# Note: Windows Boot Manager auto-discovered by systemd-boot if present at
-# \EFI\Microsoft\Boot\bootmgfw.efi (Windows install writes it there).
+
+install -d -m 755 /usr/local/sbin
+cat > /usr/local/sbin/tpm2-reseal-luks <<'BASH'
+#!/usr/bin/env bash
+# Re-enrol every TPM2-sealed LUKS device against the current PCR state.
+# Triggered by /etc/pacman.d/hooks/95-tpm2-reseal.hook after kernel/UKI/
+# limine upgrades that shift PCR 4.
+set -euo pipefail
+[[ -f /etc/crypttab ]] || exit 0
+
+# Match crypttab entries whose options field contains tpm2-device=auto.
+# Field 2 is the source UUID=... or PARTUUID=... — feed that to
+# /dev/disk/by-uuid/$ID resolution, then cryptenroll.
+while IFS= read -r line; do
+    [[ "$line" =~ ^[[:space:]]*# ]] && continue
+    [[ -z "${line// }" ]] && continue
+    # Tab-or-space separated: name source key options
+    set -- $line
+    src="${2:-}"
+    opts="${4:-}"
+    [[ "$opts" == *tpm2-device=auto* ]] || continue
+    case "$src" in
+        UUID=*)     dev="/dev/disk/by-uuid/${src#UUID=}" ;;
+        PARTUUID=*) dev="/dev/disk/by-partuuid/${src#PARTUUID=}" ;;
+        /dev/*)     dev="$src" ;;
+        *)          echo "tpm2-reseal: unknown source format: $src" >&2; continue ;;
+    esac
+    [[ -b "$dev" ]] || { echo "tpm2-reseal: $dev not present (yet?); skipping" >&2; continue; }
+    echo "tpm2-reseal: re-enrolling TPM2 slot on $dev..."
+    systemd-cryptenroll --wipe-slot=tpm2 "$dev" >/dev/null 2>&1 || true
+    systemd-cryptenroll --tpm2-device=auto --tpm2-pcrs=0+7 "$dev"
+done < /etc/crypttab.initramfs /etc/crypttab 2>/dev/null
+
+exit 0
+BASH
+chmod 755 /usr/local/sbin/tpm2-reseal-luks
 
 # ---------- TPM2 stack (for pinpam in phase-3) ----------
 # Sync the mirror DB first. pacstrap populated /var/lib/pacman/sync from the
@@ -209,31 +316,63 @@ log "Installing TPM2 userspace..."
 pacman -Sy --noconfirm
 pacman -S --noconfirm --needed tpm2-tss tpm2-tools libsecret gnome-keyring
 
-# ---------- PAM: gnome-keyring auto-unlock on SDDM login ----------
-# Adds keyring unlock tied to your SDDM login password, so Bitwarden's stored
+# ---------- TPM2 PCR bank: ensure SHA-256 active before any cryptenroll ----------
+# Intel PTT firmware on Whiskey Lake (this Dell) ships with only the
+# pcr-sha1 bank allocated. systemd-cryptenroll silently falls back to SHA-1
+# when SHA-256 isn't available. We allocate both banks here so all sealings
+# (root in phase-3, var in phase-3, swap in phase-3 if hibernate is wired,
+# pinpam) land in SHA-256 — trending standard, future-proof.
+#
+# Reallocation is a TPM-firmware-level reset: it WIPES all currently-sealed
+# objects. Doing this BEFORE any cryptenroll means there's nothing to wipe.
+# Failure mode: some Intel PTT firmwares only allow one bank active at a
+# time. If sha256:all+sha1:all is rejected, the script falls back to
+# sha256-only (drops sha1 entirely) which is still correct.
+log "Allocating TPM2 PCR banks (sha256 + sha1, fallback sha256-only)..."
+if command -v tpm2_pcrallocate >/dev/null 2>&1; then
+    if ! tpm2_pcrallocate sha256:all+sha1:all 2>/dev/null; then
+        log "  sha256+sha1 rejected; trying sha256-only..."
+        tpm2_pcrallocate sha256:all 2>/dev/null \
+            || log "  WARN: pcrallocate failed entirely; seals will land in whatever bank is active (probably sha1)."
+    fi
+    # Verify what's active so first-boot logs show ground truth.
+    tpm2_getcap pcrs 2>/dev/null | grep -iE 'sha[0-9]+:' | head -4 || true
+fi
+
+# ---------- greetd + ReGreet system-files install ----------
+# greetd replaced SDDM (decisions.md §D). Source files live alongside
+# postinstall in phase-3/system-files/ and are installed here at
+# chroot-time so first boot comes up directly into greetd.
+log "Installing greetd + ReGreet config + PAM stack..."
+pacman -S --noconfirm --needed greetd greetd-regreet
+GREETD_SRC="/root/arch-setup/phase-3-arch-postinstall/system-files"
+if [[ -d "$GREETD_SRC" ]]; then
+    install -d -m 755 /etc/greetd
+    install -m 644 "$GREETD_SRC/greetd/config.toml"   /etc/greetd/config.toml
+    install -m 644 "$GREETD_SRC/greetd/regreet.toml"  /etc/greetd/regreet.toml
+    install -m 644 "$GREETD_SRC/pam.d/greetd"         /etc/pam.d/greetd
+else
+    log "  WARN: $GREETD_SRC not found; greetd installed but unconfigured."
+    log "        Expected install.sh to bind /run/ventoy or /root/arch-setup."
+fi
+
+# ---------- PAM: gnome-keyring auto-unlock on greetd login ----------
+# Keyring unlock tied to greetd login password so Bitwarden's stored
 # master password becomes readable at session start without extra typing.
-log "Wiring gnome-keyring into SDDM PAM stack..."
-if ! grep -q pam_gnome_keyring /etc/pam.d/sddm; then
-    sed -i '/^auth.*include.*system-login/a auth       optional     pam_gnome_keyring.so' /etc/pam.d/sddm
-    sed -i '/^session.*include.*system-login/a session    optional     pam_gnome_keyring.so auto_start' /etc/pam.d/sddm
+log "Wiring gnome-keyring into greetd PAM stack..."
+if [[ -f /etc/pam.d/greetd ]] && ! grep -q pam_gnome_keyring /etc/pam.d/greetd; then
+    sed -i '/^auth.*include.*system-login/a auth       optional     pam_gnome_keyring.so' /etc/pam.d/greetd
+    sed -i '/^session.*include.*system-login/a session    optional     pam_gnome_keyring.so auto_start' /etc/pam.d/greetd
 fi
 if ! grep -q pam_gnome_keyring /etc/pam.d/passwd; then
     echo 'password   optional   pam_gnome_keyring.so' >> /etc/pam.d/passwd
 fi
 
-# ---------- PAM: fingerprint for sudo + SDDM (fprintd prompts touch-finger) ----------
-# `sufficient` means: if fingerprint auth succeeds, skip the rest (password
-# not needed); if it fails/is-unavailable, fall through to pam_unix which
-# prompts for password as normal. So worst-case failure mode of fprintd
-# being sick is "login takes an extra 2-5s then asks for password." No
-# lockout scenario exists as long as pam_unix is still in the stack after
-# our insert.
-log "Wiring fprintd into sudo + SDDM PAM stacks..."
-for svc in sudo sddm; do
-    if ! grep -q pam_fprintd "/etc/pam.d/$svc"; then
-        sed -i '1i auth       sufficient   pam_fprintd.so' "/etc/pam.d/$svc"
-    fi
-done
+# ---------- PAM: sudo (fingerprint optional) ----------
+# Phase-3 postinstall §7a OWNS the sudo / hyprlock PAM stacks end-to-end
+# (PIN → fingerprint → password). We don't pre-inject fingerprint here
+# because it would conflict with postinstall's tee-overwrite. The greetd
+# PAM stack we just installed already includes fprintd at sufficient.
 
 # ---------- pre-seed NetworkManager Wi-Fi profiles ----------
 # Mirror install.sh WIFI_PROFILES and autounattend.xml Wi-Fi block.
@@ -302,7 +441,7 @@ fi
 # ---------- services ----------
 log "Enabling services..."
 systemctl enable NetworkManager
-systemctl enable sddm
+systemctl enable greetd
 systemctl enable bluetooth
 systemctl enable fprintd
 systemctl enable fstrim.timer
