@@ -20,6 +20,14 @@ The user is paused right *before* reboot. They've just finished `prep-netac-vent
 
 The Netac is now Metis's **internal** Ventoy boot medium (the laptop's USB ports won't reliably boot Ventoy — that's why we did the Netac trick).
 
+## Three things not otherwise obvious from this doc
+
+1. **The Win11 ProductKey is real, license-genuine, and local-only.** The user replaced the Schneegans placeholder in `autounattend.xml` before running the prep script, then `git update-index --skip-worktree`'d the file so `git status` hides the change. The real key only lives in the autounattend.xml that got rsynced onto the Netac Ventoy partition. **Never suggest** "git pull / git checkout autounattend.xml" or "regenerate the answer file" — you'd replace the real key with the placeholder and the Win11 install would prompt the user to buy a license. Phase 1 activates Windows silently; no key entry required.
+
+2. **The boot medium is the internal Netac, not a USB.** At F12, the entry is usually labeled "Netac SSD …" or "Internal SSD" — whichever is NOT "Windows Boot Manager" and NOT the USB stick that was used to bring the ISOs onto Metis during prep. The USB stick is no longer required and can be removed.
+
+3. **Host-side prep workarounds on the old Linux (gone after reboot, safe to ignore).** Running `prep-netac-ventoy.sh` required `pacman -S gptfdisk exfatprogs parted rsync ventoy-bin` on the running Arch, plus a `/usr/local/bin/mkexfatfs` shim that translates old Ventoy argv to `mkfs.exfat`'s new flags. These are gone after reboot — Phase 1 is Windows, Phase 2 is a fresh Arch live ISO. If the script ever needs to be re-run (re-imaging the Netac from inside a *different* running Arch), the same workarounds need to be re-applied. **Not a concern for this install.**
+
 ## What's about to happen (the three phases)
 
 ```
