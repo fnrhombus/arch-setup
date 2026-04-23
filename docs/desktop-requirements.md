@@ -183,10 +183,36 @@ Binding categories:
 
 Ships with a printable **cheat sheet** at `runbook/keybinds.md` that
 `pnpm pdf` renders alongside the install runbook. First-week reference.
+The cheat sheet is **auto-generated from `hyprland.conf`** — no manual
+sync, can't drift.
 
 Full binding list lives in `hyprland.conf` (Claude-authored when configs
 are written) — this section locks the *philosophy*, not the literal
 bytes.
+
+### Keybind tooling
+
+Hyprland has no GUI binding editor / conflict detector — config is
+text-only. Pragmatic substitute, shipped as part of the chezmoi
+bootstrap:
+
+- **`scripts/validate-hypr-binds.sh`** — parses `hyprland.conf` (+
+  any `source =` includes), enumerates all `bind = MOD, KEY, ...` lines,
+  flags duplicate `(MOD, KEY)` pairs across the entire config, flags
+  unknown dispatchers (catches `excec` typos and similar), exits
+  non-zero on any issue.
+- Wired as a **chezmoi pre-apply hook** (`.chezmoiscripts/run_before_validate-binds.sh.tmpl`)
+  so `chezmoi apply` refuses to install a Hyprland config with binding
+  conflicts.
+- Same script regenerates `runbook/keybinds.md` from the bindings —
+  cheat sheet always reflects the active config.
+- Runtime sanity: `hyprctl binds` lists what the running compositor
+  actually has. Validator catches conflicts at config-edit time;
+  `hyprctl` catches "did the latest reload pick this up."
+
+Complementary debugging aid: **SwayOSD** (in component list) shows a
+popup on every dispatched bind, so an unbound key is visually obvious
+("nothing happened" vs "popup says it ran").
 
 ## Workspace overview (within the strategy above)
 
@@ -215,9 +241,13 @@ bytes.
   - `HandleLidSwitch=hibernate`           # battery — dead code today, live when battery returns
   - `HandleLidSwitchExternalPower=ignore` # AC, clamshell under desk
   - `HandleLidSwitchDocked=ignore`
-- **hypridle** — lock on idle, DPMS off on longer idle. **No** idle-hibernate
-  timer — the user explicitly does not want hibernation triggered while on AC
-  regardless of activity.
+- **hypridle** — both lock and DPMS-off fire at **30 minutes idle**. No
+  idle-hibernate timer — the user explicitly does not want hibernation
+  triggered while on AC regardless of activity.
+  - `timeout 1800 → loginctl lock-session` (lock)
+  - `timeout 1800 → hyprctl dispatch dpms off` (display power off)
+  - `on-resume → hyprctl dispatch dpms on`
+  - On `before-sleep` (manual hibernate path): also lock first.
 
 ### Manual hibernate workflow (current, until battery is replaced)
 
