@@ -234,7 +234,7 @@ chmod +x ~/postinstall.sh
 It will:
 1. `sudo` prompt for your password — type it. (No fingerprint/PIN yet.)
 2. **pacman** — base CLI tooling + the bare-Hyprland stack (waybar, swaync, fuzzel, swayosd, hyprlock, hypridle, hyprpolkitagent, hyprpicker, nm-connection-editor, pwvucontrol, nwg-displays, qt5/6ct, papirus-icon-theme, imv, zathura, etc.) + Bitwarden + Ghostty + cliphist + satty + hyprshot + mise + chezmoi + gh + snapper. Signed binaries from `extra`, ~5–8 min.
-3. **yay** — AUR packages: visual-studio-code-bin, microsoft-edge-stable-bin, claude-desktop-native, pinpam-git, sesh, iio-hyprland-git, powershell-bin, **awww** (Wayland wallpaper), **matugen-bin** (Material You), mission-center, overskride, wleave, bibata-cursor + bibata-cursor-translated, pacseek. ~10 min build time.
+3. **yay** — AUR packages: visual-studio-code-bin, microsoft-edge-stable-bin, claude-desktop-native, pinpam-git, sesh-bin, iio-hyprland-git, powershell-bin, **awww-bin** (Wayland wallpaper), **matugen-bin** (Material You), overskride, wleave, bibata-cursor-theme, pacseek, limine-snapper-sync. ~10 min build time. (`mission-center` moved to `extra` and is now a pacman package, not AUR.)
 4. Installs Claude Code CLI: `mise use -g node@lts` pulls a LTS Node, `npm install -g @anthropic-ai/claude-code` bootstraps, then `claude install` migrates to the **native install** at `~/.claude/local/` so auto-updates don't need sudo. **No local SSH keys are generated** — keys live in your Bitwarden vault as "SSH key" items and surface via `~/.bitwarden-ssh-agent.sock` once Bitwarden desktop is running with the SSH-agent toggle on (Phase 3e).
 5. **Points Bitwarden at your self-hosted server** `https://hass4150.duckdns.org:7277` — CLI via `bw config server`, desktop via pre-seeded `~/.config/Bitwarden/data.json`.
 6. **Prompt you to enroll your fingerprint** — touch the sensor 5 times. Reader is auto-detected (Goodix 538C via `libfprint-goodix-53xc`).
@@ -794,11 +794,9 @@ No other state needs resetting — PAM, keyring, and Bitwarden are all keyed off
 
 ## Package-name drift (AUR)
 
-If any `yay -S` call in `postinstall.sh` fails with "package not found", the AUR name changed. Search with `yay -Ss <partial>` and substitute. The likely-drifters:
-- `bitwarden` (sometimes `bitwarden-desktop`)
-- `bitwarden-cli` (stable)
-- `pinpam-git` (could be `pinpam` if it ever reaches stable)
-- `awww` / `matugen-bin` / `bibata-cursor-translated` / `pacseek` (newer AUR packages — confirm names with `yay -Ss <name>` if any errors)
-- `hyprshot` (check `hyprshot-git` from AUR if the stable name disappears)
-
-Re-run `postinstall.sh` after fixing — it's idempotent.
+All AUR + pacman names below were verified against archlinux.org / aur.archlinux.org on 2026-04-23. If any `yay -S` or `pacman -S` call in `postinstall.sh` fails with "package not found", the upstream name has shifted since. Search with `yay -Ss <partial>` and substitute, then re-run `postinstall.sh` (idempotent). Most-likely drifters:
+- `pinpam-git` could become `pinpam` if it ever reaches stable.
+- `awww-bin` / `matugen-bin` / `bibata-cursor-theme` / `pacseek` are recent AUR packages — confirm names if errors.
+- `mission-center` was AUR-only until early 2026; it's now in `extra`. If a future move puts it back to AUR, swap it across.
+- `wvkbd` is AUR-only (despite some past mirroring into `extra`).
+- `hyprshot` is in `extra`; fall back to `hyprshot-git` from AUR if the stable name disappears.

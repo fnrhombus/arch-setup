@@ -262,7 +262,7 @@ Everything listed below is installed automatically by the phase-2 + phase-3 scri
 - microsoft-edge-stable-bin
 - claude-desktop-native (unofficial repackage of Anthropic's Windows Electron build — expect occasional breakage on Anthropic updates)
 - pinpam-git (PAM module — `libpinpam.so`, NOT `pam_pinpam.so` — for TPM-backed PIN at sudo + hyprlock)
-- sesh (tmux session picker)
+- sesh-bin (tmux session picker)
 - iio-hyprland-git (accelerometer → `hyprctl monitor` transform bridge for 2-in-1 auto-rotation)
 - powershell-bin
 - awww (Wayland wallpaper daemon — continuation of archived swww)
@@ -270,8 +270,7 @@ Everything listed below is installed automatically by the phase-2 + phase-3 scri
 - mission-center (resource monitor GUI)
 - overskride (Bluetooth GUI, GTK4)
 - wleave (logout/power menu, GTK4)
-- bibata-cursor (Xcursor format for Xwayland fallback)
-- bibata-cursor-translated (hyprcursor format, ~6.6 MB)
+- bibata-cursor-theme (Xcursor format for Xwayland fallback). hyprcursor format is NOT packaged on AUR — see postinstall §3 comment for the manual install recipe (LOSEARDES77/Bibata-Cursor-hyprcursor on github).
 - pacseek (TUI fuzzy package installer)
 - libfprint-goodix-53xc (Goodix 538C fingerprint blob — built on libfprint-tod-git with `!lto` workaround)
 

@@ -31,7 +31,7 @@ Organized by category so you can skim. Nothing here is install instructions — 
 - **awww** — Wayland wallpaper daemon with smooth transitions. Continuation of `swww` (LGFae moved/renamed it on Codeberg 2025-10). Binaries: `awww-daemon` (background), `awww img <path>` (set wallpaper).
 - **swayosd** — On-screen-display popups for volume/brightness/caps-lock. GTK4. Triggered by `swayosd-client --output-volume raise` etc. (which we wire to media keys).
 - **hyprlock** — Hyprland-native lockscreen. Layout in `~/.config/hypr/hyprlock.conf`; PAM stack at `/etc/pam.d/hyprlock` (PIN → fingerprint → password, per postinstall.sh §7a).
-- **hypridle** — Hyprland-native idle daemon. Listens for input, fires actions on timeout (lock at 30 min, DPMS off at 30 min). No idle-hibernate.
+- **hypridle** — Hyprland-native idle daemon. Listens for input, fires actions on timeout (DPMS off at 28 min, lock at 30 min). No idle-hibernate.
 - **hyprpolkitagent** — Hyprland-native polkit agent. Pops up the auth dialog when an app needs root (Bitwarden unlock prompt, mount prompts, etc.).
 - **hyprpicker** — Color picker. Magnifier loupe + autocopy. Bound to Super+P.
 - **hyprexpo** — Hyprland plugin: Mission-Control-style overview with live workspace thumbnails. Bound to Super+grave (the key above Tab). Loaded via `hyprpm`.
@@ -176,7 +176,7 @@ Organized by category so you can skim. Nothing here is install instructions — 
 
 - **matugen / Material You** — Wallpaper-derived dynamic palette. Replaces the prior fixed Catppuccin choice. Re-rendered on every wallpaper change (every 6h via the user systemd timer, or manually via `wallpaper-rotate`). Master dark/light flip via Super+Shift+T (`theme-toggle`).
 - **Catppuccin Mocha** — Older fixed palette we used to ship. Replaced by matugen. Listed for context if you find legacy references in old branches/notes.
-- **Bibata-Modern-Classic** — Cursor theme. Two packages installed: `bibata-cursor` (Xcursor format, for Xwayland app fallback) + `bibata-cursor-translated` (hyprcursor format, ~6.6 MB, for Hyprland-native rendering).
+- **Bibata-Modern-Classic** — Cursor theme. Installed as `bibata-cursor-theme` (Xcursor format) — Hyprland renders via Xcursor as the fallback. The hyprcursor-native variant has no clean AUR package as of 2026-04; if you want it, postinstall §3 has the manual git-clone recipe (LOSEARDES77/Bibata-Cursor-hyprcursor).
 - **Papirus-Dark** — Icon theme. Maximum app coverage of the modern flat-style themes.
 - **Nerd Font** — Any font re-packaged with ~3000 extra icon glyphs. Required for Powerlevel10k prompt, LSD, eza, etc.
 - **JetBrains Mono** — Default monospace font. JetBrains Mono Nerd Font is the installed variant.

@@ -109,7 +109,7 @@
 
 ## Notes
 
-- Lock + DPMS off both fire after **30 minutes** idle.
+- Display turns off after **28 minutes** idle (DPMS); lock fires at **30 minutes** idle.
 - Hibernate is **manual only** (Super+Shift+H or control panel) until
   the dead battery is replaced — AC unplug is a hard cut, no graceful
   hibernate is possible from lid-close + unplug.
