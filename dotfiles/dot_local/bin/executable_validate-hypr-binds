@@ -33,20 +33,41 @@ done < <(grep -hE '^\s*source\s*=' "$entry" 2>/dev/null \
 declare -A seen_bind     # key = "MOD|KEY", value = "file:line"
 declare -a issues=()
 
-# Known good dispatchers — pulled from `hyprctl -j dispatchers` on a recent
-# Hyprland; refresh as Hyprland evolves. submap is special; exec/execr too.
+# Known good dispatchers — refreshed against
+# hyprwm/hyprland-wiki@main:content/Configuring/{Dispatchers,Dwindle-Layout}.md
+# (snapshot 2026-04). Refresh as Hyprland evolves.
+#
+# Removed since prior list (no longer real dispatchers in current wiki):
+#   fakefullscreen (→ fullscreenstate), setcursor, pinwindow (→ pin),
+#   workspaceopt, reload (the latter is a hyprctl keyword, not a dispatcher).
 known_dispatchers=(
-    exec execr killactive closewindow workspace movetoworkspace
-    movetoworkspacesilent togglefloating togglesplit fullscreen
-    fakefullscreen dpms pin centerwindow movefocus movewindow
-    swapwindow resizeactive moveactive cyclenext swapnext
-    focuscurrentorlast layoutmsg movegroupwindow togglegroup
-    changegroupactive lockgroups setprop togglespecialworkspace
-    movetoworkspace movetoworkspacesilent renameworkspace pass
-    sendshortcut focuswindow alterzorder global focusurgentorlast
-    focusmonitor splitratio movewindowpixel movecursortocorner
-    movecursor pinwindow setcursor submap event tagwindow
-    workspaceopt forcerendererreload exit reload
+    # exec / passes / signals
+    exec execr pass sendshortcut sendkeystate signal signalwindow
+    # window lifecycle
+    killactive forcekillactive closewindow killwindow
+    # window state
+    togglefloating setfloating settiled fullscreen fullscreenstate
+    pin centerwindow alterzorder bringactivetotop
+    # focus / move / resize
+    movefocus movewindow swapwindow resizeactive moveactive
+    resizewindow movewindowpixel resizewindowpixel
+    cyclenext swapnext focuswindow focuscurrentorlast focusurgentorlast
+    movecursor movecursortocorner
+    # workspace
+    workspace movetoworkspace movetoworkspacesilent togglespecialworkspace
+    renameworkspace movecurrentworkspacetomonitor
+    focusworkspaceoncurrentmonitor moveworkspacetomonitor swapactiveworkspaces
+    # monitor
+    focusmonitor
+    # group
+    togglegroup changegroupactive lockgroups lockactivegroup
+    moveintogroup moveintoorcreategroup moveoutofgroup movewindoworgroup
+    movegroupwindow denywindowfromgroup setignoregrouplock
+    # misc / system
+    dpms forceidle setprop tagwindow toggleswallow
+    submap event global forcerendererreload exit
+    # dwindle-layout dispatchers (Dwindle-Layout.md)
+    togglesplit splitratio pseudo layoutmsg
     # plugin dispatchers
     hyprexpo:expo
 )
