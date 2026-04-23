@@ -10,9 +10,9 @@
 - **Display**: Integrated touch + external Vizio via USB DisplayLink dock
 - **Boot**: UEFI, GPT. *Current BIOS state*: Secure Boot ON, SATA in RAID mode. *Before phase 1 runs*: flip SATA → **AHCI** (RAID hides the NVMe from every Linux installer + the Windows setup USB), disable **Secure Boot** (systemd-boot + unsigned initramfs = easier path; can re-enable later with `sbctl` signing if wanted).
 - **Peripherals**: Touchscreen, touchpad, fingerprint reader, active pen
-- **Battery**: NONE — the internal battery is dead / removed. Laptop is always on AC power, lives stashed under a desk. Downstream consequences:
-  - Lid-close "suspend on battery" branch in `logind.conf` is dead code (systemd-logind never sees battery state). Harmless; left in for portability if a battery ever returns.
-  - Hibernation is disabled (dual-boot + BitLocker would make it risky anyway) — swap sized for pressure relief only, not hibernate-to-disk. Could shrink from 16 GB → 4 GB in a future pass if `/var` on Netac runs tight.
+- **Battery**: NONE *currently* — the internal battery is dead / removed; user plans to replace it. Laptop is always on AC power, lives stashed under a desk. Downstream consequences:
+  - Lid-close "hibernate on battery" branch in `logind.conf` is dead code today (no battery state for logind to see). Configured anyway for forward-compat — fires automatically when a battery returns, no reconfig.
+  - **Hibernation is enabled** (S4) on Linux. Reverses the prior "disabled" decision; the cited dual-boot/BitLocker risk doesn't apply (Linux swap is on the Netac, Windows can't see LUKS or btrfs). Until the battery is replaced, hibernate is **user-invoked** (`Super+Shift+H`) since AC removal is an instant hard-cut. Swap sized 16 GB to match RAM. Persistent LUKS swap, TPM2-keyfile-sealed (mirrors cryptvar). See `docs/desktop-requirements.md` §Hibernate for the full plan.
   - Abrupt shutdowns (power cable kick) are the norm. btrfs COW handles this well — no `fsync` required for metadata integrity. Good argument for btrfs over ext4 on root.
   - SDDM is the primary moment of the day where the user authenticates (no suspend/resume cycles → no lock screens) — fingerprint at SDDM is therefore load-bearing, not cosmetic.
 
