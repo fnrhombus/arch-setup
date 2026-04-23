@@ -718,15 +718,15 @@ $scripts = @(
 			Add-BitLockerKeyProtector -MountPoint 'C:' -RecoveryPasswordProtector -ErrorAction Stop | Out-Null;
 			$rp = (Get-BitLockerVolume -MountPoint 'C:').KeyProtector | Where-Object { $_.KeyProtectorType -eq 'RecoveryPassword' } | Select-Object -First 1;
 			$line = "=== BitLocker Recovery Key ===`nHost:  $(hostname)`nWhen:  $(Get-Date -Format 'o')`nID:    $($rp.KeyProtectorId)`nKey:   $($rp.RecoveryPassword)`n================================";
+			# Recovery key written ONLY to C:\Windows\Setup\Scripts\BitLocker-Recovery.txt
+			# (on the BitLocker-encrypted volume itself — self-protecting). The prior
+			# "also write to Ventoy" branch was removed: under the no-USB workflow Ventoy
+			# lives on the internal Netac SSD, so a Ventoy-data copy of the key is a
+			# permanent unencrypted copy inside the machine, which defeats BitLocker.
+			# The first-login scheduled task (below) displays this file, requires the
+			# user to type-back the key to confirm Bitwarden save, then deletes it.
 			$line | Out-File -FilePath 'C:\Windows\Setup\Scripts\BitLocker-Recovery.txt' -Encoding UTF8;
-			$ventoy = Get-Volume | Where-Object { $_.FileSystemLabel -eq 'Ventoy' -and $_.DriveLetter } | Select-Object -First 1;
-			if ($ventoy) {
-				$dest = "$($ventoy.DriveLetter):\bitlocker-recovery.txt";
-				$line | Out-File -FilePath $dest -Encoding UTF8;
-				"Recovery key saved to $dest and C:\Windows\Setup\Scripts\BitLocker-Recovery.txt";
-			} else {
-				'Ventoy USB not found; recovery key only at C:\Windows\Setup\Scripts\BitLocker-Recovery.txt';
-			}
+			"Recovery key staged at C:\Windows\Setup\Scripts\BitLocker-Recovery.txt. Will be shown + deleted at tom's first logon.";
 		} catch {
 			"BitLocker setup failed: $_";
 		} finally { Stop-Transcript }
@@ -774,6 +774,59 @@ try {
 		$action = "powershell.exe -NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File `"$runnerPath`"";
 		schtasks.exe /Create /TN 'WingetImportOnce' /SC ONLOGON /RU 'Tom' /DELAY 0002:00 /RL HIGHEST /TR $action /F;
 		'Registered WingetImportOnce scheduled task (fires 2 min after Tom logon).';
+	};
+	{
+		# First-login BitLocker recovery-key confirmation. Displays the key,
+		# requires the user to type it back to confirm Bitwarden save, then
+		# deletes C:\Windows\Setup\Scripts\BitLocker-Recovery.txt. Task stays
+		# registered across logons until the user completes the type-back,
+		# so a cancelled dialog just pops up again next logon.
+		$keyFile = 'C:\Windows\Setup\Scripts\BitLocker-Recovery.txt';
+		if (-not (Test-Path -LiteralPath $keyFile)) {
+			'No BitLocker recovery file; skipping MetisBitLockerConfirm registration.';
+			return;
+		}
+		$runnerPath = 'C:\Windows\Setup\Scripts\MetisBitLockerConfirm.ps1';
+		$runner = @'
+$ErrorActionPreference = "Stop";
+$keyFile = "C:\Windows\Setup\Scripts\BitLocker-Recovery.txt";
+$log = "C:\Windows\Setup\Scripts\MetisBitLockerConfirm.log";
+Start-Transcript -Path $log -Append;
+try {
+	if (-not (Test-Path -LiteralPath $keyFile)) {
+		"Key file absent; self-deleting task.";
+		schtasks.exe /Delete /TN "MetisBitLockerConfirm" /F;
+		return;
+	}
+	$content = Get-Content -LiteralPath $keyFile -Raw;
+	$key = (($content -split "`n" | Where-Object { $_ -match "^Key:" }) -replace "^Key:\s*","" -replace "`r","").Trim();
+	if (-not $key) {
+		"Could not extract Key: line; leaving task registered.";
+		return;
+	}
+	Add-Type -AssemblyName PresentationFramework;
+	Add-Type -AssemblyName Microsoft.VisualBasic;
+	$showMsg = "Your BitLocker recovery key is:`n`n    $key`n`nSave this to Bitwarden NOW as 'Metis BitLocker'.`n`nAfter you click OK, you'll re-type the key to confirm. If it matches exactly, the on-disk copy is deleted and Bitwarden becomes your only copy. If you Cancel, this dialog returns at next logon.";
+	[System.Windows.MessageBox]::Show($showMsg, "Metis BitLocker Recovery Key", "OK", "Warning") | Out-Null;
+	while ($true) {
+		$typed = [Microsoft.VisualBasic.Interaction]::InputBox("Re-type the 48-digit recovery key exactly (8 groups of 6 digits, dash-separated).`n`nLeave blank or Cancel to defer until next logon.", "Metis — confirm Bitwarden save");
+		$typed = $typed.Trim();
+		if (-not $typed) { "User deferred."; return; }
+		if ($typed -eq $key) {
+			[System.Windows.MessageBox]::Show("Confirmed. Deleting on-disk copy. Bitwarden is now the only copy.", "Metis", "OK", "Information") | Out-Null;
+			Remove-Item -LiteralPath $keyFile -Force;
+			schtasks.exe /Delete /TN "MetisBitLockerConfirm" /F;
+			"Confirmed + file deleted + task self-deleted.";
+			return;
+		}
+		[System.Windows.MessageBox]::Show("Didn't match. Try again.", "Metis", "OK", "Error") | Out-Null;
+	}
+} finally { Stop-Transcript }
+'@;
+		Set-Content -LiteralPath $runnerPath -Value $runner -Encoding UTF8;
+		$action = "powershell.exe -NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File `"$runnerPath`"";
+		schtasks.exe /Create /TN 'MetisBitLockerConfirm' /SC ONLOGON /RU 'Tom' /DELAY 0001:00 /RL HIGHEST /TR $action /F;
+		'Registered MetisBitLockerConfirm scheduled task (fires 1 min after Tom logon).';
 	};
 );
 
