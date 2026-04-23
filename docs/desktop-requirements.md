@@ -146,10 +146,54 @@ hotkey opens a searchable list of recent items, pick one to paste.
 - Pinning: cliphist doesn't pin natively; if pinning matters, a small
   wrapper script can mark items in a sidecar file. Defer until requested.
 
-## Workspace switcher
+## Workspace strategy
+
+**Static + monitor-bound.**
+
+- Workspaces 1-5 bound to **DP-1** (external Vizio, primary at the desk)
+- Workspaces 6-9 bound to **eDP-1** (internal panel)
+- Workspace 10 is a **scratch / floating workspace** — no monitor binding,
+  summoned wherever the user is. Used for ephemeral things (a quick note,
+  a calculator, a one-off browser tab).
+
+Static (always exists, doesn't disappear when empty) for predictable
+muscle-memory: "Slack is on 4, browser on 1" stays true. Monitor-bound so
+that closing the lid (post-battery-replacement) cleanly drops the
+internal-only workspaces without orphaning.
+
+Hyprland config: `workspace = N, monitor:DP-1` for each workspace, plus
+`monitor = DP-1, preferred, 0x0, 1.5` and `monitor = eDP-1, preferred, 0x1440, 1`
+to match the locked-in nwg-displays layout (Vizio at 0,0 scale 1.5, internal at 0,1440 scale 1).
+
+## Keybinds
+
+**Rich custom set** (~60-80 bindings) — the "design once, internalize over
+a week, never mouse again" approach. Justified by the keyboard-ninja
+requirement and the "Claude does the tweaking" clarification — the
+upfront design cost is amortized across daily use forever.
+
+Binding categories:
+- Window/workspace nav: focus neighbors, swap, send-to-workspace, last-workspace toggle
+- App quicklaunches: `Super+B` browser, `Super+C` Claude Code, `Super+E` editor (VSCode), `Super+Return` Ghostty, `Super+F` files (yazi or nautilus)
+- Layout: split direction, master/dwindle toggle, resize submap, toggle floating, toggle pinned
+- Workspace overview: `Super+Tab` last-workspace; `Super+grave` hyprexpo overview
+- System: `Super+Shift+T` theme toggle, `Super+Shift+H` hibernate, `Super+Shift+L` lock now, `Super+N` notification panel, `Super+V` clipboard picker, `Super+,` settings panel
+- Capture: `PrtSc` region screenshot, `Shift+PrtSc` window, `Ctrl+PrtSc` full screen, `Super+P` color picker
+- Media keys: volume up/down/mute, brightness up/down, mic mute (handled by SwayOSD)
+
+Ships with a printable **cheat sheet** at `runbook/keybinds.md` that
+`pnpm pdf` renders alongside the install runbook. First-week reference.
+
+Full binding list lives in `hyprland.conf` (Claude-authored when configs
+are written) — this section locks the *philosophy*, not the literal
+bytes.
+
+## Workspace overview (within the strategy above)
 
 - `hyprexpo` plugin — Mission-Control-style overview with live thumbnails.
-  Bound to Super+Tab.
+  Bound to `Super+grave` (the key above Tab).
+- Workaround for hyprexpo issue #138 (focus stuck after clicking current workspace):
+  always dispatch `workspace,e+0` before `hyprexpo:expo,off` in the bind.
 
 ## Settings / control panel
 
