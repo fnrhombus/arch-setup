@@ -1,9 +1,7 @@
-# zathura — PDF viewer. Colors come from matugen-rendered file (it's
-# overwritten by the matugen template directly, so this file is the
-# template's destination).
-#
-# Matugen renders directly here; sourcing-pattern not needed.
-# Non-color settings below are stable.
+# zathura — PDF viewer. Colors live in `colors.zathurarc` (matugen-rendered);
+# pulled in via `include` at the bottom of this file (zathurarc(5) supports
+# `include <relative-path>`). This avoids the chezmoi/matugen write-stomp
+# we'd get if both rendered to `zathurarc` directly.
 
 set selection-clipboard          clipboard
 set adjust-open                  best-fit
@@ -28,3 +26,7 @@ map [fullscreen] q     toggle_fullscreen
 
 # Recolor toggle (hi/lo readability)
 map r recolor
+
+# Pull in the matugen-rendered color palette.
+# Resolved relative to this file (zathurarc(5)).
+include colors.zathurarc

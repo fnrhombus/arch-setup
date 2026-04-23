@@ -64,7 +64,10 @@ output_path = "~/.config/yazi/theme.toml"
 
 [templates.zathura]
 input_path = "~/.config/matugen/templates/zathurarc"
-output_path = "~/.config/zathura/zathurarc"
+# Render to a sidecar file that the chezmoi-managed `zathurarc` pulls in via
+# zathura's `include` directive (zathurarc(5)). Avoids the stomp where matugen
+# and chezmoi both wrote to ~/.config/zathura/zathurarc.
+output_path = "~/.config/zathura/colors.zathurarc"
 
 [templates.helix]
 input_path = "~/.config/matugen/templates/helix.toml"
