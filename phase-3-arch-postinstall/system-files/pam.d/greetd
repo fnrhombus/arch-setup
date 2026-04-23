@@ -1,0 +1,23 @@
+#%PAM-1.0
+# arch-setup: greetd PAM stack. Mirrors the prior SDDM design (per
+# docs/reinstall-planning.md §5): NO PIN at cold boot (TPM PCR state not
+# stable yet, matches Windows Hello "full credential at first sign-in"),
+# fingerprint with 10s timeout (reader IS reachable at the greeter, so it
+# goes first as a sufficient match), password fallback via system-login.
+#
+# NEVER remove pam_unix from system-login — that's the last-resort path.
+# Module name quirk: pinpam-git ships as libpinpam.so (not pam_pinpam.so).
+# We do NOT include libpinpam here on purpose — PIN is not a greeter-tier
+# auth method on this design.
+#
+# Installed to /etc/pam.d/greetd by postinstall.sh.
+
+auth        sufficient  pam_fprintd.so              max-tries=1 timeout=10
+auth        include     system-login
+
+account     include     system-login
+
+password    include     system-login
+
+session     include     system-login
+session     optional    pam_gnome_keyring.so auto_start
