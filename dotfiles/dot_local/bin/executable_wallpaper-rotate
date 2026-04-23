@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # wallpaper-rotate — pick next wallpaper from ~/Pictures/Wallpapers/,
-# set via swww, regenerate matugen palette, preserve dark/light mode.
+# set via awww, regenerate matugen palette, preserve dark/light mode.
 #
 # Modes:
 #   --first   : called from Hyprland exec-once at session start. Uses last
@@ -63,10 +63,10 @@ esac
 
 [[ -r "$wallpaper" ]] || { echo "wallpaper unreadable: $wallpaper" >&2; exit 1; }
 
-# ---- Set wallpaper via swww (start daemon if not running) ----
-swww query >/dev/null 2>&1 || swww-daemon &
+# ---- Set wallpaper via awww (start daemon if not running) ----
+awww query >/dev/null 2>&1 || awww-daemon &
 sleep 0.2
-swww img "$wallpaper" --transition-type any --transition-duration 1.5 >/dev/null
+awww img "$wallpaper" --transition-type any --transition-duration 1.5 >/dev/null
 
 echo "$wallpaper" > "$wp_file"
 

@@ -28,7 +28,7 @@ greetd greetd-regreet
 waybar swaync fuzzel
 
 # Clipboard, wallpaper, screenshots
-cliphist wl-clipboard swww
+cliphist wl-clipboard awww          # awww = continuation of archived swww (Codeberg/LGFae 2025-10)
 grim slurp satty hyprshot
 
 # Theming + cursor + icon
