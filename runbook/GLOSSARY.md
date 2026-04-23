@@ -12,9 +12,10 @@ Organized by category so you can skim. Nothing here is install instructions — 
 - **Xorg / X11** — The old display server. You care: some apps (especially older Electron builds, Wine, GIMP) still prefer it; `xwayland` runs them on Wayland.
 - **Compositor** — The thing that draws windows on screen under Wayland. Hyprland is a compositor and window manager rolled into one.
 - **Hyprland** — The compositor we chose. Tiling, keyboard-driven, GPU-accelerated effects. You care: *every* GUI session you have will be running in Hyprland.
-- **end-4 / illogical-impulse** — A pre-built Hyprland configuration (dotfiles) that gives you a full desktop out of the box. You care: this is our starting config. All your keybinds, animations, bar, launcher, etc. come from here.
-- **SDDM** (Simple Desktop Display Manager) — The login screen you see on boot. Wayland-native, themeable. You care: fingerprint login happens here.
-- **GDM / LightDM** — Alternatives to SDDM from GNOME / the XFCE world. We don't use them; ignore.
+- **bare-Hyprland (Claude-authored configs in chezmoi)** — Our dotfile approach. NOT a pre-built pack (no HyDE, no end-4, no Caelestia). Configs at `dotfiles/dot_config/hypr/*` are split into fragments (monitors, workspaces, binds, decoration, animations, plugins, exec). You own every line; future "change X" is one prompt to Claude.
+- **greetd** — Tiny daemon that "shows a login UI, then starts the session." Replaces SDDM (~3 MB vs ~21 MB). The UI is delegated to a separate program — we use ReGreet.
+- **ReGreet** — GTK4-based greeter UI launched by greetd. Themed via plain GTK CSS so the matugen palette drops in directly. Fingerprint via the same PAM stack as before.
+- **SDDM / GDM / LightDM** — Other display managers (KDE / GNOME / XFCE world). We don't use them; ignore.
 
 ## Wayland ecosystem utilities
 
@@ -25,8 +26,18 @@ Organized by category so you can skim. Nothing here is install instructions — 
 - **hyprshot** — Screenshot tool built for Hyprland (region/window/monitor). Plays the role `grimblast` plays on sway.
 - **satty** (Screenshot Annotation Tool) — Post-capture annotation: arrows, boxes, blur, text. You care: `hyprshot | satty` gives you Snipping-Tool-level UX.
 - **wl-clipboard** — `wl-copy` / `wl-paste` command-line clipboard utilities. You care: scripts and Claude Code use these to read/write the clipboard.
-- **cliphist** — Clipboard history daemon. Stores text + image clips, picker via fuzzel.
-- **wlogout** — Graphical logout/shutdown/reboot menu. Not installed by default — end-4/dots-hyprland ships its own power menu; install `wlogout` only if you want a swap-in replacement.
+- **cliphist** — Clipboard history daemon. Stores text + image clips, picker via fuzzel. Bound to Super+V (Win+V analog).
+- **wleave** — Graphical logout/shutdown/reboot menu. GTK4 fork of the older `wlogout`; themed via matugen GTK CSS. Bound to Super+Shift+Q.
+- **awww** — Wayland wallpaper daemon with smooth transitions. Continuation of `swww` (LGFae moved/renamed it on Codeberg 2025-10). Binaries: `awww-daemon` (background), `awww img <path>` (set wallpaper).
+- **swayosd** — On-screen-display popups for volume/brightness/caps-lock. GTK4. Triggered by `swayosd-client --output-volume raise` etc. (which we wire to media keys).
+- **hyprlock** — Hyprland-native lockscreen. Layout in `~/.config/hypr/hyprlock.conf`; PAM stack at `/etc/pam.d/hyprlock` (PIN → fingerprint → password, per postinstall.sh §7a).
+- **hypridle** — Hyprland-native idle daemon. Listens for input, fires actions on timeout (lock at 30 min, DPMS off at 30 min). No idle-hibernate.
+- **hyprpolkitagent** — Hyprland-native polkit agent. Pops up the auth dialog when an app needs root (Bitwarden unlock prompt, mount prompts, etc.).
+- **hyprpicker** — Color picker. Magnifier loupe + autocopy. Bound to Super+P.
+- **hyprexpo** — Hyprland plugin: Mission-Control-style overview with live workspace thumbnails. Bound to Super+grave (the key above Tab). Loaded via `hyprpm`.
+- **hyprgrass** — Hyprland plugin: touch gesture engine for the 2-in-1. Single-finger long-press, edge swipes, OSK toggle. Loaded via `hyprpm`.
+- **hyprpm** — Hyprland's plugin manager. `hyprpm add <repo>`, `hyprpm enable <plugin>`, `hyprpm update`. Auto-pins plugins to your Hyprland version.
+- **wvkbd** — On-screen keyboard for tablet mode. `wvkbd-mobintl --hidden` is what hyprgrass's edge-swipe-up toggles.
 
 ## Audio
 
@@ -81,8 +92,10 @@ Organized by category so you can skim. Nothing here is install instructions — 
 - **GPT** (GUID Partition Table) — Modern partition-table format. Required for UEFI boot.
 - **ESP** (EFI System Partition) — FAT32 partition where the bootloader lives. 512 MB on our Samsung.
 - **MSR** (Microsoft Reserved) — 16 MB partition Windows wants. Not used by Linux.
-- **systemd-boot** — Minimal UEFI bootloader. Reads `.conf` files from the ESP. You care: adding a kernel/Windows/recovery entry = dropping a file here.
-- **GRUB** — The big classic bootloader. We're not using it — systemd-boot is simpler.
+- **limine** — UEFI bootloader. Replaces systemd-boot in this design. Reasons: snapshot-rollback boot menu (via `limine-snapper-sync`), bootable-ISO-from-disk (Netac recovery), modern actively-developed. Config: `/boot/limine.conf` (single file). UEFI binary at `/boot/EFI/BOOT/BOOTX64.EFI`.
+- **limine-snapper-sync** — AUR package that auto-regenerates limine entries from snapper snapshots. Means after a bad `pacman -Syu`, you can pick yesterday's snapshot at the boot menu and reboot — no chroot rescue needed.
+- **systemd-boot** — Older minimal UEFI bootloader. We used to use it; replaced by limine for snapshot-rollback. Listed for context.
+- **GRUB** — The big classic bootloader. We're not using it.
 - **Secure Boot** — UEFI feature that verifies signed bootloaders. Disabled for install; re-enabled later with `sbctl`.
 - **sbctl** — Tool to generate keys + sign kernel/bootloader for Secure Boot. Later-phase work.
 - **TPM** (Trusted Platform Module) — Chip that stores encryption keys. BitLocker and LUKS can use it.
@@ -91,8 +104,9 @@ Organized by category so you can skim. Nothing here is install instructions — 
 - **cryptsetup** — CLI for LUKS. `cryptsetup luksFormat` creates a container, `cryptsetup open <dev> <name>` unlocks it to `/dev/mapper/<name>`, `cryptsetup close <name>` tears it back down.
 - **sd-encrypt** — mkinitcpio hook that reads `/etc/crypttab.initramfs` inside the initramfs and opens LUKS containers before `/` is mounted. Sits between `block` and `filesystems` in the HOOKS line.
 - **crypttab** / **crypttab.initramfs** — `/etc/crypttab` is read post-init by systemd to unlock non-root encrypted volumes (ours: cryptvar + cryptswap). `/etc/crypttab.initramfs` is baked into the initramfs by `sd-encrypt` to unlock the root (cryptroot). Format: `<name> <device> <key-source> <options>`.
-- **systemd-cryptenroll** — Binds a LUKS2 key slot to a TPM2 (or FIDO2 / PKCS#11) credential. `systemd-cryptenroll --tpm2-device=auto --tpm2-pcrs=0+7 /dev/disk/by-partlabel/ArchRoot` after Phase 3 is what makes boot silent. Re-run with `--wipe-slot=tpm2` if PCRs drift.
-- **Random-key swap** — `/dev/urandom` as the crypttab key source, combined with the `swap` option, re-mkswaps the mapper device with a fresh random key on every boot. Means hibernation is impossible (keys die at shutdown), which is fine here — battery is dead.
+- **systemd-cryptenroll** — Binds a LUKS2 key slot to a TPM2 (or FIDO2 / PKCS#11) credential. We enroll BOTH `ArchRoot` and `ArchSwap` (per postinstall.sh §7.5). Re-run with `--wipe-slot=tpm2 …` if PCRs drift. The pacman post-upgrade hook `/etc/pacman.d/hooks/95-tpm2-reseal.hook` automates this on linux/limine/mkinitcpio updates.
+- **tpm2_pcrallocate** — Selects which PCR banks (sha1/sha256) are ACTIVE. Intel PTT firmware on this Dell ships sha1-only; chroot.sh runs `tpm2_pcrallocate sha256:all+sha1:all` BEFORE any cryptenroll so seals land in sha256. Running this on an already-enrolled system WIPES seals — only run pre-enrollment.
+- **Hibernate-ready cryptswap** — Persistent LUKS2 swap unlocked via TPM2 (same pattern as cryptroot). Lives in `/etc/crypttab.initramfs` so it opens before resume runs. Replaces the older `/dev/urandom` random-key swap which made hibernation impossible. Resume= cmdline param in `/boot/limine.conf` points at `/dev/mapper/cryptswap`.
 - **AHCI** — Normal SATA mode. Required for Linux to see the drives as plain block devices. Flip from RAID in BIOS before install.
 - **Ventoy** — USB tool that boots any ISO dropped onto the data partition. Menu pops up at boot.
 - **VTOYEFI** — Ventoy's ~32 MB companion partition (boots the menu). Sibling of the data partition on the same stick.
@@ -117,12 +131,13 @@ Organized by category so you can skim. Nothing here is install instructions — 
 
 ## Authentication / secrets
 
-- **PAM** (Pluggable Authentication Modules) — Linux's auth stack. Login, sudo, SDDM, screen lockers all go through `/etc/pam.d/*`. You care: fingerprint integration means adding a `pam_fprintd.so` line.
-- **fprintd** / **libfprint** — Fingerprint daemon + library. `fprintd-enroll` to register a finger.
-- **gnome-keyring** — Secret storage (SSH keys, passwords, browser credentials). Unlocked by your login password.
+- **PAM** (Pluggable Authentication Modules) — Linux's auth stack. Login, sudo, greetd, hyprlock all go through `/etc/pam.d/*`. Sudo + hyprlock get PIN → fingerprint(5s) → password (per postinstall.sh §7a). Greeter excludes PIN per design (cold-boot wants full credential).
+- **pinpam / libpinpam.so** — TPM-backed PIN auth module from the AUR `pinpam-git` package. The PAM module name is literally `libpinpam.so` (NOT `pam_pinpam.so`); referencing the wrong name silently dlopen-fails and PAM treats it as a faulty module. PIN itself is set up via `pinutil setup`.
+- **fprintd** / **libfprint** — Fingerprint daemon + library. `fprintd-enroll` to register a finger. Goodix 538C reader on this machine via the AUR `libfprint-goodix-53xc` package.
+- **matugen** — Material You palette generator. Reads a wallpaper, derives a full color palette, renders templates → waybar CSS, Hyprland color vars, Ghostty theme, GTK CSS, Qt color scheme, etc. Templates at `~/.config/matugen/templates/`. Theme switch (dark/light) via `theme-toggle` script.
+- **gnome-keyring** — Secret storage (SSH keys, passwords, browser credentials). Unlocked by your login password (greetd PAM stack auto-starts it).
 - **Bitwarden** — Password manager. We use a self-hosted instance. Desktop app can also act as an SSH agent.
 - **SSH agent** — Holds decrypted SSH keys in memory. Bitwarden desktop provides one at `~/.bitwarden-ssh-agent.sock`.
-- **keychain** — Alternative SSH/GPG key manager. Not installed — Bitwarden's agent replaces it.
 
 ## Hardware — this laptop specifically
 
@@ -159,10 +174,26 @@ Organized by category so you can skim. Nothing here is install instructions — 
 
 ## Theme / fonts
 
-- **Catppuccin Mocha** — Color palette we apply everywhere (terminal, editor, bar, GTK, Qt, SDDM, browser). Pastel-on-dark.
+- **matugen / Material You** — Wallpaper-derived dynamic palette. Replaces the prior fixed Catppuccin choice. Re-rendered on every wallpaper change (every 6h via the user systemd timer, or manually via `wallpaper-rotate`). Master dark/light flip via Super+Shift+T (`theme-toggle`).
+- **Catppuccin Mocha** — Older fixed palette we used to ship. Replaced by matugen. Listed for context if you find legacy references in old branches/notes.
+- **Bibata-Modern-Classic** — Cursor theme. Two packages installed: `bibata-cursor` (Xcursor format, for Xwayland app fallback) + `bibata-cursor-translated` (hyprcursor format, ~6.6 MB, for Hyprland-native rendering).
+- **Papirus-Dark** — Icon theme. Maximum app coverage of the modern flat-style themes.
 - **Nerd Font** — Any font re-packaged with ~3000 extra icon glyphs. Required for Powerlevel10k prompt, LSD, eza, etc.
 - **JetBrains Mono** — Default monospace font. JetBrains Mono Nerd Font is the installed variant.
-- **FiraCode / Cascadia / Hack / MesloLGS** — Alternative Nerd Fonts, installed but not default.
+- **FiraCode** — Alternative Nerd Font, installed but not default.
+
+## Settings GUIs (reachable from `~/.local/bin/control-panel`)
+
+The control-panel script (Super+,) is a fuzzel-launched menu that dispatches to these so you don't have to remember tool names:
+
+- **nwg-displays** — Display config GUI (resolution, scale, position, rotation). Wayland-native.
+- **nm-connection-editor** — NetworkManager full config GUI (Wi-Fi, VPN, ethernet). From `network-manager-applet` package; we install the binary but skip the tray applet.
+- **overskride** — Bluetooth pairing/management GUI. GTK4/libadwaita, Wayland-native. Replaces the older blueman.
+- **pwvucontrol** — Audio mixer GUI for PipeWire. Native (talks the wire protocol directly), unlike pavucontrol which goes through the PulseAudio compatibility shim.
+- **mission-center** — Resource monitor (Task Manager equivalent). GTK4. The one piece a per-tool launcher misses — pairs with btop in the terminal.
+- **pacseek** — TUI fuzzy package installer (pacman + AUR). Searchable, pull request-style preview.
+- **nwg-look** — GTK theme manager (font, GTK theme, icon theme). Run on demand only — if you click Apply after matugen has rendered, nwg-look's settings win until next theme change.
+- **qt5ct** / **qt6ct** — Qt theme managers. Set `QT_QPA_PLATFORMTHEME=qt6ct` in environment so Qt apps read the matugen-generated color scheme. `style=Fusion` (NOT kvantum — that requires extra packages).
 
 ## Misc / acronyms
 
