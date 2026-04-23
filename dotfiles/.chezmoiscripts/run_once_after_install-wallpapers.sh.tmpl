@@ -1,0 +1,41 @@
+#!/usr/bin/env bash
+# chezmoi run-once hook — populate ~/Pictures/Wallpapers/ from the user's
+# callisto repo on first apply. After the first successful run, chezmoi
+# tracks this script's hash; only re-runs if THIS script changes.
+#
+# Source: https://github.com/fnrhombus/callisto/tree/main/static/wallpaper/linux
+# (top-level only; subfolders intentionally skipped per user direction.)
+
+set -euo pipefail
+
+dest="$HOME/Pictures/Wallpapers"
+mkdir -p "$dest"
+
+# If the dest dir already has wallpapers (user dropped some manually),
+# don't clobber. Just ensure at least the base set is present.
+api='https://api.github.com/repos/fnrhombus/callisto/contents/static/wallpaper/linux'
+
+echo "wallpapers: fetching list from callisto repo..."
+mapfile -t files < <(curl -fsSL "$api" \
+    | python3 -c 'import json,sys; d=json.load(sys.stdin); [print(e["download_url"]) for e in d if e["type"]=="file"]')
+
+if [[ "${#files[@]}" -eq 0 ]]; then
+    echo "wallpapers: no files returned from callisto API; skipping" >&2
+    exit 0
+fi
+
+for url in "${files[@]}"; do
+    name=$(basename "$url")
+    target="$dest/$name"
+    if [[ -f "$target" ]]; then
+        echo "wallpapers: skip (exists) $name"
+        continue
+    fi
+    echo "wallpapers: fetching $name"
+    if ! curl -fsSL --output "$target" "$url"; then
+        echo "wallpapers: failed to fetch $url" >&2
+        rm -f "$target"
+    fi
+done
+
+echo "wallpapers: done — $(ls -1 "$dest" | wc -l) files in $dest"

@@ -1,0 +1,10 @@
+[Unit]
+Description=Rotate wallpaper + regenerate matugen palette
+ConditionEnvironment=WAYLAND_DISPLAY
+
+[Service]
+Type=oneshot
+ExecStart=%h/.local/bin/wallpaper-rotate
+
+[Install]
+WantedBy=default.target

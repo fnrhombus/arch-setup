@@ -1,0 +1,11 @@
+[Unit]
+Description=Rotate wallpaper every 6 hours
+Requires=wallpaper-rotate.service
+
+[Timer]
+OnBootSec=1h
+OnUnitActiveSec=6h
+Persistent=false
+
+[Install]
+WantedBy=timers.target

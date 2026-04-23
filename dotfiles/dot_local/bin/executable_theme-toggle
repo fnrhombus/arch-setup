@@ -1,0 +1,70 @@
+#!/usr/bin/env bash
+# theme-toggle — flip dark/light mode and re-render matugen output.
+# Three entry points (all converge here):
+#   - hotkey: SUPER+SHIFT+T (binds.conf)
+#   - waybar bar icon: click handler (waybar config)
+#   - fuzzel control-panel: "Theme: dark/light flip" entry
+#
+# Effect chain:
+#   1. Read cached mode, flip it, persist.
+#   2. Run matugen against the cached wallpaper with the new mode.
+#      matugen's per-template post_hook fires reloads (waybar, swaync,
+#      ghostty, hyprctl reload).
+#   3. Broadcast color-scheme via gsettings → freedesktop portal so
+#      GTK4 / Qt 6.9+ / Firefox / Chromium / Bitwarden auto-flip.
+#
+# No per-app fallback chains: if matugen failed, we exit non-zero so
+# fuzzel/waybar can surface the error.
+
+set -euo pipefail
+
+cache_dir="${XDG_CACHE_HOME:-$HOME/.cache}/matugen"
+mode_file="${cache_dir}/mode"
+wp_file="${cache_dir}/last-wallpaper"
+
+mkdir -p "$cache_dir"
+
+# ---- Determine new mode ----
+current="dark"
+[[ -f "$mode_file" ]] && current=$(<"$mode_file")
+case "${1:-toggle}" in
+    dark)   new="dark"  ;;
+    light)  new="light" ;;
+    toggle) new=$( [[ "$current" == "dark" ]] && echo "light" || echo "dark" ) ;;
+    *) echo "usage: theme-toggle [toggle|dark|light]" >&2; exit 2 ;;
+esac
+
+echo "$new" > "$mode_file"
+
+# ---- Find wallpaper ----
+wallpaper=""
+if [[ -f "$wp_file" ]] && [[ -r "$(<"$wp_file")" ]]; then
+    wallpaper=$(<"$wp_file")
+fi
+
+if [[ -z "$wallpaper" ]]; then
+    # Fall back: pick any in ~/Pictures/Wallpapers/
+    wallpaper=$(find "$HOME/Pictures/Wallpapers" -maxdepth 1 -type f \
+        \( -iname '*.jpg' -o -iname '*.jpeg' -o -iname '*.png' -o -iname '*.webp' \) \
+        2>/dev/null | shuf -n 1 || true)
+fi
+
+if [[ -z "$wallpaper" ]]; then
+    echo "theme-toggle: no wallpaper found in ~/Pictures/Wallpapers/" >&2
+    notify-send -u critical "Theme toggle" "No wallpaper available — drop one into ~/Pictures/Wallpapers/" 2>/dev/null || true
+    exit 1
+fi
+
+# ---- Render matugen ----
+matugen --mode "$new" image "$wallpaper" >/dev/null
+
+# ---- Broadcast color-scheme to apps that read the freedesktop portal ----
+case "$new" in
+    dark)  gsettings set org.gnome.desktop.interface color-scheme prefer-dark  ;;
+    light) gsettings set org.gnome.desktop.interface color-scheme prefer-light ;;
+esac
+
+# ---- Signal waybar to re-run custom modules (theme-toggle icon update) ----
+pkill -SIGRTMIN+8 waybar 2>/dev/null || true
+
+notify-send -t 2000 "Theme: $new" "$(basename "$wallpaper")" 2>/dev/null || true
