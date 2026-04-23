@@ -293,43 +293,20 @@ After the re-login: Bitwarden auto-unlocks (via gnome-keyring), and `ssh-add -l`
 
 ### 3e-bis. Azure DDNS one-time setup (`metis.rhombus.rocks`)
 
-`postinstall.sh` installs the `metis-ddns` script + systemd timer + NetworkManager dispatcher hook + the `az` CLI, and stubs `/etc/metis-ddns.env` from a template. **You still have to fill in the service-principal credentials once.**
+`postinstall.sh` installs the `metis-ddns` script + systemd timer + NetworkManager dispatcher hook + the `az` CLI, and stubs `/etc/metis-ddns.env` from a template. **You still have to wire up the service-principal credentials once** — but that's automated by `setup-azure-ddns.sh` (also copied to `~/` by install.sh).
 
-On this laptop (or any machine with `az` CLI):
+The script is fully idempotent: each run reuses an existing `metis-ddns` app registration if found, ensures the SP exists, **rotates the secret** (replaces, doesn't append), ensures the role assignment, and rewrites both `/etc/metis-ddns.env` and `/etc/letsencrypt/azure.ini` with fresh creds.
+
+It uses piecemeal `az ad app` / `az ad sp` / `az role assignment` commands instead of the all-in-one `az ad sp create-for-rbac` because the latter is broken under Python 3.14 + azure-cli 2.85.0 (argparse `%Y` bug, observed 2026-04-23).
 
 ```bash
+sudo -v                                  # cache sudo creds for the script's installs
 az login                                 # device-code flow, opens browser
-SUB=$(az account show --query id -o tsv)
-RG=<your-DNS-resource-group>             # the one containing rhombus.rocks
-ZONE_ID=$(az network dns zone show -g "$RG" -n rhombus.rocks --query id -o tsv)
-az ad sp create-for-rbac \
-    --name metis-ddns \
-    --role "DNS Zone Contributor" \
-    --scopes "$ZONE_ID" \
-    --years 2
+~/setup-azure-ddns.sh                    # ~5 sec wall clock; restarts metis-ddns at the end
+sudo journalctl -u metis-ddns -n 30      # confirm "status=0/SUCCESS"
 ```
 
-Last command prints `appId`, `password`, `tenant`. Paste them into `/etc/metis-ddns.env` (mode 600, root-owned — `sudoedit /etc/metis-ddns.env`):
-
-```ini
-AZ_TENANT_ID=<tenant>
-AZ_CLIENT_ID=<appId>
-AZ_CLIENT_SECRET=<password>
-AZ_SUBSCRIPTION_ID=<SUB>
-AZ_RESOURCE_GROUP=<RG>
-AZ_DNS_ZONE=rhombus.rocks
-AZ_DNS_RECORD=metis
-DDNS_DISABLE_IPV4=1                      # IPv6-only — flip to 0 if you ever expose v4
-```
-
-Kick the first run:
-
-```bash
-sudo systemctl start metis-ddns.service
-sudo journalctl -u metis-ddns -n 30
-```
-
-First call may 403 with "AuthorizationFailed" — Azure role assignments propagate in 30s–5min. Wait, retry. After first success, the timer + NM hook take over and you don't think about it again until the SP secret expires in 2 years.
+First service call may 403 with "AuthorizationFailed" — Azure role assignments propagate in 30s–5min. Wait, retry. After first success, the timer + NM hook take over and you don't think about it again until the SP secret expires in 2 years (the script will rotate when re-run).
 
 **Verify from the outside** (any machine, even your phone):
 
@@ -343,18 +320,7 @@ Should return your laptop's current public IPv6 address.
 
 Only useful **after step 3e-bis succeeds** (DNS must resolve before the dns-01 challenge will).
 
-`postinstall.sh` installs `certbot` + the `certbot-dns-azure` plugin and stubs `/etc/letsencrypt/azure.ini` from a template. Same SP that DDNS uses works here — `DNS Zone Contributor` already lets it write the TXT challenge records.
-
-Mirror the SP creds into `/etc/letsencrypt/azure.ini` (the keys differ from the DDNS env file because certbot's plugin uses its own INI scheme):
-
-```ini
-dns_azure_environment = "AzurePublicCloud"
-dns_azure_tenant_id = <tenant>
-dns_azure_subscription_id = <SUB>
-dns_azure_resource_group = <RG>
-dns_azure_sp_client_id = <appId>
-dns_azure_sp_client_secret = <password>
-```
+`postinstall.sh` installs `certbot` + the `certbot-dns-azure` plugin (via pipx — not packaged for Arch). `setup-azure-ddns.sh` already wrote the SP creds into `/etc/letsencrypt/azure.ini` using the plugin's own INI keys, so there's nothing to fill in by hand.
 
 Issue the cert (one-time):
 
