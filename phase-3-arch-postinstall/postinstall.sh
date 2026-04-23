@@ -330,18 +330,21 @@ else
 fi
 
 # ---------- 5. Claude Code CLI ----------
-# Claude Code is distributed via npm (@anthropic-ai/claude-code). There's no
-# mise plugin named "claude-code" — that call was wrong. Route: use mise to
-# install a LTS node, then `npm install -g`. The binary lands under
-# ~/.local/share/mise/installs/node/<version>/bin/claude and is only on PATH
-# in mise-activated shells — symlink it into /usr/local/bin so `claude` works
-# from any shell, including sudo, scripts, and SDDM-launched apps.
+# Two-stage install:
+#   (a) bootstrap via mise+npm — gets us a working `claude` binary
+#   (b) `claude install` (native) — migrates to ~/.claude/local/, which is
+#       user-owned. Without this, `claude doctor` warns:
+#         "Insufficient permissions for auto-updates"
+#       because the npm-installed binary lives under a path the auto-update
+#       checker can't write to (mise prefix or symlinked into /usr/local/bin).
+#
+# After (b), the npm-installed copy is harmless leftovers — `claude install`
+# rewrites .bashrc/.zshrc to point at ~/.claude/local/claude. We keep the
+# /usr/local/bin/claude symlink as a fallback for non-interactive shells
+# (sudo, scripts) until the user verifies the native install resolves cleanly.
 if ! command -v claude >/dev/null; then
     if command -v mise >/dev/null; then
-        log "Installing node@lts via mise, then Claude Code via npm..."
-        # Bash's `cmd | tee` returns tee's exit, masking a failed install behind
-        # success. Redirect to the log file directly so the `if` sees the real
-        # exit status, then show the tail on failure.
+        log "Installing node@lts via mise, then Claude Code via npm (bootstrap)..."
         if ! mise use -g node@lts >>/tmp/mise-node.log 2>&1; then
             warn "mise node@lts install failed — tail of /tmp/mise-node.log:"
             tail -n 10 /tmp/mise-node.log >&2 || true
@@ -359,6 +362,18 @@ fi
 # every time so a node version bump silently refreshes the symlink target.
 if claude_bin=$(mise which claude 2>/dev/null) && [[ -x "$claude_bin" ]]; then
     sudo ln -sf "$claude_bin" /usr/local/bin/claude
+fi
+# Migrate to native install so auto-updates work without sudo.
+# `claude install` is idempotent: re-running on an already-native install
+# is a no-op. Pipe 'y' to auto-confirm any prompts (the command was
+# stabilized to non-interactive accept by 2.1.x).
+if command -v claude >/dev/null && [[ ! -d "$HOME/.claude/local" ]]; then
+    log "Migrating Claude Code to native install (unprivileged auto-updates)..."
+    if ! printf 'y\n' | claude install >/tmp/claude-install.log 2>&1; then
+        warn "claude install failed — tail of /tmp/claude-install.log:"
+        tail -n 10 /tmp/claude-install.log >&2 || true
+        warn "Run 'claude install' manually to fix the doctor's auto-update warning."
+    fi
 fi
 # Claude Code ships its own completions at runtime: `claude --print-completion zsh`
 # is wired in .zshrc below, no fragile external download needed.
