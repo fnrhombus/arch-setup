@@ -56,24 +56,57 @@ prompt_password() {
     openssl passwd -6 "$p1"
 }
 
-# Prompt twice for a LUKS passphrase and print the plaintext on stdout.
-# Unlike prompt_password above (which hashes for /etc/shadow), cryptsetup needs
-# the plaintext — it hashes internally via argon2id. Caller must keep it in
-# memory only; never let it touch disk.
-prompt_luks() {
-    local label="$1" p1 p2
+# Generate a BitLocker-style 48-digit recovery key, grouped into 8 blocks
+# of 6 digits separated by dashes. /dev/urandom is cryptographically secure;
+# 48 digits = ~160 bits of entropy, stretched further by luksFormat's
+# argon2id KDF. Printed on stdout, nowhere else.
+generate_luks_recovery_key() {
+    local digits
+    digits=$(tr -dc '0-9' < /dev/urandom | head -c 48)
+    printf '%s-%s-%s-%s-%s-%s-%s-%s' \
+        "${digits:0:6}"  "${digits:6:6}"  "${digits:12:6}" "${digits:18:6}" \
+        "${digits:24:6}" "${digits:30:6}" "${digits:36:6}" "${digits:42:6}"
+}
+
+# Display the recovery key with a loud warning banner, then block until the
+# user types it back character-for-character (strict). Parity with Windows
+# BitLocker "save this recovery key" flow — except we never write to any
+# non-volatile medium. If the user can't re-type it, they haven't saved it;
+# refuse to continue (luksFormat hasn't run yet, so the disk is untouched).
+#
+# Offers escape hatches: "show" re-displays, "quit" aborts cleanly before
+# any disk modification.
+display_and_verify_luks_key() {
+    local key="$1" typed
+    echo
+    printf '\033[1;37;41m%s\033[0m\n' "╔══════════════════════════════════════════════════════════════════════╗"
+    printf '\033[1;37;41m%s\033[0m\n' "║                  LUKS RECOVERY KEY — SAVE THIS NOW                   ║"
+    printf '\033[1;37;41m%s\033[0m\n' "║                                                                      ║"
+    printf '\033[1;37;41m║   \033[1;33;41m%s\033[1;37;41m   ║\033[0m\n' "$key"
+    printf '\033[1;37;41m%s\033[0m\n' "║                                                                      ║"
+    printf '\033[1;37;41m%s\033[0m\n' "║   Save to Bitwarden as 'Metis LUKS'. This key will NOT be written    ║"
+    printf '\033[1;37;41m%s\033[0m\n' "║   to any disk. Once install continues, it exists only inside the     ║"
+    printf '\033[1;37;41m%s\033[0m\n' "║   LUKS header — no paper trail, no backup, no recovery from us.      ║"
+    printf '\033[1;37;41m%s\033[0m\n' "╚══════════════════════════════════════════════════════════════════════╝"
+    echo
     while :; do
-        read -rsp "LUKS passphrase for $label: " p1 </dev/tty; printf '\n' >&2
-        read -rsp "  confirm $label passphrase: " p2 </dev/tty; printf '\n' >&2
-        if [[ ${#p1} -lt 8 ]]; then
-            warn "  (too short — 8+ chars; 12+ recommended. This is your recovery fallback if the TPM loses its seal.)"
-        elif [[ "$p1" != "$p2" ]]; then
-            warn "  (didn't match — try again)"
-        else
-            break
-        fi
+        read -rp "Re-type the recovery key to confirm Bitwarden save (or 'show' / 'quit'): " typed </dev/tty
+        case "$typed" in
+            show)
+                printf '\n   \033[1;33m%s\033[0m\n\n' "$key"
+                ;;
+            quit)
+                die "Aborted during recovery-key verification. No disk changes have been made."
+                ;;
+            "$key")
+                log "Recovery key confirmed. Proceeding with install."
+                return 0
+                ;;
+            *)
+                warn "Didn't match. Try again, or type 'show' to re-display, 'quit' to abort."
+                ;;
+        esac
     done
-    printf '%s' "$p1"
 }
 
 # Cleanup trap: on any failure, unmount /mnt and close LUKS mappers so a
@@ -189,15 +222,18 @@ timedatectl set-ntp true
 # cleanup_on_fail and the post-chroot rm -f together ensure the file never
 # survives this script. Requires openssl, which is in the Arch live ISO.
 #
-# LUKS passphrase stays in an in-memory variable for the duration of this
-# script — used to luksFormat both volumes and to luksAddKey the cryptvar
-# keyfile — then unset before exit. Never touches disk.
+# LUKS recovery key is auto-generated (BitLocker parity). It lives in an
+# in-memory variable for the duration of this script — used to luksFormat
+# both volumes and luksAddKey the cryptvar keyfile — then unset before exit.
+# Never touches any non-volatile storage. The user is shown it once, must
+# type it back to confirm Bitwarden save, then the script continues. After
+# that point, the key exists only inside LUKS headers on disk.
 command -v openssl >/dev/null || die "openssl not found in live env — needed for password hashing."
-log "Collecting passwords + LUKS passphrase now (you won't be prompted again during install)."
-log "The LUKS passphrase is what you'll type at boot if the TPM ever loses its seal — stash it in Bitwarden."
+log "Collecting passwords now. LUKS recovery key will be auto-generated + shown to you for Bitwarden save."
 ROOT_PW_HASH=$(prompt_password "root")
 TOM_PW_HASH=$(prompt_password "tom")
-LUKS_PW=$(prompt_luks "disk encryption (used for both Samsung root and Netac /var)")
+LUKS_PW=$(generate_luks_recovery_key)
+display_and_verify_luks_key "$LUKS_PW"
 
 # ---------- 3. confirm ----------
 cat <<EOF
@@ -450,11 +486,14 @@ cryptsetup close cryptroot || true
 
 cat <<EOF
 
-Done. Remove the USB and reboot.
+Done. Remove any installer USB (if present) and reboot.
 
-First boot asks for the LUKS passphrase (you set it at the top of this run).
+First boot will prompt for the LUKS recovery key — the one you saved to
+Bitwarden earlier. Type it from there.
+
 Log in as 'tom', then:
-    ./postinstall.sh           # installs yay, zgenom, illogical-impulse dots,
-                               # catppuccin, chezmoi, fingerprint, TPM2 enroll
-                               # for silent LUKS unlock, etc.
+    ./postinstall.sh           # enrolls TPM2 so boots are silent from
+                               # then on (recovery key stays as fallback),
+                               # plus yay, zgenom, HyDE dots, catppuccin,
+                               # chezmoi, fingerprint, etc.
 EOF
