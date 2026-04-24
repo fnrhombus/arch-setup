@@ -142,19 +142,29 @@ command -v pacstrap >/dev/null          || die "pacstrap missing — not in Arch
 command -v cryptsetup >/dev/null        || die "cryptsetup missing — not in Arch live env? (FDE requires it)"
 
 # ---------- 0.5 source dir (custom ISO baked-in OR Ventoy USB) ----------
-# Two boot paths supported:
+# Three boot paths supported, probed in order:
 #   (a) Custom Arch ISO with arch-setup/ baked into /root/arch-setup/ at ISO
 #       build time (phase-1-iso/). This is the preferred path post-2026-04
 #       because USB drives have been flaky on this machine.
+#   (a') Script was invoked from an existing repo clone (the documented
+#       runbook path: `git clone ... /tmp/arch-setup; bash /tmp/arch-setup/
+#       phase-2-arch-install/install.sh`). SOURCE_DIR is the script's own
+#       parent dir — /tmp/arch-setup, /home/.../arch-setup, wherever.
+#       Avoids the /run/ventoy dm-linear mount entirely (which has been
+#       observed to throw Buffer I/O errors on the Netac-SATA bootstrap).
 #   (b) Vanilla Arch ISO booted from a Ventoy USB stick that ALSO holds the
-#       arch-setup repo at its root. Original (and still-supported) path.
-#
-# Probe (a) first; fall back to (b) if it's not present.
+#       arch-setup repo at its root, invoked via something other than the
+#       repo clone itself. Last-resort fallback — self-mounts /run/ventoy.
 SOURCE_DIR=""
 if [[ -f /root/arch-setup/phase-2-arch-install/chroot.sh ]]; then
     SOURCE_DIR=/root/arch-setup
     log "Source: baked-in custom ISO ($SOURCE_DIR)."
+elif SCRIPT_PARENT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." 2>/dev/null && pwd)" \
+     && [[ -n "$SCRIPT_PARENT" && -f "$SCRIPT_PARENT/phase-2-arch-install/chroot.sh" ]]; then
+    SOURCE_DIR="$SCRIPT_PARENT"
+    log "Source: script-adjacent repo clone ($SOURCE_DIR)."
 fi
+unset SCRIPT_PARENT
 
 # Ventoy boots the Arch ISO via a dm-linear target on /dev/sdX. While that
 # parent disk can still be read (dm is a passthrough, not an exclusive
@@ -537,28 +547,35 @@ rm -f /mnt/root/.pw /mnt/root/.luks
 unset LUKS_PW
 
 # ---------- 12. recovery partition ----------
-log "Writing Arch ISO to recovery partition $NETAC_RECOVERY..."
-# Look for the Arch ISO at: (a) Ventoy USB root, (b) custom-ISO source dir
-# fallback (the live system itself is the recovery image candidate).
-ARCH_ISO=$(ls "$SOURCE_DIR"/archlinux-*.iso 2>/dev/null | head -1 || true)
-if [[ -z "$ARCH_ISO" || ! -f "$ARCH_ISO" ]] && [[ -d /run/archiso/bootmnt ]]; then
-    # Custom-ISO boot path: the running ISO IS what we'd dd. Use the live
-    # device. /run/archiso/bootmnt is the archiso default mount.
-    log "  No Arch ISO file in source; falling back to the live ISO image itself."
-    LIVE_ISO_DEV=$(findmnt -no SOURCE /run/archiso/bootmnt 2>/dev/null | head -1)
-    if [[ -b "$LIVE_ISO_DEV" ]]; then
-        ARCH_ISO="$LIVE_ISO_DEV"
+# Skipped in the Ventoy-on-Netac bootstrap: the Netac's Ventoy data
+# partition already carries the bootable Arch ISO, so it IS the recovery.
+# NETAC_RECOVERY is empty in that branch (set by §5 when VENTOY_ON_NETAC=1).
+if [[ -z "$NETAC_RECOVERY" ]]; then
+    log "Ventoy-on-Netac: skipping recovery-partition write (the Ventoy ISO is the recovery)."
+else
+    log "Writing Arch ISO to recovery partition $NETAC_RECOVERY..."
+    # Look for the Arch ISO at: (a) Ventoy USB root, (b) custom-ISO source dir
+    # fallback (the live system itself is the recovery image candidate).
+    ARCH_ISO=$(ls "$SOURCE_DIR"/archlinux-*.iso 2>/dev/null | head -1 || true)
+    if [[ -z "$ARCH_ISO" || ! -f "$ARCH_ISO" ]] && [[ -d /run/archiso/bootmnt ]]; then
+        # Custom-ISO boot path: the running ISO IS what we'd dd. Use the live
+        # device. /run/archiso/bootmnt is the archiso default mount.
+        log "  No Arch ISO file in source; falling back to the live ISO image itself."
+        LIVE_ISO_DEV=$(findmnt -no SOURCE /run/archiso/bootmnt 2>/dev/null | head -1)
+        if [[ -b "$LIVE_ISO_DEV" ]]; then
+            ARCH_ISO="$LIVE_ISO_DEV"
+        fi
     fi
+    [[ -n "$ARCH_ISO" ]] || die "No Arch ISO found (checked $SOURCE_DIR + /run/archiso)."
+    # Size-gate: NETAC_RECOVERY is 1536 MiB. A larger ISO would dd past the
+    # partition boundary into NETAC_SWAP with no error, silently corrupting swap.
+    ISO_BYTES=$(stat -c%s "$ARCH_ISO")
+    PART_BYTES=$(blockdev --getsize64 "$NETAC_RECOVERY")
+    if (( ISO_BYTES > PART_BYTES )); then
+        die "Arch ISO ($ISO_BYTES bytes) is larger than recovery partition ($PART_BYTES bytes). Resize NETAC_RECOVERY in install.sh or use a smaller ISO."
+    fi
+    dd if="$ARCH_ISO" of="$NETAC_RECOVERY" bs=4M status=progress conv=fsync
 fi
-[[ -n "$ARCH_ISO" ]] || die "No Arch ISO found (checked $SOURCE_DIR + /run/archiso)."
-# Size-gate: NETAC_RECOVERY is 1536 MiB. A larger ISO would dd past the
-# partition boundary into NETAC_SWAP with no error, silently corrupting swap.
-ISO_BYTES=$(stat -c%s "$ARCH_ISO")
-PART_BYTES=$(blockdev --getsize64 "$NETAC_RECOVERY")
-if (( ISO_BYTES > PART_BYTES )); then
-    die "Arch ISO ($ISO_BYTES bytes) is larger than recovery partition ($PART_BYTES bytes). Resize NETAC_RECOVERY in install.sh or use a smaller ISO."
-fi
-dd if="$ARCH_ISO" of="$NETAC_RECOVERY" bs=4M status=progress conv=fsync
 
 # ---------- 13. post-install hook ----------
 # Stage phase-3 script + setup-azure-ddns + the dotfiles tree where the
