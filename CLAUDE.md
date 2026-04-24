@@ -27,7 +27,7 @@ Phase 1 only touches the Samsung SSD 840 PRO 512GB. The Netac 128GB is reserved 
 The whole end-to-end flow from a bare dev machine is:
 1. Clone this repo, `pnpm i` — fetches ISOs, detects the Ventoy USB, mirrors everything onto it.
 2. Plug the stick into the laptop, boot it, pick the Win11 entry from the Ventoy menu. Windows installs fully unattended (autounattend.xml: inline PS picks the Samsung by size → writes `X:\target-disk.txt` → diskpart reads that, silent OOBE).
-3. Reboot, pick the Arch entry from Ventoy, run `./install.sh` from the mounted Ventoy data partition. Password prompt is one-shot at the top; pacstrap + chroot run unattended.
+3. Reboot, pick the Arch entry from any Ventoy loader (SanDisk USB or the internal Netac-Ventoy if the no-USB workflow is in play), clone the repo and run the installer: `git clone https://github.com/fnrhombus/arch-setup /tmp/arch-setup && bash /tmp/arch-setup/phase-2-arch-install/install.sh`. Root + tom passwords prompted up front; the LUKS recovery key is auto-generated BitLocker-style (48 digits, displayed with loud banner, strict type-back required). pacstrap + chroot run unattended.
 4. First boot into Arch, log in as `tom`, run `~/postinstall.sh`.
 
 ## Repo layout

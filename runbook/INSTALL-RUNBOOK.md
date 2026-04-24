@@ -128,11 +128,13 @@ ping -c2 archlinux.org
 
 ### 2c. Fetch the installer
 
-You can't just `mount /dev/disk/by-label/Ventoy` — it fails with "Can't open blockdev" because Ventoy holds the USB disk exclusively via dm-linear to serve the booted ISO. The install script works around that internally (creates a dm-linear passthrough and mounts the data partition at `/run/ventoy`, per [ventoy.net/en/doc_compatible_mount.html](https://www.ventoy.net/en/doc_compatible_mount.html)), but you still need a way to invoke it. Pull a fresh copy from GitHub:
+Clone the repo fresh from GitHub — `install.sh` reads everything it needs (chroot.sh, phase-3 staging, p10k sidecar) from its own parent directory:
 
 ```bash
 git clone https://github.com/fnrhombus/arch-setup /tmp/arch-setup
 ```
+
+No Ventoy-USB mount step. The previous USB-mounted variant was fragile (dm-linear lock collisions) and has been removed from the repo; clone-only is the canonical path.
 
 ### 2d. Run the installer
 
@@ -147,20 +149,18 @@ If `reflector` complains about no network, you haven't connected yet — go back
 bash /tmp/arch-setup/phase-2-arch-install/install.sh
 ```
 
-The script self-mounts the Ventoy data partition at `/run/ventoy` (for `chroot.sh` and the Arch ISO), so the clone is only needed to bootstrap this one invocation.
-
 It will:
 1. Size-detect the Samsung (500–600 GB) and Netac (100–150 GB). **Aborts loudly if either is missing** — don't blindly retry, fix it.
-2. Show the plan and ask `[yes/NO]`. Type **`yes`** exactly.
-3. **Prompt once up-front for three secrets** (all confirmed twice; nothing else will ask you for input until install is done):
+2. Detect whether Ventoy is installed on the Netac (no-USB recovery workflow). If yes → partitions only the reserved region, preserves Ventoy. If no → wipes Netac per the original Q9 layout (recovery + swap + /var).
+3. Show the plan and ask `[yes/NO]`. Type **`yes`** exactly.
+4. **Prompt once up-front for two passwords** (each confirmed twice):
    - **root password** — account recovery.
-   - **tom's password** — your daily login. Make it strong; you'll bypass it with TPM-PIN and fingerprint later.
-   - **LUKS passphrase** — unlocks both the Samsung root and Netac /var at boot until TPM2 autounlock is wired in Phase 3. **Stash this in Bitwarden now** (next to the BitLocker key) as a Secure Note called "Inspiron LUKS passphrase". 8+ chars, 12+ recommended. If PCR values ever drift, this is what gets you back in.
-4. LUKS-format both data partitions, mkfs, pacstrap (~15 min — biggest wait, fully unattended).
-5. Enter chroot (passwords + LUKS UUIDs handed in via mode-600 files), install systemd-boot, write `/etc/crypttab.initramfs` + `/etc/crypttab`, add `sd-encrypt` to mkinitcpio HOOKS, wire services + PAM for fingerprint-sudo + gnome-keyring.
-6. `dd` the Arch ISO onto the Netac recovery partition (~1 min, unencrypted by design so it still boots from F12 if Arch is hosed).
-7. Copy `postinstall.sh` + dotfiles into `/home/tom/`.
-8. Unmount, close LUKS mappers, and print "Done."
+   - **tom's password** — your daily login. You'll bypass it with TPM-PIN and fingerprint later.
+5. **Auto-generate a 48-digit LUKS recovery key** (BitLocker-format: 8 groups of 6 digits, dash-separated) and display it with a loud banner. **Save it to Bitwarden as `Metis LUKS` right now** — then re-type it back exactly at the prompt. Script refuses to continue until the type-back matches. The key is never written to disk: Bitwarden is the only copy from here on.
+6. LUKS-format both data partitions (Samsung root + Netac /var), mkfs, pacstrap (~15 min — biggest wait, fully unattended).
+7. Enter chroot (passwords + LUKS UUIDs handed in via mode-600 files), install systemd-boot, write `/etc/crypttab.initramfs` + `/etc/crypttab`, add `sd-encrypt` to mkinitcpio HOOKS, wire services + PAM for fingerprint-sudo + gnome-keyring.
+8. Copy `postinstall.sh` + dotfiles into `/home/tom/`.
+9. Unmount, close LUKS mappers, print "Done."
 
 **If install.sh dies:**
 - **"No 500–600 GB disk detected"** → phase-1 Windows install didn't run. Boot back into Windows first.
