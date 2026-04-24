@@ -255,6 +255,27 @@ log "Netac  (recovery+swap+/var): $NETAC"
 part_count=$(lsblk -n -o NAME "$SAMSUNG" | tail -n +2 | wc -l)
 (( part_count >= 3 )) || die "Samsung has <3 partitions. Run Windows install (phase 1) first."
 
+# ---------- 1.5 Ventoy-on-Netac detection ----------
+# If the Netac was bootstrapped as a Ventoy boot medium (no-USB install
+# path — Ventoy2Disk installed onto the Netac with reserved space at the
+# tail), we want to PRESERVE Ventoy as the recovery rather than wiping it.
+# In that mode, only the reserved region (partitions 3 + 4) gets carved
+# into swap + var; the Ventoy data partition (sdb1, NTFS) and VTOYEFI
+# companion (sdb2, FAT) stay untouched — they ARE the recovery.
+#
+# Detection: the "Ventoy" filesystem label sits on Ventoy's data partition.
+# If its parent disk is $NETAC, Ventoy-on-Netac mode is active.
+VENTOY_ON_NETAC=0
+_ventoy_part=$(blkid -L Ventoy 2>/dev/null || true)
+if [[ -n "$_ventoy_part" ]]; then
+    _ventoy_disk=$(lsblk -ndo PKNAME "$_ventoy_part" 2>/dev/null || true)
+    if [[ -n "$_ventoy_disk" && "/dev/$_ventoy_disk" == "$NETAC" ]]; then
+        VENTOY_ON_NETAC=1
+        log "Ventoy detected on $NETAC — reserved-region layout (Ventoy preserved as recovery)."
+    fi
+fi
+unset _ventoy_part _ventoy_disk
+
 # ---------- 2. network ----------
 # Embedded Wi-Fi profiles. Mirror these in chroot.sh WIFI_PROFILES and in
 # autounattend.xml's FirstLogon Wi-Fi block. Format: "SSID:PSK"
@@ -316,8 +337,21 @@ cat <<EOF
 About to:
   - Leave Samsung partitions 1, 2, 3 (EFI, MSR, Windows) UNTOUCHED
   - Create one new LUKS2 + btrfs partition in the trailing unallocated space of $SAMSUNG
+EOF
+if (( VENTOY_ON_NETAC )); then
+    cat <<EOF
+  - Leave Netac partitions 1, 2 (Ventoy data + VTOYEFI) UNTOUCHED — they stay as recovery
+  - Create 2 new LUKS2 partitions in $NETAC's reserved region:
+      - LUKS2 swap w/ random key (16 GB)
+      - LUKS2 ext4 for /var/log + /var/cache (rest of reserved region)
+EOF
+else
+    cat <<EOF
   - WIPE $NETAC entirely (GPT label, 3 new partitions: recovery ISO,
     LUKS2 swap w/ random key, LUKS2 ext4 for /var/log + /var/cache)
+EOF
+fi
+cat <<EOF
   - pacstrap a full Arch system and configure per decisions.md
 
 EOF
@@ -359,20 +393,57 @@ SAMSUNG_EFI=$(lsblk -ln -o NAME,PARTTYPE "$SAMSUNG" | awk '$2 ~ /c12a7328-f81f-1
 SAMSUNG_EFI="/dev/$SAMSUNG_EFI"
 log "EFI System partition: $SAMSUNG_EFI"
 
-# ---------- 5. Netac: wipe and partition ----------
-log "Wiping and partitioning $NETAC..."
-sgdisk --zap-all "$NETAC"
-sgdisk \
-    --new=1:0:+1536M --typecode=1:8300 --change-name=1:ArchRecovery \
-    --new=2:0:+16G   --typecode=2:8200 --change-name=2:ArchSwap     \
-    --new=3:0:0      --typecode=3:8300 --change-name=3:ArchVar      \
-    "$NETAC"
+# ---------- 5. Netac: partition ----------
+# Two layouts, chosen by VENTOY_ON_NETAC (§1.5):
+#   reserved-region — preserve sdb1 (Ventoy data) + sdb2 (VTOYEFI); carve
+#                     swap + var into the trailing reserved free space.
+#                     Ventoy itself IS the recovery; no separate partition.
+#   greenfield     — wipe the whole Netac, create ArchRecovery +
+#                     ArchSwap + ArchVar from scratch. ArchRecovery gets
+#                     the Arch ISO dd'd onto it in §12.
+if (( VENTOY_ON_NETAC )); then
+    log "Partitioning $NETAC reserved region (Ventoy data + VTOYEFI preserved)..."
+    # sgdisk --new=N:0:... starts at the first free sector after the highest
+    # existing partition — which is VTOYEFI (partition 2) for Ventoy-on-Netac
+    # installed via Ventoy2Disk -r. So partitions 3 + 4 land in the reserved
+    # region without touching 1 or 2.
+    sgdisk \
+        --new=3:0:+16G --typecode=3:8200 --change-name=3:ArchSwap \
+        --new=4:0:0    --typecode=4:8300 --change-name=4:ArchVar  \
+        "$NETAC"
+    _NETAC_RECOVERY_N=""   # Ventoy IS the recovery; no separate slot.
+    _NETAC_SWAP_N=3
+    _NETAC_VAR_N=4
+else
+    log "Wiping and partitioning $NETAC..."
+    sgdisk --zap-all "$NETAC"
+    sgdisk \
+        --new=1:0:+1536M --typecode=1:8300 --change-name=1:ArchRecovery \
+        --new=2:0:+16G   --typecode=2:8200 --change-name=2:ArchSwap     \
+        --new=3:0:0      --typecode=3:8300 --change-name=3:ArchVar      \
+        "$NETAC"
+    _NETAC_RECOVERY_N=1
+    _NETAC_SWAP_N=2
+    _NETAC_VAR_N=3
+fi
 partprobe "$NETAC"
 udevadm settle
 
-NETAC_RECOVERY="${NETAC}1"; [[ -b "$NETAC_RECOVERY" ]] || NETAC_RECOVERY="${NETAC}p1"
-NETAC_SWAP="${NETAC}2";     [[ -b "$NETAC_SWAP"     ]] || NETAC_SWAP="${NETAC}p2"
-NETAC_VAR="${NETAC}3";      [[ -b "$NETAC_VAR"      ]] || NETAC_VAR="${NETAC}p3"
+# Portable partition-device resolver (sda<N> vs nvme0n1p<N>).
+_netac_part() {
+    local n="$1" path="${NETAC}${n}"
+    [[ -b "$path" ]] || path="${NETAC}p${n}"
+    printf '%s' "$path"
+}
+NETAC_SWAP=$(_netac_part "$_NETAC_SWAP_N")
+NETAC_VAR=$(_netac_part "$_NETAC_VAR_N")
+if [[ -n "$_NETAC_RECOVERY_N" ]]; then
+    NETAC_RECOVERY=$(_netac_part "$_NETAC_RECOVERY_N")
+else
+    NETAC_RECOVERY=""
+fi
+unset -f _netac_part
+unset _NETAC_RECOVERY_N _NETAC_SWAP_N _NETAC_VAR_N
 
 # ---------- 6. LUKS format + filesystems ----------
 # Encrypt both data partitions with the same passphrase. The passphrase is
