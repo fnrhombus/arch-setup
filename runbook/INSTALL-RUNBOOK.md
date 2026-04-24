@@ -137,6 +137,7 @@ ping -c2 archlinux.org
 You can't just `mount /dev/disk/by-label/Ventoy` — it fails with "Can't open blockdev" because Ventoy holds the USB disk exclusively via dm-linear to serve the booted ISO. The install script works around that internally (creates a dm-linear passthrough and mounts the data partition at `/run/ventoy`, per [ventoy.net/en/doc_compatible_mount.html](https://www.ventoy.net/en/doc_compatible_mount.html)), but you still need a way to invoke it. Pull a fresh copy from GitHub:
 
 ```bash
+pacman -Sy git
 git clone https://github.com/fnrhombus/arch-setup /tmp/arch-setup
 ```
 
