@@ -10,10 +10,7 @@
     "stage": "pwsh -NoProfile -ExecutionPolicy Bypass -File scripts/stage-usb.ps1 && pnpm prune:usb",
     "stage:force": "pwsh -NoProfile -ExecutionPolicy Bypass -File scripts/stage-usb.ps1 -Force && pnpm prune:usb",
     "prune:usb": "pwsh -NoProfile -ExecutionPolicy Bypass -File scripts/prune-usb.ps1",
-    "pdf": "node scripts/runbook-pdf.mjs",
-    "iso": "pwsh -NoProfile -ExecutionPolicy Bypass -File scripts/build-custom-iso.ps1",
-    "iso:clean": "pwsh -NoProfile -ExecutionPolicy Bypass -File scripts/build-custom-iso.ps1 -Clean",
-    "iso:docker": "pwsh -NoProfile -ExecutionPolicy Bypass -File scripts/build-custom-iso.ps1 -Docker"
+    "pdf": "node scripts/runbook-pdf.mjs"
   },
   "repository": {
     "type": "git",

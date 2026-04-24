@@ -5,7 +5,6 @@ Ordered snapshot of what's still open across the arch-setup repo as of 2026-04-2
 ## On the dev machine (Phase 0 — USB prep)
 
 - [ ] `pnpm i` to download Arch ISO + Win11 ISO + Ventoy + stage everything onto the Ventoy USB.
-- [ ] (Optional) `pnpm iso` to bake the custom Arch ISO with the repo pre-staged into `/root/arch-setup/`. Skipped if Ventoy USB approach is fine.
 
 ## On Metis (Phase 1-3 — fresh install)
 

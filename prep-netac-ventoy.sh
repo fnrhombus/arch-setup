@@ -206,15 +206,12 @@ for sidecar in "$REPO_ROOT"/assets/archlinux-x86_64.iso.sig "$REPO_ROOT"/assets/
     [[ -f "$sidecar" ]] && cp -v "$sidecar" "$MNT/"
 done
 
-log "Mirroring repo into Ventoy data partition (excluding .git, node_modules, assets, PDFs, phase-1-iso/airootfs)..."
+log "Mirroring repo into Ventoy data partition (excluding .git, node_modules, assets, PDFs)..."
 log "  (exFAT can't store unix perms/owner/symlinks — rsync errors on those are expected and ignored.)"
 # rsync flag breakdown:
 #   -r recursive, -t times — what we actually need
 #   --no-perms / --no-owner / --no-group — exFAT has no concept of these
-#   (no -l): drop symlinks entirely; phase-1-iso/airootfs is excluded for the
-#   same reason (heavy symlinks into /usr/share/zoneinfo, /dev/null, etc., all
-#   only needed for the `pnpm iso` build path on the dev machine, not for
-#   running the install from the Netac).
+#   (no -l): drop symlinks entirely (exFAT can't represent them either).
 if ! rsync -rt --info=progress2 \
         --no-perms --no-owner --no-group \
         --exclude='.git' \
@@ -222,7 +219,6 @@ if ! rsync -rt --info=progress2 \
         --exclude='assets' \
         --exclude='runbook/*.pdf' \
         --exclude='dotfiles/' \
-        --exclude='phase-1-iso/airootfs' \
         "$REPO_ROOT/" "$MNT/"; then
     warn "rsync exited non-zero — likely exFAT metadata-only errors (Operation not permitted on chown/symlink). File content should be intact; verify by spot-checking $MNT/."
 fi

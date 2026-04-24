@@ -803,9 +803,8 @@ No other state needs resetting — PAM, keyring, and Bitwarden are all keyed off
 
 ## Recovery
 
-- **Primary recovery**: boot the Ventoy USB, pick the Arch ISO → live environment with `pacstrap`, `arch-chroot`, etc.
-- **Secondary recovery**: the Netac has the Arch ISO dd'd onto partition 1 (when using the custom-baked ISO from `pnpm iso`, the dotfiles + scripts are pre-baked into `/root/arch-setup/`). To boot it, use Dell F12 boot menu and pick the Netac's EFI entry — the ISO's own bootloader takes over. So: same live environment without needing the USB.
-- **Full reinstall**: boot USB → Arch ISO → re-run `install.sh`. It's size-gated and will abort if anything looks off, so you can't accidentally double-wipe.
+- **Primary recovery**: boot the Ventoy USB (or the internal Netac-Ventoy, whichever you used for the install), pick the Arch ISO → live environment with `pacstrap`, `arch-chroot`, etc.
+- **Full reinstall**: boot the same Ventoy menu → Arch ISO → re-clone and re-run `install.sh`. It's size-gated and will abort if anything looks off, so you can't accidentally double-wipe.
 
 ## Package-name drift (AUR)
 

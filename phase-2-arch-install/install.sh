@@ -66,37 +66,29 @@ prompt_password() {
 #     at leisure, never type again unless the TPM seal breaks.
 gen_and_show_luks_passphrase() {
     # 24 random bytes → 48 hex chars → grouped 6-by-6 with hyphens.
-    local raw key
+    local raw key ack
     raw=$(openssl rand -hex 24)            # 48 chars, 0-9a-f, ~192 bits entropy
     key=$(printf '%s' "$raw" | sed 's/.\{6\}/&-/g; s/-$//')
 
+    # Red-banner BitLocker-style box (ported from install-auto-luks) plus
+    # main's lighter "I HAVE THE KEY" ack (no full retype — 55 chars is a
+    # lot to fat-finger on a TTY). Symmetric UX with the Windows-side
+    # BitLocker recovery dialog.
     {
         printf '\n'
-        printf '\033[1;33m'   # yellow bold for visibility on the live-ISO TTY
-        printf '================================================================\n'
-        printf '   LUKS RECOVERY KEY  --  PHOTOGRAPH THIS NOW\n'
-        printf '================================================================\n'
+        printf '\033[1;37;41m%s\033[0m\n' "╔══════════════════════════════════════════════════════════════════════╗"
+        printf '\033[1;37;41m%s\033[0m\n' "║                  LUKS RECOVERY KEY — SAVE THIS NOW                   ║"
+        printf '\033[1;37;41m%s\033[0m\n' "║                                                                      ║"
+        printf '\033[1;37;41m║   \033[1;33;41m%s\033[1;37;41m   ║\033[0m\n' "$key"
+        printf '\033[1;37;41m%s\033[0m\n' "║                                                                      ║"
+        printf '\033[1;37;41m%s\033[0m\n' "║   Save to Bitwarden as 'Metis LUKS'. This key will NOT be written    ║"
+        printf '\033[1;37;41m%s\033[0m\n' "║   to any disk. Once install continues, it exists only inside the     ║"
+        printf '\033[1;37;41m%s\033[0m\n' "║   LUKS header — no paper trail, no backup, no recovery from us.      ║"
+        printf '\033[1;37;41m%s\033[0m\n' "╚══════════════════════════════════════════════════════════════════════╝"
         printf '\n'
-        printf '       \033[1;37m%s\033[1;33m\n' "$key"
-        printf '\n'
-        printf '================================================================\n'
-        printf '\033[0m\n'
-        printf '  This unlocks every encrypted volume on Metis (cryptroot,\n'
-        printf '  cryptvar, cryptswap) at boot if the TPM ever loses its seal\n'
-        printf '  -- same model as the BitLocker recovery key you stashed during\n'
-        printf '  the Windows install.\n\n'
-        printf '  WHAT TO DO RIGHT NOW:\n'
-        printf '    1. Take a phone photo of the key above. Make sure it'"'"'s sharp.\n'
-        printf '    2. Later, transcribe it to Bitwarden as "Metis LUKS recovery"\n'
-        printf '       (parallel to "Metis BitLocker recovery").\n\n'
-        printf '  IF YOU LOSE THIS KEY: the encrypted disks become unrecoverable\n'
-        printf '  the moment the TPM seal breaks (firmware update, secure-boot\n'
-        printf '  toggle, motherboard swap). No backdoor, no recovery -- same as\n'
-        printf '  BitLocker.\n\n'
         printf '  Type \033[1mI HAVE THE KEY\033[0m (case-sensitive, exactly) to continue:\n'
     } >&2
 
-    local ack
     while :; do
         read -rp '> ' ack </dev/tty
         [[ "$ack" == "I HAVE THE KEY" ]] && break
@@ -141,96 +133,22 @@ confirm() {
 command -v pacstrap >/dev/null          || die "pacstrap missing — not in Arch live env?"
 command -v cryptsetup >/dev/null        || die "cryptsetup missing — not in Arch live env? (FDE requires it)"
 
-# ---------- 0.5 source dir (custom ISO baked-in OR Ventoy USB) ----------
-# Three boot paths supported, probed in order:
-#   (a) Custom Arch ISO with arch-setup/ baked into /root/arch-setup/ at ISO
-#       build time (phase-1-iso/). This is the preferred path post-2026-04
-#       because USB drives have been flaky on this machine.
-#   (a') Script was invoked from an existing repo clone (the documented
-#       runbook path: `git clone ... /tmp/arch-setup; bash /tmp/arch-setup/
-#       phase-2-arch-install/install.sh`). SOURCE_DIR is the script's own
-#       parent dir — /tmp/arch-setup, /home/.../arch-setup, wherever.
-#       Avoids the /run/ventoy dm-linear mount entirely (which has been
-#       observed to throw Buffer I/O errors on the Netac-SATA bootstrap).
-#   (b) Vanilla Arch ISO booted from a Ventoy USB stick that ALSO holds the
-#       arch-setup repo at its root, invoked via something other than the
-#       repo clone itself. Last-resort fallback — self-mounts /run/ventoy.
-SOURCE_DIR=""
-if [[ -f /root/arch-setup/phase-2-arch-install/chroot.sh ]]; then
-    SOURCE_DIR=/root/arch-setup
-    log "Source: baked-in custom ISO ($SOURCE_DIR)."
-elif SCRIPT_PARENT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." 2>/dev/null && pwd)" \
-     && [[ -n "$SCRIPT_PARENT" && -f "$SCRIPT_PARENT/phase-2-arch-install/chroot.sh" ]]; then
-    SOURCE_DIR="$SCRIPT_PARENT"
-    log "Source: script-adjacent repo clone ($SOURCE_DIR)."
-fi
-unset SCRIPT_PARENT
-
-# Ventoy boots the Arch ISO via a dm-linear target on /dev/sdX. While that
-# parent disk can still be read (dm is a passthrough, not an exclusive
-# claim), the kernel-synthesised partition node /dev/sdX1 is held busy by
-# archiso's probe hooks — so `mount /dev/sdX1` and even
-# `dmsetup create ... linear /dev/sdX1 0` both fail with "Device or
-# resource busy".
+# ---------- 0.5 source dir (repo clone, resolved from the script's own path) ----------
+# Canonical install: boot vanilla Arch ISO (from Ventoy — USB or Netac),
+# `git clone https://github.com/fnrhombus/arch-setup ...`, run this script
+# from inside the clone. SOURCE_DIR = the clone's root.
 #
-# The documented workaround (https://www.ventoy.net/en/doc_compatible_mount.html)
-# is to build a fresh dm-linear against the parent disk at partition 1's
-# sector offset, and mount *that* mapper device.
-VENTOY_MNT=/run/ventoy
-if [[ -z "$SOURCE_DIR" ]] && ! mountpoint -q "$VENTOY_MNT"; then
-    # Find the USB disk. Prefer the "ventoy" dm target (present on the
-    # initial boot), but if the stick was unplugged + replugged the target
-    # is orphaned; fall back to blkid-by-label, then any USB-TRAN disk.
-    # Every fallback is wrapped in `|| true` so set -e doesn't kill us
-    # inside the command substitution before we can diagnose.
-    VENTOY_DISK=$(dmsetup deps -o devname ventoy 2>/dev/null \
-        | grep -oE '[sv]d[a-z]+|nvme[0-9]+n[0-9]+' | head -n1 || true)
-
-    if [[ -z "$VENTOY_DISK" ]]; then
-        # blkid -L Ventoy prints e.g. /dev/sdb1; PKNAME strips to the parent disk.
-        PART_NODE=$(blkid -L Ventoy 2>/dev/null || true)
-        if [[ -n "$PART_NODE" ]]; then
-            VENTOY_DISK=$(lsblk -ndo PKNAME "$PART_NODE" 2>/dev/null || true)
-        fi
-    fi
-
-    if [[ -z "$VENTOY_DISK" ]]; then
-        VENTOY_DISK=$(lsblk -ndo NAME,TRAN 2>/dev/null \
-            | awk '$2=="usb"{print $1; exit}' || true)
-    fi
-
-    [[ -n "$VENTOY_DISK" ]] || die "Could not locate the Ventoy USB disk (tried dmsetup/blkid/lsblk). Is the stick plugged in?"
-
-    # NVMe partitions are nvme0n1 → nvme0n1p1; SATA/USB are sdX → sdX1.
-    # Only used as the dm mapper name — we target /dev/$VENTOY_DISK below.
-    if [[ "$VENTOY_DISK" == nvme* ]]; then VENTOY_PART="${VENTOY_DISK}p1"
-    else                                   VENTOY_PART="${VENTOY_DISK}1"
-    fi
-
-    # Create the passthrough against the parent disk + partition 1 offset
-    # (idempotent across retries).
-    if [[ ! -e "/dev/mapper/$VENTOY_PART" ]]; then
-        PART_START=$(partx -g -o START "/dev/$VENTOY_DISK" | head -n1 | awk '{print $1}')
-        PART_SIZE=$(partx  -g -o SECTORS "/dev/$VENTOY_DISK" | head -n1 | awk '{print $1}')
-        [[ "$PART_START" =~ ^[0-9]+$ && "$PART_SIZE" =~ ^[0-9]+$ ]] \
-            || die "Could not read partition 1 geometry from /dev/$VENTOY_DISK."
-        echo "0 $PART_SIZE linear /dev/$VENTOY_DISK $PART_START" | dmsetup create "$VENTOY_PART" \
-            || die "dmsetup create $VENTOY_PART failed."
-    fi
-
-    mkdir -p "$VENTOY_MNT"
-    mount -o ro "/dev/mapper/$VENTOY_PART" "$VENTOY_MNT" \
-        || die "Failed to mount /dev/mapper/$VENTOY_PART at $VENTOY_MNT."
-    log "Ventoy data partition mounted at $VENTOY_MNT (ro, via dm passthrough)."
-fi
-
-# Resolve SOURCE_DIR (Ventoy fallback if baked-in path didn't exist).
-if [[ -z "$SOURCE_DIR" ]]; then
-    [[ -f "$VENTOY_MNT/phase-2-arch-install/chroot.sh" ]] \
-        || die "$VENTOY_MNT is mounted but chroot.sh is missing — wrong USB stick?"
-    SOURCE_DIR="$VENTOY_MNT"
-    log "Source: Ventoy USB ($SOURCE_DIR)."
-fi
+# No baked-in-ISO variant, no /run/ventoy dm-linear self-mount — both were
+# tried and both had sharp edges (custom-ISO build maintenance overhead;
+# Ventoy dm-linear random-access reads on internal-SATA bootstrap throwing
+# Buffer I/O errors). The clone-and-run path has zero filesystem
+# acrobatics: everything install.sh needs is in the clone.
+SCRIPT_PARENT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." 2>/dev/null && pwd)"
+[[ -n "$SCRIPT_PARENT" && -f "$SCRIPT_PARENT/phase-2-arch-install/chroot.sh" ]] \
+    || die "Not a valid arch-setup clone — chroot.sh missing next to install.sh. Did you clone the repo, or did you extract just this one script?"
+SOURCE_DIR="$SCRIPT_PARENT"
+unset SCRIPT_PARENT
+log "Using repo clone at $SOURCE_DIR."
 
 # ---------- 1. locate disks by size ----------
 # decisions.md §Q9: Samsung 512 GB nominal (~476 GiB actual), Netac 128 GB nominal (~119 GiB actual).
