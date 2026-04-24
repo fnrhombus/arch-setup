@@ -691,6 +691,34 @@ if [[ -c /dev/tpm0 || -c /dev/tpmrm0 ]] && [[ -z "${SKIP_TPM_LUKS:-}" ]]; then
                 || warn "TPM enroll failed for $partlabel — boot still works with passphrase."
         fi
     done
+
+    # After enrollment: flip `tpm2-device=auto` on in /etc/crypttab.initramfs
+    # for each volume that now has a TPM2 slot, then `mkinitcpio -P`.
+    # chroot.sh deliberately wrote these lines WITHOUT `tpm2-device=auto` —
+    # pre-enrollment, that option makes systemd-cryptsetup block on TPM and
+    # hang first boot (systemd/systemd#39049, #36293). Now that slots exist,
+    # turning it on switches subsequent boots to silent TPM unseal.
+    # Idempotent: the sed only matches lines still ending in `luks,discard`.
+    _crypttab_changed=0
+    for pair in "cryptroot:ArchRoot" "cryptswap:ArchSwap"; do
+        _crypt_name="${pair%:*}"
+        _partlabel="${pair#*:}"
+        _dev="/dev/disk/by-partlabel/$_partlabel"
+        [[ -b "$_dev" ]] || continue
+        if sudo systemd-cryptenroll "$_dev" 2>/dev/null | awk 'NR>1 && $2=="tpm2"{f=1} END{exit !f}'; then
+            if sudo grep -qE "^${_crypt_name} .*luks,discard$" /etc/crypttab.initramfs; then
+                log "Adding tpm2-device=auto to $_crypt_name in /etc/crypttab.initramfs..."
+                sudo sed -i "/^${_crypt_name} /s/luks,discard\$/luks,discard,tpm2-device=auto/" /etc/crypttab.initramfs
+                _crypttab_changed=1
+            fi
+        fi
+    done
+    unset _crypt_name _partlabel _dev pair
+    if (( _crypttab_changed )); then
+        log "Regenerating initramfs (mkinitcpio -P) so TPM2 unlock takes effect next boot..."
+        sudo mkinitcpio -P
+    fi
+    unset _crypttab_changed
 else
     warn "No TPM device (or SKIP_TPM_LUKS set) — boot will continue to prompt for the LUKS passphrase."
 fi

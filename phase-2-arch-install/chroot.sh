@@ -127,20 +127,27 @@ EOF
 #                               Opens cryptvar from the on-root keyfile, then
 #                               cryptswap with a fresh /dev/urandom key per
 #                               boot.
-log "Writing /etc/crypttab.initramfs (cryptroot) + /etc/crypttab (cryptvar, cryptswap)..."
-# tpm2-device=auto on cryptroot: at first boot no TPM slot exists yet so
-# sd-encrypt falls back to a passphrase prompt. After phase-3 runs
-# systemd-cryptenroll, the TPM slot is consulted first and boot becomes
-# silent. Keeping this option in the crypttab up front means no second
-# initramfs regeneration is needed after enrollment.
+log "Writing /etc/crypttab.initramfs (cryptroot + cryptswap, passphrase-only) + /etc/crypttab (cryptvar)..."
+# NO tpm2-device=auto in crypttab.initramfs at install time: no TPM2
+# keyslot has been enrolled yet, and systemd-cryptsetup's tpm2-device
+# path does NOT cleanly fall back to passphrase when the keyslot is
+# missing — it blocks waiting for TPM and silently masks the password
+# agent on the second volume (refs: systemd/systemd#39049, #36293).
+# Result: first boot hangs after the cryptroot passphrase is accepted,
+# because cryptswap is waiting for a TPM unlock that can never come.
+# Phase-3 postinstall runs `systemd-cryptenroll --tpm2-device=auto` on
+# both devices and THEN adds `tpm2-device=auto` to these two lines +
+# `mkinitcpio -P` — subsequent boots are silent. Until then, both
+# volumes prompt for the passphrase; sd-encrypt's keyring cache means
+# you type it once and cryptswap picks it up from the cache.
 #
 # cryptvar is unlocked from a keyfile stored on the (now-unlocked) cryptroot
 # filesystem. Intentionally NOT TPM-enrolled — once cryptroot is open, the
 # keyfile is readable by root, so a redundant TPM slot would only waste LUKS
 # slot budget without adding any at-rest protection.
 cat > /etc/crypttab.initramfs <<EOF
-cryptroot UUID=$LUKS_ROOT_UUID none luks,discard,tpm2-device=auto
-cryptswap UUID=$LUKS_SWAP_UUID none luks,discard,tpm2-device=auto
+cryptroot UUID=$LUKS_ROOT_UUID none luks,discard
+cryptswap UUID=$LUKS_SWAP_UUID none luks,discard
 EOF
 cat > /etc/crypttab <<EOF
 cryptvar  UUID=$LUKS_VAR_UUID  /etc/cryptsetup-keys.d/cryptvar.key  luks,discard
