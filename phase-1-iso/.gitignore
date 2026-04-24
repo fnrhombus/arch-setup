@@ -1,0 +1,8 @@
+# scripts/build-custom-iso.sh stages a copy of the repo into
+# airootfs/root/arch-setup/ before invoking mkarchiso, then cleans up.
+# The staged copy should never be committed.
+/airootfs/root/arch-setup/
+
+# mkarchiso's work + out dirs, if someone runs it in-tree.
+/work/
+/out/

@@ -5,11 +5,13 @@ Print this. Keep it next to the laptop.
 Total wall-clock: ~90 min active, ~2 h with waits.
 
 You'll need:
-- Ventoy USB (already built + staged via `pnpm i` on the dev machine — whatever drive letter Windows mounts it at, e.g. `E:` or `F:`)
-- Wi-Fi SSID + password
+- **Boot medium with both ISOs + the repo staged.** Two paths:
+  - **Standard:** Ventoy USB built via `pnpm i` on the dev machine.
+  - **No-USB fallback** (Metis-specific — laptop's USB ports won't reliably boot Ventoy): use the **Netac SSD itself** as a Ventoy boot medium. From the *current* Arch install on Metis, run `sudo bash prep-netac-ventoy.sh` from the repo root. That wipes the Netac, installs Ventoy, populates with both ISOs + the repo. One-way door — covered in detail in `runbook/phase-0-handoff.md`.
+- Wi-Fi SSID + password (or USB-C dock for ethernet)
 - The Bitwarden master password (for later — Bitwarden desktop in Arch)
-- A second device (phone) to read this if you can't print
-- A safe place to stash **two** recovery secrets: the **BitLocker recovery key** (see Phase 1 step 7) and the **LUKS passphrase** you pick in Phase 2d
+- **Phone with Claude on it** for the install drive (paste `runbook/phase-0-handoff.md` into a fresh Claude conversation; it carries enough context to ride along).
+- A safe place to stash **two** recovery secrets: the **BitLocker recovery key** (Phase 1 step 7, "Metis BitLocker recovery") and the **LUKS recovery key** (Phase 2 — auto-generated and displayed once, "Metis LUKS recovery").
 
 What gets touched:
 - **Samsung 512 GB** → EFI + MSR + Windows 160 GB (BitLocker) + Arch LUKS+btrfs (~316 GB)
@@ -18,24 +20,28 @@ What gets touched:
 **Both drives are required.** `install.sh` size-detects both and aborts if either is missing. If you've repurposed the Netac for something else, swap it back in before starting — the layout is not optional (swap, recovery partition, and the `/var/log`+`/var/cache` ext4 all depend on it per [docs/decisions.md](../docs/decisions.md) §Q9).
 
 Three things to know before starting:
-- **Hostnames are intentionally different**: Windows = `Metis`, Arch = `inspiron`. Your router sees whichever OS is up. This is cosmetic, not a bug (see recovery §D if it bothers you).
-- **First Windows boot after Arch install will prompt for the BitLocker recovery key.** Expected — systemd-boot changes PCR values. Phase 1 step 7 stashes the key in Bitwarden.
+- **Hostnames intentionally match**: Windows = `Metis`, Arch = `metis`. Same name, same machine — your router sees `metis` regardless of which OS is up. (Windows may be renamed to `metis-win` later for unambiguous DHCP leases; not wired yet.)
+- **First Windows boot after Arch install will prompt for the BitLocker recovery key.** Expected — installing **limine** to the shared EFI changes PCR values that BitLocker sealed against. Phase 1 step 7 stashes the recovery key in Bitwarden. See §C below for the one-shot reseal.
 - **First Arch boot after install will prompt for the LUKS passphrase.** Also expected — TPM2 autounlock isn't wired until Phase 3 runs `systemd-cryptenroll`. After that, Arch boots silently (same model as BitLocker). The passphrase stays as a key slot forever so you can always recover.
 
 ---
 
 ## Phase 0 — BIOS prep (5 min)
 
-1. Plug the Ventoy USB. Power on. Hammer **F2** to enter BIOS setup.
+1. Plug the Ventoy USB (or, if you ran `prep-netac-ventoy.sh`, the boot medium is the internal Netac — nothing to plug). Power on. Hammer **F2** to enter BIOS setup.
 2. Set:
    - **Boot Mode**: UEFI (not Legacy)
-   - **Secure Boot**: **Disabled** for the install (systemd-boot isn't signed out of the box). `decisions.md` wants Secure Boot ON long-term; that's a separate later step using `sbctl` to enroll your own keys. Don't block on it now — get the install running first, then re-enable with signed kernel/bootloader after Phase 3 stabilizes.
+   - **Secure Boot**: **Disabled** for the install (limine UEFI binary isn't signed out of the box). `decisions.md` wants Secure Boot ON long-term; that's a separate later step using `sbctl` to enroll your own keys (see `phase-3-handoff.md` Upgrade Paths). Don't block on it now — get the install running first.
    - **SATA Operation**: AHCI (should already be; RAID/Intel RST will hide disks from Arch)
    - **Fast Boot**: Disabled (stops it skipping the boot menu)
    - **Fingerprint Reader**: **Enabled** (Dell BIOS hides this under Security → Fingerprint Reader on some firmware revisions). If it's disabled, Linux won't see the sensor at all and Phase 3 fingerprint enrollment will fail with "no devices".
-3. Save & exit. Hammer **F12** at the Dell logo → boot menu → pick the USB (something like "UEFI: SanDisk …" or the WD label).
+3. Save & exit. Hammer **F12** at the Dell logo → boot menu → pick the boot medium:
+   - **USB path**: something like "UEFI: SanDisk …" or the WD label.
+   - **Netac path**: usually labeled "Netac SSD …" or "Internal SSD" (whichever entry is *not* "Windows Boot Manager").
 
-**If the USB isn't in F12:** go back to BIOS → Boot Sequence → Add Boot Option, or make sure USB Boot is enabled. Secure Boot being on will also hide it.
+**If your boot medium isn't in F12:** go back to BIOS → Boot Sequence → Add Boot Option, or make sure USB Boot is enabled (USB path). Secure Boot being on will also hide it. For the Netac path: confirm it's listed in Boot Sequence at all — if `prep-netac-ventoy.sh` ran clean it should appear.
+
+> **Want a Claude session walking you through this on your phone?** Paste the contents of `runbook/phase-0-handoff.md` into a fresh Claude Code conversation as the first message. It carries Metis hardware context, the three-phase boot flow, the secrets-to-photograph list, and recovery doors — designed for thumb-typing on a 5-inch screen.
 
 ---
 
@@ -73,7 +79,7 @@ The inline PowerShell safety check in `autounattend.xml` aborted because either 
    - File #1: `C:\Windows\Setup\Scripts\BitLocker-Recovery.txt`
    - File #2: `<VENTOY_USB>:\bitlocker-recovery.txt` (same content)
    - Open it. Copy the 48-digit key.
-   - Paste into Bitwarden as a **Secure Note** titled "Inspiron BitLocker recovery". Save.
+   - Paste into Bitwarden as a **Secure Note** titled "Metis BitLocker recovery". Save.
    - Also take a phone photo of it as a belt-and-suspenders backup.
    - Once you've confirmed the key is safely in Bitwarden, delete both files: `Remove-Item C:\Windows\Setup\Scripts\BitLocker-Recovery.txt, <USB_LETTER>:\bitlocker-recovery.txt -Force` (substitute whatever drive letter Windows assigned the Ventoy stick — check **This PC**)
    - **Do not skip this.** You'll need this key in Phase 2e — the first Windows boot after Arch install will almost certainly prompt for it.
@@ -152,12 +158,12 @@ The script self-mounts the Ventoy data partition at `/run/ventoy` (for `chroot.s
 It will:
 1. Size-detect the Samsung (500–600 GB) and Netac (100–150 GB). **Aborts loudly if either is missing** — don't blindly retry, fix it.
 2. Show the plan and ask `[yes/NO]`. Type **`yes`** exactly.
-3. **Prompt once up-front for three secrets** (all confirmed twice; nothing else will ask you for input until install is done):
-   - **root password** — account recovery.
-   - **tom's password** — your daily login. Make it strong; you'll bypass it with TPM-PIN and fingerprint later.
-   - **LUKS passphrase** — unlocks both the Samsung root and Netac /var at boot until TPM2 autounlock is wired in Phase 3. **Stash this in Bitwarden now** (next to the BitLocker key) as a Secure Note called "Inspiron LUKS passphrase". 8+ chars, 12+ recommended. If PCR values ever drift, this is what gets you back in.
+3. **Prompt once up-front** for the two account passwords, then **display an auto-generated LUKS recovery key** for you to photograph (BitLocker model — no typing). Nothing else will ask for input until install is done.
+   - **root password** — account recovery; type + confirm.
+   - **tom's password** — your daily login; type + confirm. Make it strong; you'll bypass it with TPM-PIN and fingerprint later.
+   - **LUKS recovery key** — install.sh generates a 48-char hex key (8 groups of 6, hyphen-separated, ~192 bits entropy) and prints it in a yellow banner. **Photograph it now** with your phone. Same as BitLocker: you only need this if the TPM ever loses its seal (firmware update, secure-boot toggle, motherboard swap). The script pauses until you type **`I HAVE THE KEY`** verbatim — don't skip past, you can't get the key back. Later, transcribe to Bitwarden as a Secure Note called **"Metis LUKS recovery"** (parallel to "Metis BitLocker recovery").
 4. LUKS-format both data partitions, mkfs, pacstrap (~15 min — biggest wait, fully unattended).
-5. Enter chroot (passwords + LUKS UUIDs handed in via mode-600 files), install systemd-boot, write `/etc/crypttab.initramfs` + `/etc/crypttab`, add `sd-encrypt` to mkinitcpio HOOKS, wire services + PAM for fingerprint-sudo + gnome-keyring.
+5. Enter chroot (passwords + LUKS UUIDs handed in via mode-600 files), allocate TPM2 SHA-256 PCR bank, install **limine** + greetd + greetd-regreet, write `/etc/crypttab.initramfs` (cryptroot + cryptswap with TPM2) + `/etc/crypttab` (cryptvar via keyfile), add `sd-encrypt` to mkinitcpio HOOKS, install greetd config from `/root/arch-setup/phase-3-arch-postinstall/system-files/`, install pacman post-upgrade hook for TPM2 reseal on kernel/limine updates, wire greetd PAM for gnome-keyring auto-unlock.
 6. `dd` the Arch ISO onto the Netac recovery partition (~1 min, unencrypted by design so it still boots from F12 if Arch is hosed).
 7. Copy `postinstall.sh` + dotfiles into `/home/tom/`.
 8. Unmount, close LUKS mappers, and print "Done."
@@ -183,34 +189,34 @@ It will:
 
 ### 2e. First boot into Arch
 
-- systemd-boot menu appears with:
+- limine boot menu appears with:
   - **Arch Linux** (linux kernel) + **Arch Linux (fallback)**
   - **Arch Linux LTS** (linux-lts kernel) + **Arch Linux LTS (fallback)** — the safety net if a linux upgrade breaks something
   - Auto-discovered **Windows Boot Manager**
 
   3-sec timeout; Arch Linux (the non-LTS) is default.
 - **LUKS passphrase prompt** appears early in boot: `Please enter passphrase for disk (cryptroot):`. Type the passphrase you set in Phase 2d. The /var volume auto-unlocks from a keyfile — only cryptroot asks you for anything. After Phase 3's `systemd-cryptenroll` runs, this prompt is replaced by silent TPM unlock.
-- It boots to a black screen, then to **SDDM** (graphical login).
+- It boots to a black screen, then to **greetd + ReGreet** (graphical login).
 
-**If the systemd-boot menu doesn't show Windows:** boot into Arch anyway, then as root: `bootctl list` should show Windows. If not: `ls /boot/EFI/Microsoft/Boot/bootmgfw.efi` — missing file means Windows install didn't write it (rare). Fix later; don't block on this.
+**If the limine menu doesn't show Windows:** boot into Arch anyway, then as root check `/boot/limine.conf` — the `Windows Boot Manager` chainload entry should be present (chroot.sh writes it). Verify `ls /boot/EFI/Microsoft/Boot/bootmgfw.efi` exists — missing file means Windows install didn't write it (rare). Fix later; don't block on this.
 
-**Expected: BitLocker recovery prompt on first Windows boot after this step.** Systemd-boot installing itself to the shared EFI changes the TPM's PCR values → BitLocker can't auto-unseal → you get the blue "Enter recovery key" screen. This is not a bug.
+**Expected: BitLocker recovery prompt on first Windows boot after this step.** limine installing itself to the shared EFI changes the TPM's PCR values → BitLocker can't auto-unseal → you get the blue "Enter recovery key" screen. This is not a bug.
 - Type the 48-digit key from Bitwarden.
 - Windows unlocks, boots normally.
 - Windows re-seals to the new PCR values automatically. Next boots: silent unlock, no prompt ever again (unless bootloader changes).
 - **If you don't have the key when this screen appears — you are locked out of Windows.** Phase 1 step 7 exists for this reason.
 
-**If nothing boots:** BIOS → Boot Sequence → make sure "Linux Boot Manager" is listed and first. If only "Windows Boot Manager" is there, run from a live USB: `bootctl --path=/boot install` to re-register.
+**If nothing boots:** BIOS → Boot Sequence → make sure "Limine Boot Manager" is listed and first. If only "Windows Boot Manager" is there, recover from a live USB: unlock LUKS + chroot in (see §A below for the unlock incantation), then `install -d /boot/EFI/BOOT && install -m 644 /usr/share/limine/BOOTX64.EFI /boot/EFI/BOOT/BOOTX64.EFI && efibootmgr --create --disk /dev/sda --part 1 --label "Limine Boot Manager" --loader '\EFI\BOOT\BOOTX64.EFI'` to re-register.
 
 ### 2f. Clear the BitLocker prompt now (before Phase 3)
 
 Do this before starting Phase 3 — you want the BitLocker key mess handled while you're still thinking about it, not 25 minutes into Hyprland setup.
 
-1. Reboot. At the systemd-boot menu, pick **Windows Boot Manager**.
-2. BitLocker prompts for the recovery key. Type the 48-digit key from Bitwarden ("Inspiron BitLocker recovery").
+1. Reboot. At the limine boot menu, pick **Windows Boot Manager**.
+2. BitLocker prompts for the recovery key. Type the 48-digit key from Bitwarden ("Metis BitLocker recovery").
 3. Windows boots. Log in as `Tom`. Let it sit for 30 seconds so BitLocker re-seals against the new PCR values.
 4. Shut down: **Start → Power → Shut down**. (Fast Startup is off, so this is a clean shutdown, not a hybrid-hibernate.)
-5. Power on → systemd-boot → pick **Arch Linux** → back into Arch. No more BitLocker prompts from here.
+5. Power on → limine → pick **Arch Linux** → back into Arch. No more BitLocker prompts from here.
 
 If the BitLocker key doesn't work: you have the phone photo from Phase 1 step 7 as a last-ditch copy. If even that doesn't work, Windows is gone and you need to reinstall — Arch is unaffected.
 
@@ -220,7 +226,7 @@ If the BitLocker key doesn't work: you have the phone photo from Phase 1 step 7 
 
 ### 3a. Get a terminal
 
-At SDDM, log in as **tom**. Hyprland starts with **no config yet** → blank screen, no keybindings, no launcher. That's expected.
+At the **greetd + ReGreet** login screen, log in as **tom**. Hyprland starts but there's no config applied yet (chezmoi hasn't run) — expect a blank screen, no keybindings, no launcher.
 
 **Switch to a TTY:** `Ctrl + Alt + F2` → text login as `tom`.
 
@@ -233,20 +239,21 @@ chmod +x ~/postinstall.sh
 
 It will:
 1. `sudo` prompt for your password — type it. (No fingerprint/PIN yet.)
-2. **pacman** — all CLI tooling, Bitwarden (desktop + CLI), Ghostty, fuzzel, cliphist, swaync, satty, hyprshot, mise, chezmoi, gh, snapper. Signed binaries from `extra`, ~5 min.
-3. **yay** — only the 4 AUR-exclusive packages: `visual-studio-code-bin`, `microsoft-edge-stable-bin`, `catppuccin-sddm-theme-mocha`, `pinpam-git`. ~5 min build time.
-4. Installs Claude Code CLI: `mise use -g node@lts` pulls a LTS Node via mise, then `mise exec -- npm install -g @anthropic-ai/claude-code`. (There is no mise plugin named "claude-code" — Claude Code is shipped through npm. Completions are printed at runtime by `claude --print-completion zsh`; no external file download.) **No local SSH keys are generated** — keys live in your Bitwarden vault as "SSH key" items and surface via `~/.bitwarden-ssh-agent.sock` once Bitwarden desktop is running with the SSH-agent toggle on (Phase 3e). A planter in `~/.zshrc.d/arch-ssh-signing.zsh` waits until `ssh-add -L` returns a pubkey, then wires git commit signing + registers the key with GitHub automatically.
-5. **Points Bitwarden at your self-hosted server** `https://hass4150.duckdns.org:7277` — CLI via `bw config server`, desktop via pre-seeded `~/.config/Bitwarden/data.json`. If the desktop login screen still shows "bitwarden.com" in the "Logging in on:" dropdown, pick **Self-hosted** and paste that URL manually.
-6. **Prompt you to enroll your fingerprint** — touch the sensor 5 times, slight re-position each touch. Reader is auto-detected; if enrollment fails the script prints a diagnostic (full `lsusb`, `fprintd-list`, last 20 log lines) and offers to install `libfprint-git` from AUR and retry.
-7. **Prompt you to set a TPM-PIN** (`pinutil setup`) — 6+ chars. This is what you'll type for sudo from now on.
-7.5. **Enroll TPM2 for silent LUKS autounlock** (`systemd-cryptenroll --tpm2-pcrs=0+7 /dev/disk/by-partlabel/ArchRoot`). Prompts once for your LUKS passphrase so it can add the TPM slot. After this reboot, `cryptroot` unseals from the TPM automatically — no passphrase prompt at boot. Passphrase slot stays intact as recovery.
+2. **pacman** — base CLI tooling + the bare-Hyprland stack (waybar, swaync, fuzzel, swayosd, hyprlock, hypridle, hyprpolkitagent, hyprpicker, nm-connection-editor, pwvucontrol, nwg-displays, qt5/6ct, papirus-icon-theme, imv, zathura, etc.) + Bitwarden + Ghostty + cliphist + satty + hyprshot + mise + chezmoi + gh + snapper. Signed binaries from `extra`, ~5–8 min.
+3. **yay** — AUR packages: visual-studio-code-bin, microsoft-edge-stable-bin, claude-desktop-native, pinpam-git, sesh-bin, iio-hyprland-git, powershell-bin, **awww-bin** (Wayland wallpaper), **matugen-bin** (Material You), overskride, wleave, bibata-cursor-theme, pacseek, limine-snapper-sync. ~10 min build time. (`mission-center` moved to `extra` and is now a pacman package, not AUR.)
+4. Installs Claude Code CLI: `mise use -g node@lts` pulls a LTS Node, `npm install -g @anthropic-ai/claude-code` bootstraps, then `claude install` migrates to the **native install** at `~/.claude/local/` so auto-updates don't need sudo. **No local SSH keys are generated** — keys live in your Bitwarden vault as "SSH key" items and surface via `~/.bitwarden-ssh-agent.sock` once Bitwarden desktop is running with the SSH-agent toggle on (Phase 3e).
+5. **Points Bitwarden at your self-hosted server** `https://hass4150.duckdns.org:7277` — CLI via `bw config server`, desktop via pre-seeded `~/.config/Bitwarden/data.json`.
+6. **Prompt you to enroll your fingerprint** — touch the sensor 5 times. Reader is auto-detected (Goodix 538C via `libfprint-goodix-53xc`).
+7. **Prompt you to set a TPM-PIN** (`pinutil setup`) — 6+ chars. PAM module name is `libpinpam.so` (NOT `pam_pinpam.so` — quirk of the AUR package).
+7.5. **Enroll TPM2 on BOTH ArchRoot AND ArchSwap** (`systemd-cryptenroll --tpm2-pcrs=0+7`). Both volumes get silent unseal at next boot. Hibernate-ready cryptswap requires TPM2 enrollment so `resume=` works without the LUKS passphrase prompt.
 8. Wires `~/.ssh/config` for Bitwarden SSH agent.
-9. Plants `~/.zshrc.d/arch-first-login.zsh` (one-shot: `bw login` + `gh auth login` + git name/email) and `~/.zshrc.d/arch-ssh-signing.zsh` (every-login, self-deletes once SSH signing is wired).
-10. Builds zgenom plugins (warms cache so first login is fast), writes tmux/helix/ghostty configs.
-11. Takes a **snapper baseline snapshot** of `/` — you can roll back later via `snapper -c root list`.
+9. Plants first-login + ssh-signing scripts in `~/.zshrc.d/`.
+10. Builds zgenom plugins (warms cache so first login is fast).
+11. Takes a **snapper baseline snapshot** of `/`.
 12. Installs USB-serial udev rules (ESP32/Pico/FTDI/CH340) and adds you to `uucp`.
-13. Runs the **end-4/dots-hyprland installer interactively** — it'll ask questions. Accept defaults unless you know better. If it asks whether to **overwrite existing config files**, say **yes** — your `~/.config` is fresh and there is nothing here worth keeping. If it asks about a user-level systemd service restart, say yes too.
-14. Prints a verify table — scan for **FAIL** rows.
+13. **Runs `chezmoi init --source=/root/arch-setup/dotfiles && chezmoi apply`** — writes Hyprland configs (entry + 9 fragments), waybar, swaync, fuzzel, ghostty, yazi, helix, imv, zathura, qt5ct/qt6ct, matugen pipeline + templates, and the helper scripts (theme-toggle, wallpaper-rotate, control-panel, validate-hypr-binds). The `run_once` wallpaper bootstrap downloads from `fnrhombus/callisto` into `~/Pictures/Wallpapers/`.
+14. **Loads Hyprland plugins via `hyprpm`**: hyprexpo (workspace overview) + hyprgrass (touch gestures). Note: must re-run from inside Hyprland to actually take effect — re-runs are idempotent.
+15. Prints a verify table — scan for **FAIL** rows.
 
 **If fingerprint enroll fails:** postinstall already handles the Goodix fallback interactively. If you declined or it still fails:
 ```bash
@@ -270,12 +277,14 @@ sudo pinutil setup
 sudo reboot
 ```
 
-- SDDM again. Log in as tom.
-- Hyprland comes up with end-4 config: waybar at top, wallpaper, keybindings live.
-- Default terminal: `Super + Return` opens Ghostty. (If end-4 has re-mapped it, the keybind cheatsheet is bound to `Super + /`.)
+- greetd + ReGreet again. Log in as tom.
+- Hyprland comes up with the chezmoi-applied configs: waybar at top, matugen-themed wallpaper, ~85 keybindings live.
+- Default terminal: `Super + Return` opens Ghostty.
 - App launcher: `Super + Space` (fuzzel).
+- Cheat sheet: `runbook/keybinds.md` (printable).
+- The first matugen render runs from Hyprland's `exec-once = ~/.local/bin/wallpaper-rotate --first` — wallpaper appears, palette derives, all components reload.
 
-**Escape hatch if NO keybinding opens a terminal** (keybind variant mismatch, Hyprland config didn't install, wayland handshake fail): `Ctrl + Alt + F3` drops to TTY3 where you can log in as `tom` and debug. `Ctrl + Alt + F1` jumps back to the SDDM/Hyprland session. Worst case: from TTY3, `journalctl --user -u hyprland -b` tells you why Hyprland dropped you to a featureless compositor.
+**Escape hatch if NO keybinding opens a terminal** (keybind variant mismatch, Hyprland config didn't install, wayland handshake fail): `Ctrl + Alt + F3` drops to TTY3 where you can log in as `tom` and debug. `Ctrl + Alt + F1` jumps back to the greetd/Hyprland session. Worst case: from TTY3, `journalctl --user -u hyprland -b` tells you why Hyprland dropped you to a featureless compositor.
 
 ### 3e. Bitwarden one-time setup
 
@@ -290,43 +299,20 @@ After the re-login: Bitwarden auto-unlocks (via gnome-keyring), and `ssh-add -l`
 
 ### 3e-bis. Azure DDNS one-time setup (`metis.rhombus.rocks`)
 
-`postinstall.sh` installs the `metis-ddns` script + systemd timer + NetworkManager dispatcher hook + the `az` CLI, and stubs `/etc/metis-ddns.env` from a template. **You still have to fill in the service-principal credentials once.**
+`postinstall.sh` installs the `metis-ddns` script + systemd timer + NetworkManager dispatcher hook + the `az` CLI, and stubs `/etc/metis-ddns.env` from a template. **You still have to wire up the service-principal credentials once** — but that's automated by `setup-azure-ddns.sh` (also copied to `~/` by install.sh).
 
-On this laptop (or any machine with `az` CLI):
+The script is fully idempotent: each run reuses an existing `metis-ddns` app registration if found, ensures the SP exists, **rotates the secret** (replaces, doesn't append), ensures the role assignment, and rewrites both `/etc/metis-ddns.env` and `/etc/letsencrypt/azure.ini` with fresh creds.
+
+It uses piecemeal `az ad app` / `az ad sp` / `az role assignment` commands instead of the all-in-one `az ad sp create-for-rbac` because the latter is broken under Python 3.14 + azure-cli 2.85.0 (argparse `%Y` bug, observed 2026-04-23).
 
 ```bash
+sudo -v                                  # cache sudo creds for the script's installs
 az login                                 # device-code flow, opens browser
-SUB=$(az account show --query id -o tsv)
-RG=<your-DNS-resource-group>             # the one containing rhombus.rocks
-ZONE_ID=$(az network dns zone show -g "$RG" -n rhombus.rocks --query id -o tsv)
-az ad sp create-for-rbac \
-    --name metis-ddns \
-    --role "DNS Zone Contributor" \
-    --scopes "$ZONE_ID" \
-    --years 2
+~/setup-azure-ddns.sh                    # ~5 sec wall clock; restarts metis-ddns at the end
+sudo journalctl -u metis-ddns -n 30      # confirm "status=0/SUCCESS"
 ```
 
-Last command prints `appId`, `password`, `tenant`. Paste them into `/etc/metis-ddns.env` (mode 600, root-owned — `sudoedit /etc/metis-ddns.env`):
-
-```ini
-AZ_TENANT_ID=<tenant>
-AZ_CLIENT_ID=<appId>
-AZ_CLIENT_SECRET=<password>
-AZ_SUBSCRIPTION_ID=<SUB>
-AZ_RESOURCE_GROUP=<RG>
-AZ_DNS_ZONE=rhombus.rocks
-AZ_DNS_RECORD=metis
-DDNS_DISABLE_IPV4=1                      # IPv6-only — flip to 0 if you ever expose v4
-```
-
-Kick the first run:
-
-```bash
-sudo systemctl start metis-ddns.service
-sudo journalctl -u metis-ddns -n 30
-```
-
-First call may 403 with "AuthorizationFailed" — Azure role assignments propagate in 30s–5min. Wait, retry. After first success, the timer + NM hook take over and you don't think about it again until the SP secret expires in 2 years.
+First service call may 403 with "AuthorizationFailed" — Azure role assignments propagate in 30s–5min. Wait, retry. After first success, the timer + NM hook take over and you don't think about it again until the SP secret expires in 2 years (the script will rotate when re-run).
 
 **Verify from the outside** (any machine, even your phone):
 
@@ -340,18 +326,7 @@ Should return your laptop's current public IPv6 address.
 
 Only useful **after step 3e-bis succeeds** (DNS must resolve before the dns-01 challenge will).
 
-`postinstall.sh` installs `certbot` + the `certbot-dns-azure` plugin and stubs `/etc/letsencrypt/azure.ini` from a template. Same SP that DDNS uses works here — `DNS Zone Contributor` already lets it write the TXT challenge records.
-
-Mirror the SP creds into `/etc/letsencrypt/azure.ini` (the keys differ from the DDNS env file because certbot's plugin uses its own INI scheme):
-
-```ini
-dns_azure_environment = "AzurePublicCloud"
-dns_azure_tenant_id = <tenant>
-dns_azure_subscription_id = <SUB>
-dns_azure_resource_group = <RG>
-dns_azure_sp_client_id = <appId>
-dns_azure_sp_client_secret = <password>
-```
+`postinstall.sh` installs `certbot` + the `certbot-dns-azure` plugin (via pipx — not packaged for Arch). `setup-azure-ddns.sh` already wrote the SP creds into `/etc/letsencrypt/azure.ini` using the plugin's own INI keys, so there's nothing to fill in by hand.
 
 Issue the cert (one-time):
 
@@ -461,11 +436,11 @@ ssh-add -l                     # should list keys once Bitwarden desktop is unlo
    ```
    Read runbook/phase-3-handoff.md. That's the brief. Start by walking
    me through the Hyprland keybindings — I'm looking at a fresh
-   Hyprland session with the end-4/illogical-impulse dotfiles and I
-   don't know how to do anything yet.
+   bare-Hyprland session with Claude-authored configs in chezmoi
+   (matugen theme) and I don't know how to do anything yet.
    ```
 
-   Claude will read `runbook/phase-3-handoff.md`, `docs/decisions.md`, and `CLAUDE.md` on its own and have the full context.
+   Claude will read `runbook/phase-3-handoff.md`, `docs/decisions.md`, `docs/desktop-requirements.md`, and `CLAUDE.md` on its own and have the full context. The keybind cheat sheet is at `runbook/keybinds.md`.
 
 ---
 
@@ -473,14 +448,15 @@ ssh-add -l                     # should list keys once Bitwarden desktop is unlo
 
 - **pacstrap and yay builds look stuck** — they're not. `base-devel` pulls ~50 packages, AUR builds compile from source. Don't Ctrl-C.
 - **zgenom first-login rebuild** — if postinstall's pre-build didn't fully warm the cache, your first `zsh` login will take 20 seconds. One-time.
-- **end-4 installer** — asks a dozen questions. Defaults are fine.
+- **chezmoi apply** — first run downloads wallpapers from the callisto repo and writes ~50 dotfiles. ~30 sec.
 - **fingerprint enroll** — takes 5 touches but the reader is picky about angle. If it keeps rejecting, lift fully off between touches.
+- **First Hyprland start** — matugen renders the initial palette + all components reload. ~5 sec lag before the bar appears.
 
 ## Things that are actually broken if you see them
 
 - **"No network" during pacstrap** → wifi dropped. Reconnect, restart install.
-- **systemd-boot doesn't list any entries after `bootctl list`** → reinstall with `bootctl --path=/boot install` as root.
-- **SDDM loops back to login** → Hyprland is crashing. Drop to TTY, `cat ~/.local/share/hyprland/hyprland.log`. Usually a missing config include from end-4 — re-run its installer.
+- **limine boot menu missing entries** → check `/boot/limine.conf`; if the Linux entries are gone, reinstall the limine UEFI binary: `install -d /boot/EFI/BOOT && install -m 644 /usr/share/limine/BOOTX64.EFI /boot/EFI/BOOT/BOOTX64.EFI && efibootmgr --create --disk /dev/sda --part 1 --label "Limine Boot Manager" --loader '\EFI\BOOT\BOOTX64.EFI'`.
+- **greetd loops back to login** → Hyprland is crashing. Drop to TTY (Ctrl+Alt+F3), `journalctl --user -u hyprland -b -n 100`. Usually a chezmoi-apply mismatch (config drift from upstream Hyprland). Re-run `chezmoi apply` and check `validate-hypr-binds` for keybind conflicts.
 - **`sudo` rejects your TPM-PIN** → TPM got reset or the PIN index was evicted. Re-run `sudo pinutil setup`. Password still works as fallback.
 
 ---
@@ -530,11 +506,11 @@ vim /etc/fstab   # or `vi` — nano is NOT installed, only vim and helix are pac
 systemctl daemon-reload
 reboot
 ```
-If editing fstab from emergency mode is scary: add `systemd.unit=rescue.target` to the kernel command line in systemd-boot (press `e` on the Arch entry at boot, append to `options=`), which gives a full single-user shell with `/` writable.
+If editing fstab from emergency mode is scary: add `systemd.unit=rescue.target` to the kernel command line in **limine** (press `e` on the Arch entry at boot, append to the `cmdline:` line), which gives a full single-user shell with `/` writable.
 
 ### C. BitLocker recovery prompt on next Windows boot (and keeps prompting)
 
-**First prompt is expected, not a failure.** systemd-boot installing itself to the shared EFI rewrites the PCR values the TPM sealed BitLocker against. First Windows boot after Arch install → blue "Enter recovery key" screen. Type the 48-digit key (stored in Bitwarden as "Inspiron BitLocker recovery" per Phase 1 step 7) to get in.
+**First prompt is expected, not a failure.** Installing limine (or any non-Microsoft EFI binary) to the shared EFI rewrites the PCR values the TPM sealed BitLocker against. First Windows boot after Arch install → blue "Enter recovery key" screen. Type the 48-digit key (stored in Bitwarden as "Metis BitLocker recovery" per Phase 1 step 7) to get in.
 
 **But Windows does NOT auto-reseal the TPM protector just because you entered the recovery key** — that path unlocks the drive but leaves the TPM protector sealed against the *old* (pre-Arch) PCRs. So the next boot, and the next, and the next will all keep prompting unless you force a re-seal.
 
@@ -561,14 +537,14 @@ manage-bde -protectors -disable C: -RebootCount 0
 shutdown /r /t 0
 
 # 4. Back in Windows, re-enable. This re-seals the TPM protector against
-#    *current* PCR values (i.e. the new systemd-boot → WBM → Windows chain).
+#    *current* PCR values (i.e. the new limine → WBM → Windows chain).
 manage-bde -protectors -enable C:
 
 # 5. Confirm: TPM protector should show as "Enabled" again.
 manage-bde -protectors -get C:
 ```
 
-After that, every subsequent boot unlocks via TPM silently. The boot chain needs to stay stable for this to hold — if something later changes it (systemd-boot update rewriting its EFI binary, Windows update replacing the boot manager, firmware update changing Secure Boot state), you'll get prompted once more and have to run the same dance.
+After that, every subsequent boot unlocks via TPM silently. The boot chain needs to stay stable for this to hold — if something later changes it (limine update rewriting its EFI binary, Windows update replacing the boot manager, firmware update changing Secure Boot state), you'll get prompted once more. The pacman post-upgrade hook `/etc/pacman.d/hooks/95-tpm2-reseal.hook` automates the re-seal on linux/limine/mkinitcpio updates so this is normally invisible.
 
 **Nuclear option: turn BitLocker off.** You already have LUKS on the Linux side. If your Windows partition doesn't need encryption-at-rest (home dev laptop, not regulated-device territory), decrypting removes the entire class of problem:
 
@@ -579,11 +555,15 @@ manage-bde -status C:      # watch progress
 
 Trade-off: stolen laptop + removed drive + NTFS reader = your Windows files are readable.
 
-### D. Hostname shows as `Metis` on the network, not `inspiron`
+### D. DHCP lease shows two devices both named `metis`
 
-**Cause:** Windows unattend names the machine `Metis`, Arch's `chroot.sh` names it `inspiron`. Both are correct for their respective OS — they just don't match. Your router's DHCP lease will show whichever OS booted most recently.
+**Cause:** Both OSes intentionally use the same hostname (`Metis` on Windows, `metis` on Arch — case-insensitive at the DHCP/mDNS layer). Your router will see one `metis` lease that flips between two MAC addresses depending on which OS is up.
 
-**This is cosmetic.** If you care: edit `/etc/hostname` in Arch to `Metis` (and the `127.0.1.1` line in `/etc/hosts`), or change Windows via `Rename-Computer -NewName inspiron -Restart` from an elevated PowerShell. Neither change is required for anything to work.
+**This is by design** for the single-OS-at-a-time use case. If you want unambiguous leases (e.g., for both OSes to coexist visibly in router DHCP tables, or to avoid mDNS collisions if both are ever booted simultaneously via PXE/dual-network):
+- **Rename Windows**: `Rename-Computer -NewName metis-win -Restart` from elevated PowerShell.
+- **Or rename Arch**: `sudo hostnamectl set-hostname metis-arch` (also update the `127.0.1.1` line in `/etc/hosts`).
+
+Neither change is required for anything to work.
 
 ### E. Snapper complains `config "root" does not exist` or `.snapshots not found`
 
@@ -616,15 +596,26 @@ EOF
 sudo systemctl restart bluetooth
 ```
 
-### G. Can't get back into Windows from the Arch systemd-boot menu
+### G. Can't get back into Windows from the Arch limine boot menu
 
-**Cause:** Windows Boot Manager didn't auto-register with systemd-boot. Check `bootctl list` — if you don't see `title: Windows Boot Manager`, the `\EFI\Microsoft\Boot\bootmgfw.efi` file is missing or wasn't detected.
+**Cause:** the Windows Boot Manager chainload entry is missing from `/boot/limine.conf` (chroot.sh writes it explicitly under `/Windows Boot Manager`). Check the file; if absent, append:
+```
+/Windows Boot Manager
+    protocol: efi_chainload
+    image_path: boot():/EFI/Microsoft/Boot/bootmgfw.efi
+```
+Verify `ls /boot/EFI/Microsoft/Boot/bootmgfw.efi` exists — missing file means Windows install didn't write it.
 
-**Fix:** Reboot, hit F12 at the Dell logo, pick "Windows Boot Manager" directly from the firmware menu. From inside Windows, re-run Arch's `bootctl` from a live USB later to re-register. You are not stuck — both OSes are still bootable via F12.
+**Fix:** Reboot, hit F12 at the Dell logo, pick "Windows Boot Manager" directly from the firmware menu. From a live USB later, boot the Arch ISO, unlock LUKS + chroot in (see §A above for the unlock incantation), and re-run `limine bios-install` + reinstall the UEFI binary to `/boot/EFI/BOOT/BOOTX64.EFI` to re-register. You are not stuck — both OSes are still bootable via F12.
 
-### H. SDDM shows but fingerprint prompt never appears at login
+### H. greetd shows but fingerprint prompt never appears at login
 
-SDDM login doesn't use fingerprint by default — it's wired for **sudo/polkit/hyprlock** only. Type your password at SDDM. Fingerprint kicks in the first time you `sudo` after login.
+The greetd PAM stack (`/etc/pam.d/greetd`) DOES include `pam_fprintd.so sufficient max-tries=1 timeout=10` — fingerprint is the first auth attempt at the greeter. If it doesn't appear:
+- Confirm fprintd is enrolled: `fprintd-list tom`
+- Check the greetd PAM stack actually has the line: `cat /etc/pam.d/greetd`
+- Restart greetd: `sudo systemctl restart greetd`
+
+Note: PIN is **deliberately excluded** from greetd (cold-boot wants full credential per Windows Hello pattern). Sudo + hyprlock include PIN per `postinstall.sh §7a`.
 
 ### I. `sudo` fails with "PAM module not found" — you're locked out of root
 
@@ -652,12 +643,12 @@ After reboot, `sudo` takes your **password** (TPM-PIN + fingerprint are gone unt
 
 **Prevention:** after `postinstall.sh` finishes, always test sudo from a **second** terminal before closing the one you ran the script in. If sudo fails, you can fix PAM from the still-privileged parent session without rebooting.
 
-**Sibling issue — locked out of SDDM login:** the same kind of break can hit `/etc/pam.d/sddm` (if postinstall added a `pam_fprintd.so` line and fprintd is missing). Symptom: SDDM rejects every password. Recovery is identical to the sudo case — boot the Ventoy USB → Arch live → unlock LUKS → chroot → restore the file:
+**Sibling issue — locked out of greetd login:** the same kind of break can hit `/etc/pam.d/greetd` (if fprintd is somehow uninstalled or the PAM module is renamed). Symptom: greetd rejects every password. Recovery is identical to the sudo case — boot the Ventoy USB or Netac recovery → Arch live → unlock LUKS → chroot → restore the file:
 ```bash
 cryptsetup open /dev/disk/by-partlabel/ArchRoot cryptroot   # LUKS passphrase
 mount -o subvol=@ /dev/mapper/cryptroot /mnt
 arch-chroot /mnt
-cat > /etc/pam.d/sddm <<'EOF'
+cat > /etc/pam.d/greetd <<'EOF'
 #%PAM-1.0
 auth       include      system-login
 account    include      system-login
@@ -680,17 +671,36 @@ Password login returns; re-wire fingerprint after you've reinstalled fprintd.
 3. If present but `ssh-add -l` still errors: `SSH_AUTH_SOCK=~/.bitwarden-ssh-agent.sock ssh-add -l` to rule out an env issue.
 4. If the SSH-signing planter at `~/.zshrc.d/arch-ssh-signing.zsh` was never deleted, it will try again on each login — once Bitwarden is back online with at least one "SSH key" vault item, the planter fires and self-deletes.
 
-### K-pre. end-4 dots-hyprland clone failed in postinstall
+### K-pre. chezmoi apply failed in postinstall §13
 
-**Cause:** `postinstall.sh` clones `https://github.com/end-4/dots-hyprland.git` at step 13. If network dropped or GitHub rate-limited you, the clone fails and postinstall prints a retry hint. Everything else in postinstall already succeeded — you just don't have dotfiles yet.
+**Cause:** `postinstall.sh §13` runs `chezmoi init --source=/root/arch-setup/dotfiles && chezmoi apply`. If the source dir wasn't staged at `/root/arch-setup/` (install.sh §11 should have copied it there), chezmoi has nothing to apply and Hyprland comes up with empty config.
 
 **Fix:**
 ```bash
-GIT_TEMPLATE_DIR="" git clone --depth 1 https://github.com/end-4/dots-hyprland.git ~/dotfiles/dots-hyprland
-cd ~/dotfiles/dots-hyprland
-./install.sh                          # interactive; accept defaults
+ls /root/arch-setup/dotfiles/dot_config/hypr/   # should exist
+# If empty:
+sudo cp -r /run/ventoy/dotfiles /root/arch-setup/    # if Ventoy still mounted
+# Or:
+sudo git clone https://github.com/fnrhombus/arch-setup.git /root/arch-setup
+chezmoi init --source=/root/arch-setup/dotfiles
+chezmoi apply --force
 ```
-Re-login (or `Super+Shift+R` to reload Hyprland) once the installer finishes.
+Re-login (or `Super+Shift+R` to reload Hyprland) once apply finishes.
+
+### K-binds. validate-hypr-binds reports duplicate (MOD, KEY) pairs
+
+The validator script catches binding conflicts as a chezmoi pre-apply hook. If it blocks `chezmoi apply` with a `DUP` or `UNK` issue:
+```bash
+~/.local/bin/validate-hypr-binds       # see the conflicts
+hx ~/.config/hypr/binds.conf           # fix the duplicate or rename to a new dispatcher
+~/.local/bin/validate-hypr-binds       # re-validate; should report OK
+chezmoi apply
+```
+After a clean validation, regenerate the printed cheat sheet:
+```bash
+cd /root/arch-setup
+~/.local/bin/validate-hypr-binds --emit-cheatsheet
+```
 
 ### L-nvidia. NVIDIA modules load despite the blacklist (screen tearing, GBM errors)
 
@@ -708,17 +718,25 @@ lsmod | grep -iE 'nvidia|nouveau'     # expect empty output
 ```
 If modules still load: check `/etc/mkinitcpio.conf` — `MODULES=(btrfs)` should NOT contain `nvidia` or `nouveau`. Check `/etc/modules-load.d/` for any file forcing them.
 
-### M-luks. LUKS prompt rejects your passphrase at boot
+### M-luks. LUKS prompt rejects your recovery key at boot
 
-**Cause:** Most likely you fat-fingered it during Phase 2d (same failure mode as the account passwords below — the `prompt_luks` helper in `install.sh` only confirms against its own re-entry, never against reality). Less likely: initramfs keyboard layout is wrong, so a symbol you're typing is different from what the kernel receives.
+The key is auto-generated 48 hex chars in 8 groups of 6 (BitLocker model). Reading wrong from the photo is the only realistic failure mode here — typo recovery isn't possible (the install never re-asks, so what got generated IS what's in the LUKS header).
 
-**Fix (still have the passphrase in Bitwarden, typo was at install time):** you don't — if both copies were typed wrong identically, the LUKS header's slot 0 holds that typo as the real passphrase. Continue reading — there's no magic recovery.
+**Fix (you misread the photo):**
+- Hex chars are `0-9 a-f` only — no `o`/`O`, no `l`/`I`, no `s`/`5` confusion possible. Compare carefully:
+  - `0` (zero) vs `o` — there's no `o` in the key
+  - `b` vs `8` — both can appear; check the photo at higher zoom
+  - `e` vs `c` — same
+- Hyphens are pure separators; the key would still work without them, but typing them in keeps you on track of which group you're in.
+- Initramfs keyboard layout: hex chars are layout-invariant on a QWERTY US keyboard, so layout shouldn't be the culprit. (No symbols in this key.)
 
-**Fix (typo at install, no backup):** boot the Ventoy USB → Arch ISO → live env. The Samsung data is unreachable without the passphrase. Full reinstall is the only path — re-run Phase 2 with the corrected passphrase, being careful to type it slowly both times.
+**Fix (you lost the photo + haven't transcribed it to Bitwarden yet):** the encrypted disks are unrecoverable. Full reinstall — boot Ventoy USB → Arch ISO → re-run Phase 2; a fresh key will be generated. Same outcome as losing the BitLocker recovery key.
 
-**Fix (passphrase is correct, layout issue):** at the LUKS prompt, try typing slowly. If your passphrase contains symbols (`!@#$%^&*`), the initramfs may be using a US layout even if your physical keyboard is something else. Workaround: reinstall with a passphrase that's ASCII letters + digits only until SDDM, then change it later with `sudo cryptsetup luksChangeKey /dev/disk/by-partlabel/ArchRoot`.
-
-**Preventive note for re-running Phase 2:** `install.sh` enforces an 8+ character minimum and re-prompts on mismatch, but it cannot catch a consistent typo. Type slowly; verify against Bitwarden before hitting Enter the second time.
+**Once unlocked**: if you'd prefer a memorable passphrase to the random hex string, you can replace key-slot 0 (without losing your data):
+```
+sudo cryptsetup luksChangeKey /dev/disk/by-partlabel/ArchRoot
+```
+You'll be asked for the current key (the random hex), then the new passphrase + confirmation. Repeat for `ArchVarLUKS` and `ArchSwapLUKS`. **Stash the new passphrase in Bitwarden BEFORE rebooting** — same destruction-on-loss model applies.
 
 ### N-luks. TPM autounlock didn't kick in — still getting the passphrase prompt every boot
 
@@ -761,7 +779,7 @@ sudo reboot
 
 If TPM enrollment keeps failing entirely, not a blocker — the passphrase path works forever. You type ~6 chars extra per boot; that's it.
 
-### K. "Login incorrect" at SDDM / first TTY — you fat-fingered `tom`'s password at the install prompt
+### K. "Login incorrect" at greetd / first TTY — you fat-fingered `tom`'s password at the install prompt
 
 **Cause:** `install.sh`'s `prompt_password` accepts any entry that matches its own confirmation. If you typed the same wrong password twice, it hashed that wrong password via `openssl passwd -6` and handed it to `chroot.sh`, which applied it with `chpasswd -e`. No interactive validation ever happened. Same goes for `root`.
 
@@ -785,16 +803,14 @@ No other state needs resetting — PAM, keyring, and Bitwarden are all keyed off
 ## Recovery
 
 - **Primary recovery**: boot the Ventoy USB, pick the Arch ISO → live environment with `pacstrap`, `arch-chroot`, etc.
-- **Secondary recovery**: the Netac has the Arch ISO dd'd onto partition 1. It's not auto-discovered by systemd-boot (systemd-boot can't chain-load a raw ISO partition). To use it, boot into Dell F12 boot menu and pick the Netac's EFI entry — the ISO's own bootloader takes over. So: same live environment, without needing the USB.
+- **Secondary recovery**: the Netac has the Arch ISO dd'd onto partition 1 (when using the custom-baked ISO from `pnpm iso`, the dotfiles + scripts are pre-baked into `/root/arch-setup/`). To boot it, use Dell F12 boot menu and pick the Netac's EFI entry — the ISO's own bootloader takes over. So: same live environment without needing the USB.
 - **Full reinstall**: boot USB → Arch ISO → re-run `install.sh`. It's size-gated and will abort if anything looks off, so you can't accidentally double-wipe.
 
 ## Package-name drift (AUR)
 
-If any `yay -S` call in `postinstall.sh` fails with "package not found", the AUR name changed. Search with `yay -Ss <partial>` and substitute. The likely-drifters:
-- `bitwarden` (sometimes `bitwarden-desktop`)
-- `bitwarden-cli` (stable)
-- `pinpam-git` (could be `pinpam` if it ever reaches stable)
-- `catppuccin-sddm-theme-mocha` (rename-prone)
-- `hyprshot` (check `hyprshot-git` from AUR if the stable name disappears)
-
-Re-run `postinstall.sh` after fixing — it's idempotent.
+All AUR + pacman names below were verified against archlinux.org / aur.archlinux.org on 2026-04-23. If any `yay -S` or `pacman -S` call in `postinstall.sh` fails with "package not found", the upstream name has shifted since. Search with `yay -Ss <partial>` and substitute, then re-run `postinstall.sh` (idempotent). Most-likely drifters:
+- `pinpam-git` could become `pinpam` if it ever reaches stable.
+- `awww-bin` / `matugen-bin` / `bibata-cursor-theme` / `pacseek` are recent AUR packages — confirm names if errors.
+- `mission-center` was AUR-only until early 2026; it's now in `extra`. If a future move puts it back to AUR, swap it across.
+- `wvkbd` is AUR-only (despite some past mirroring into `extra`).
+- `hyprshot` is in `extra`; fall back to `hyprshot-git` from AUR if the stable name disappears.

@@ -258,7 +258,7 @@ TMUXEOF
 # --- Set up helix config ---
 mkdir -p ~/.config/helix
 cat > ~/.config/helix/config.toml << 'HELIXEOF'
-theme = "catppuccin_mocha"
+theme = "default_dark"
 
 [editor]
 line-number = "relative"

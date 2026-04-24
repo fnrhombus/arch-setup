@@ -1,0 +1,155 @@
+#!/usr/bin/env bash
+# validate-hypr-binds — parse hyprland.conf + sourced fragments, enumerate
+# every `bind = ...` line, flag duplicate (MOD, KEY) pairs and unknown
+# dispatchers. Exits non-zero on any issue.
+#
+# Two modes:
+#   (default)        : validate; non-zero on conflicts
+#   --emit-cheatsheet: write Markdown cheat sheet to runbook/keybinds.md
+#
+# Wired as a chezmoi pre-apply hook (~/.local/share/chezmoi/.chezmoiscripts/
+# run_before_validate-binds.sh.tmpl) so a config with conflicts can't be
+# applied accidentally.
+
+set -euo pipefail
+
+hypr_dir="${HYPR_DIR:-$HOME/.config/hypr}"
+entry="${hypr_dir}/hyprland.conf"
+emit_cheatsheet=0
+[[ "${1:-}" == "--emit-cheatsheet" ]] && emit_cheatsheet=1
+
+[[ -r "$entry" ]] || { echo "validate-hypr-binds: missing $entry" >&2; exit 2; }
+
+# ---- Resolve sourced files. Hyprland's `source = path` accepts both
+# absolute paths and ~-prefixed; we also fall back to the entry file's
+# dirname so the validator works against a chezmoi source tree (where
+# binds.conf etc. live next to hyprland.conf, not under ~/.config/hypr/).
+files=("$entry")
+entry_dir="$(dirname "$entry")"
+while IFS= read -r src; do
+    src_trimmed="${src%# *}"; src_trimmed="${src_trimmed%%[[:space:]]}"
+    expanded="${src_trimmed/#~/$HOME}"
+    if [[ -r "$expanded" ]]; then
+        files+=("$expanded")
+    elif [[ -r "${entry_dir}/$(basename "$expanded")" ]]; then
+        files+=("${entry_dir}/$(basename "$expanded")")
+    fi
+done < <(grep -hE '^\s*source\s*=' "$entry" 2>/dev/null \
+    | sed -E 's/^\s*source\s*=\s*//' )
+
+# ---- Extract binds. Tolerate bind / bindm / bindel / bindl / binde variants. ----
+# Grammar (Hyprland docs): bind[flags] = MOD, KEY, dispatcher[, args]
+# `set -u` errors on first access of an empty associative array; explicit
+# init bypasses that.
+declare -A seen_bind=()  # key = "MOD|KEY", value = "file:line"
+declare -a issues=()
+
+# Known good dispatchers — refreshed against
+# hyprwm/hyprland-wiki@main:content/Configuring/{Dispatchers,Dwindle-Layout}.md
+# (snapshot 2026-04). Refresh as Hyprland evolves.
+#
+# Removed since prior list (no longer real dispatchers in current wiki):
+#   fakefullscreen (→ fullscreenstate), setcursor, pinwindow (→ pin),
+#   workspaceopt, reload (the latter is a hyprctl keyword, not a dispatcher).
+known_dispatchers=(
+    # exec / passes / signals
+    exec execr pass sendshortcut sendkeystate signal signalwindow
+    # window lifecycle
+    killactive forcekillactive closewindow killwindow
+    # window state
+    togglefloating setfloating settiled fullscreen fullscreenstate
+    pin centerwindow alterzorder bringactivetotop
+    # focus / move / resize
+    movefocus movewindow swapwindow resizeactive moveactive
+    resizewindow movewindowpixel resizewindowpixel
+    cyclenext swapnext focuswindow focuscurrentorlast focusurgentorlast
+    movecursor movecursortocorner
+    # workspace
+    workspace movetoworkspace movetoworkspacesilent togglespecialworkspace
+    renameworkspace movecurrentworkspacetomonitor
+    focusworkspaceoncurrentmonitor moveworkspacetomonitor swapactiveworkspaces
+    # monitor
+    focusmonitor
+    # group
+    togglegroup changegroupactive lockgroups lockactivegroup
+    moveintogroup moveintoorcreategroup moveoutofgroup movewindoworgroup
+    movegroupwindow denywindowfromgroup setignoregrouplock
+    # misc / system
+    dpms forceidle setprop tagwindow toggleswallow
+    submap event global forcerendererreload exit
+    # dwindle-layout dispatchers (Dwindle-Layout.md)
+    togglesplit splitratio pseudo layoutmsg
+    # plugin dispatchers
+    hyprexpo:expo
+)
+
+is_known() {
+    local d="$1"
+    for k in "${known_dispatchers[@]}"; do
+        [[ "$d" == "$k" ]] && return 0
+    done
+    return 1
+}
+
+for f in "${files[@]}"; do
+    while IFS= read -r raw; do
+        # Match bind variants. Strip leading whitespace + match.
+        line=$(echo "$raw" | sed -E 's/^\s+//; s/\s+#.*$//')
+        [[ "$line" =~ ^bind[a-z]*\ *= ]] || continue
+        # Strip the "bindXXX = " prefix
+        rhs=$(echo "$line" | sed -E 's/^bind[a-z]*\s*=\s*//')
+        # Split on commas: MOD, KEY, DISPATCHER, args...
+        IFS=',' read -r mod key dispatcher rest <<<"$rhs"
+        mod=$(echo "${mod:-}" | xargs)
+        key=$(echo "${key:-}" | xargs)
+        dispatcher=$(echo "${dispatcher:-}" | xargs)
+        # submap is allowed in odd shapes; skip strict checking
+        [[ "$dispatcher" == "submap" ]] && continue
+        [[ -z "$key" || -z "$dispatcher" ]] && continue
+
+        # Skip key = mouse_up/mouse_down/mouse:NNN — those are valid wheel/mouse
+        # but the (MOD, KEY) pair check still applies.
+        composite="${mod}|${key}"
+
+        if [[ -n "${seen_bind[$composite]:-}" ]]; then
+            issues+=("DUP   $composite  ←  ${seen_bind[$composite]}  +  ${f}")
+        else
+            seen_bind[$composite]="${f}"
+        fi
+
+        if ! is_known "$dispatcher"; then
+            issues+=("UNK   ${composite} → ${dispatcher}  in  ${f}")
+        fi
+    done < "$f"
+done
+
+# ---- Emit cheat sheet if requested ----
+if (( emit_cheatsheet )); then
+    out="${PWD}/runbook/keybinds.md"
+    [[ -d "${PWD}/runbook" ]] || { echo "validate-hypr-binds: --emit-cheatsheet expects to run from repo root" >&2; exit 3; }
+    {
+        echo "# Hyprland keybinds (auto-generated)"
+        echo ""
+        echo "> Generated by \`validate-hypr-binds --emit-cheatsheet\` from"
+        echo "> \`~/.config/hypr/binds.conf\`. Do not hand-edit; changes here"
+        echo "> are overwritten on every chezmoi apply."
+        echo ""
+        echo "| Mod | Key | Action |"
+        echo "|---|---|---|"
+        for f in "${files[@]}"; do
+            grep -hE '^\s*bind[a-z]*\s*=' "$f" 2>/dev/null \
+                | sed -E 's/^\s*bind[a-z]*\s*=\s*//; s/#.*$//' \
+                | awk -F',' '{ printf "| `%s` | `%s` | `%s%s%s` |\n", $1, $2, $3, ($4?", ":""), ($4?$4:"") }'
+        done | sort -u
+    } > "$out"
+    echo "wrote $out"
+fi
+
+# ---- Report ----
+if (( ${#issues[@]} > 0 )); then
+    printf 'validate-hypr-binds: %d issue(s):\n' "${#issues[@]}" >&2
+    printf '  %s\n' "${issues[@]}" >&2
+    exit 1
+fi
+
+echo "validate-hypr-binds: OK (${#seen_bind[@]} bindings, $(( ${#files[@]} )) files)"

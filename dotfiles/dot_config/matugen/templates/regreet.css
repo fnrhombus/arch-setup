@@ -1,0 +1,49 @@
+/* regreet (greetd greeter) — matugen-generated GTK CSS.
+ * After matugen renders this to ~/.cache/matugen/regreet.css, postinstall
+ * (or a polkit-allowed cp) installs it to /etc/greetd/regreet.css.
+ * regreet picks up CSS on next greeter restart (every cold boot). */
+
+@define-color background        {{colors.background.default.hex}};
+@define-color surface           {{colors.surface.default.hex}};
+@define-color surface-container {{colors.surface_container.default.hex}};
+@define-color on-surface        {{colors.on_surface.default.hex}};
+@define-color primary           {{colors.primary.default.hex}};
+@define-color on-primary        {{colors.on_primary.default.hex}};
+@define-color outline           {{colors.outline.default.hex}};
+
+window {
+    background-color: @background;
+    color: @on-surface;
+}
+
+#main_window {
+    background-color: alpha(@surface-container, 0.85);
+    border-radius: 12px;
+    padding: 24px;
+}
+
+entry, button {
+    background-color: @surface;
+    color: @on-surface;
+    border: 1px solid @outline;
+    border-radius: 6px;
+    padding: 6px 10px;
+}
+
+entry:focus {
+    border-color: @primary;
+}
+
+button.suggested-action {
+    background-color: @primary;
+    color: @on-primary;
+    border: none;
+}
+
+label {
+    color: @on-surface;
+}
+
+#error_info {
+    color: {{colors.error.default.hex}};
+}

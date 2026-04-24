@@ -1,0 +1,77 @@
+#!/usr/bin/env bash
+# wallpaper-rotate — pick next wallpaper from ~/Pictures/Wallpapers/,
+# set via awww, regenerate matugen palette, preserve dark/light mode.
+#
+# Modes:
+#   --first   : called from Hyprland exec-once at session start. Uses last
+#               wallpaper if known; otherwise picks one at random.
+#   (default) : pick next wallpaper (random; not-current).
+#   --pick X  : explicit wallpaper path.
+#
+# Trigger paths:
+#   - exec-once at Hyprland startup (--first)
+#   - systemd user timer every 6h (default — see wallpaper-rotate.timer)
+#   - manual via Super+Shift+W
+#   - control-panel → "Wallpaper: rotate now"
+
+set -euo pipefail
+
+wp_dir="$HOME/Pictures/Wallpapers"
+cache_dir="${XDG_CACHE_HOME:-$HOME/.cache}/matugen"
+mode_file="${cache_dir}/mode"
+wp_file="${cache_dir}/last-wallpaper"
+
+mkdir -p "$cache_dir"
+
+if [[ ! -d "$wp_dir" ]] || [[ -z "$(ls -A "$wp_dir" 2>/dev/null)" ]]; then
+    notify-send -u critical "Wallpaper rotate" "No wallpapers in $wp_dir — bootstrap should have populated it" 2>/dev/null || true
+    exit 1
+fi
+
+mode="dark"
+[[ -f "$mode_file" ]] && mode=$(<"$mode_file")
+
+# ---- Pick wallpaper ----
+case "${1:-}" in
+    --first)
+        if [[ -f "$wp_file" ]] && [[ -r "$(<"$wp_file")" ]]; then
+            wallpaper=$(<"$wp_file")
+        else
+            wallpaper=$(find "$wp_dir" -maxdepth 1 -type f \
+                \( -iname '*.jpg' -o -iname '*.jpeg' -o -iname '*.png' -o -iname '*.webp' \) \
+                | shuf -n 1)
+        fi
+        ;;
+    --pick)
+        [[ -n "${2:-}" ]] || { echo "usage: --pick <path>" >&2; exit 2; }
+        wallpaper="$2"
+        ;;
+    *)
+        # Pick a random wallpaper that ISN'T the current one (unless only one exists)
+        current=""
+        [[ -f "$wp_file" ]] && current=$(<"$wp_file")
+        wallpaper=$(find "$wp_dir" -maxdepth 1 -type f \
+            \( -iname '*.jpg' -o -iname '*.jpeg' -o -iname '*.png' -o -iname '*.webp' \) \
+            | grep -vxF "$current" 2>/dev/null \
+            | shuf -n 1 || true)
+        # Edge case: only one wallpaper exists
+        [[ -z "$wallpaper" ]] && wallpaper=$(find "$wp_dir" -maxdepth 1 -type f \
+            \( -iname '*.jpg' -o -iname '*.jpeg' -o -iname '*.png' -o -iname '*.webp' \) \
+            | shuf -n 1)
+        ;;
+esac
+
+[[ -r "$wallpaper" ]] || { echo "wallpaper unreadable: $wallpaper" >&2; exit 1; }
+
+# ---- Set wallpaper via awww (start daemon if not running) ----
+awww query >/dev/null 2>&1 || awww-daemon &
+sleep 0.2
+awww img "$wallpaper" --transition-type any --transition-duration 1.5 >/dev/null
+
+echo "$wallpaper" > "$wp_file"
+
+# ---- Regenerate matugen palette + reload dependents ----
+matugen --mode "$mode" image "$wallpaper" >/dev/null
+
+# ---- Update bar (theme-toggle icon may not change but custom modules might) ----
+pkill -SIGRTMIN+8 waybar 2>/dev/null || true

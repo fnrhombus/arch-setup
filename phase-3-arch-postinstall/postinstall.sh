@@ -27,10 +27,13 @@
 #     brought in from fnwsl; WSL-specific pieces dropped). p10k config itself
 #     is authored by the user via `p10k configure` on first shell launch —
 #     no pre-shipped ~/.p10k.zsh.
-#   - HyDE-Project/HyDE Hyprland dotfiles + Catppuccin-Mocha theme
+#   - chezmoi apply against /root/arch-setup/dotfiles — writes the bare
+#     Hyprland configs (split fragments), waybar, swaync, fuzzel, ghostty,
+#     yazi, helix, qt5/6ct, matugen pipeline + templates, helper scripts.
 #   - 2-in-1 touch: iio-sensor-proxy / iio-hyprland (rotation), wvkbd (OSK),
 #     hyprgrass plugin (touch gestures), libwacom (Wacom AES stylus)
-#   - Catppuccin Mocha across Ghostty/SDDM/tmux/Helix
+#   - matugen Material You palette derived from wallpaper; rendered into
+#     waybar / swaync / fuzzel / ghostty / hypr-colors / etc.
 #   - Snapper baseline snapshot
 #   - USB-serial udev rules (ESP32/Pico)
 #
@@ -73,7 +76,7 @@ ping -c1 -W3 archlinux.org >/dev/null || die "No network."
 # Two modes:
 #   - SUDO_ASKPASS exported + helper executable  → keeper can re-auth on its
 #     own via `sudo -A` when the cache expires. Robust to anything inside
-#     the run that clears the cache (HyDE's scripts have been observed to).
+#     the run that clears the cache (some installer scripts have been observed to).
 #   - Otherwise                                    → keeper only refreshes an
 #     already-cached credential via `sudo -n -v`. A pre-run `sudo -v` is
 #     required; if the cache is ever cleared during the run, the next sudo
@@ -113,20 +116,48 @@ sudo pacman -Syu --noconfirm --needed \
     xdg-user-dirs pipewire pipewire-pulse pipewire-jack wireplumber \
     noto-fonts noto-fonts-emoji ttf-jetbrains-mono-nerd ttf-firacode-nerd \
     bitwarden bitwarden-cli \
-    ghostty fuzzel cliphist mako satty hyprshot \
-    foot nautilus yazi \
-    hyprpolkitagent swww xdg-desktop-portal-gtk \
+    ghostty fuzzel cliphist satty hyprshot \
+    nautilus yazi \
+    hyprland hyprlock hypridle hyprpolkitagent hyprpicker \
+    waybar swaync swayosd \
+    xdg-desktop-portal-gtk xdg-desktop-portal-hyprland \
+    network-manager-applet pwvucontrol \
+    nwg-look nwg-displays \
+    qt5ct qt6ct papirus-icon-theme \
+    imv zathura zathura-pdf-poppler \
     iio-sensor-proxy libwacom \
+    mission-center \
     remmina freerdp \
     ufw \
     azure-cli certbot python-pipx \
     memtest86+ memtest86+-efi \
     smartmontools \
+    sbctl \
     mise chezmoi github-cli \
     docker docker-compose docker-buildx \
     snapper snap-pac
 
 sudo pkgfile -u
+
+# ---------- 1-print. CUPS + gutenprint (Canon Pro 9000 Mk II via USB) ----------
+# CUPS is the spooler; gutenprint ships the open-source PPDs that cover
+# legacy Canon Pixma inkjets including the Pro 9000 Mark II (released 2009 —
+# pre-cnijfilter consolidation, so Canon's own driver isn't packaged for it).
+# system-config-printer adds the GTK GUI for adding/removing printers.
+# usbutils is needed by CUPS auto-discovery on USB-attached printers.
+log "Installing CUPS + gutenprint (Canon Pro 9000 Mk II)..."
+sudo pacman -S --noconfirm --needed \
+    cups cups-pdf cups-filters \
+    gutenprint foomatic-db foomatic-db-engine \
+    ghostscript system-config-printer usbutils
+# cups.socket = on-demand activation (vs cups.service which runs forever).
+# Lighter; CUPS spins up only when something hits :631 or queues a job.
+sudo systemctl enable --now cups.socket
+# `lp` group lets users manage queues / cancel others' jobs.
+if ! id -nG tom | grep -qw lp; then
+    sudo usermod -aG lp tom
+    warn "Added tom to lp group — log out and back in for CUPS GUI access."
+fi
 
 # ---------- 1-smart. smartd: ongoing SMART monitoring ----------
 # The BIOS "SMART Reporting" toggle only surfaces errors at POST. smartd
@@ -156,25 +187,27 @@ fi
 systemctl --user enable --now hyprpolkitagent.service 2>/dev/null || \
     warn "hyprpolkitagent.service enable failed — Bitwarden may flag system-auth as unavailable."
 
-# ---------- 1c. memtest86+ systemd-boot loader entry ----------
+# ---------- 1c. memtest86+ limine entry ----------
 # Arch splits memtest86+ into two packages: `memtest86+` ships only the BIOS
 # binary (memtest.bin), `memtest86+-efi` ships the UEFI binary (memtest.efi).
-# Metis boots UEFI via systemd-boot, so the EFI package is the one we need
-# for a usable loader entry. We query memtest86+-efi specifically — the plain
-# package's file list has no .efi and the grep would silently skip.
-# Systemd-boot has no auto-scan for memtest86+/, so write the entry here.
-# Idempotent: tee just overwrites with identical content on re-run.
+# Metis boots UEFI via limine, so the EFI package is the one we need. We
+# append a /Memtest86+ entry to /boot/limine.conf (chained as efi_chainload).
+# Idempotent: only appends if the entry isn't already there.
 MEMTEST_EFI=$(pacman -Ql memtest86+-efi 2>/dev/null | awk '/\.efi$/ {print $2; exit}')
 if [[ -n "$MEMTEST_EFI" ]] && sudo test -f "$MEMTEST_EFI"; then
-    # Strip the /boot prefix — loader entries use ESP-relative paths.
+    # Strip the /boot prefix — limine's boot():… is ESP-relative.
     MEMTEST_EFI_REL="${MEMTEST_EFI#/boot}"
-    log "Registering memtest86+ with systemd-boot..."
-    sudo tee /boot/loader/entries/memtest86+.conf >/dev/null <<MEMEOF
-title   Memtest86+
-efi     ${MEMTEST_EFI_REL}
+    if sudo test -f /boot/limine.conf && ! sudo grep -qE '^/Memtest86\+' /boot/limine.conf; then
+        log "Adding memtest86+ entry to /boot/limine.conf..."
+        sudo tee -a /boot/limine.conf >/dev/null <<MEMEOF
+
+/Memtest86+
+    protocol: efi_chainload
+    image_path: boot():${MEMTEST_EFI_REL}
 MEMEOF
+    fi
 else
-    warn "memtest86+-efi EFI binary not found — loader entry skipped. Did pacman -S memtest86+-efi succeed?"
+    warn "memtest86+-efi EFI binary not found — limine entry skipped. Did pacman -S memtest86+-efi succeed?"
 fi
 
 # ---------- 2. yay bootstrap ----------
@@ -193,21 +226,40 @@ fi
 # build (Anthropic ships no official Linux binary). `-native` variant is the
 # community-recommended one — `-bin` has recurring ffmpeg dep issues. Lags
 # official releases; expect occasional breakage on Anthropic updates.
-log "Installing AUR-exclusive apps (VSCode, Edge, Claude desktop, pinpam-git, SDDM theme, iio-hyprland-git, powershell-bin)..."
-# iio-hyprland is published on AUR as `iio-hyprland-git` (no tagged release).
-# certbot-dns-azure is NOT in AUR — installed via pipx inject below (step 4d).
-# powershell-bin: Microsoft's prebuilt pwsh tarball. `powershell` (source)
-# builds from .NET SDK and takes noticeably longer; bin is the pragmatic pick.
+log "Installing AUR-exclusive apps (VSCode, Edge, Claude, awww, matugen, overskride, wleave, Bibata, wvkbd, pinpam, iio-hyprland, powershell)..."
+# Verified existence on AUR 2026-04-23 — package names below are the
+# actual AUR slugs, NOT the upstream project names.
+#
+# Notes per package:
+#   - awww-bin       — continuation of archived swww (LGFae, Codeberg);
+#                      provides=awww so binaries `awww` + `awww-daemon`
+#                      end up on PATH.
+#   - sesh-bin       — was once available as bare `sesh` somewhere;
+#                      currently AUR-only as `sesh-bin`.
+#   - wvkbd          — moved here from §1 pacman: NOT in extra, AUR-only.
+#   - bibata-cursor-theme  — Xcursor format. Used as Xwayland fallback.
+#   - hyprcursor-format Bibata: NO clean AUR package as of 2026-04. The
+#     LOSEARDES77/Bibata-Cursor-hyprcursor github repo is the source;
+#     install manually via:
+#       git clone https://github.com/LOSEARDES77/Bibata-Cursor-hyprcursor ~/.icons/Bibata-hyprcursor
+#     Until then, Hyprland falls back to the Xcursor build (works fine,
+#     just larger ~44 MB resident vs ~6.6 MB hyprcursor).
 yay -S --noconfirm --needed \
     visual-studio-code-bin \
     microsoft-edge-stable-bin \
     claude-desktop-native \
-    catppuccin-sddm-theme-mocha \
     pinpam-git \
-    sesh \
+    sesh-bin \
     wvkbd \
     iio-hyprland-git \
-    powershell-bin
+    powershell-bin \
+    awww-bin \
+    matugen-bin \
+    overskride \
+    wleave \
+    bibata-cursor-theme \
+    pacseek \
+    limine-snapper-sync
 
 # ---------- 3a. certbot-dns-azure plugin (pipx — not packaged for Arch) ----------
 # certbot-dns-azure is PyPI-only: not in extra, not in AUR, not community-
@@ -330,18 +382,21 @@ else
 fi
 
 # ---------- 5. Claude Code CLI ----------
-# Claude Code is distributed via npm (@anthropic-ai/claude-code). There's no
-# mise plugin named "claude-code" — that call was wrong. Route: use mise to
-# install a LTS node, then `npm install -g`. The binary lands under
-# ~/.local/share/mise/installs/node/<version>/bin/claude and is only on PATH
-# in mise-activated shells — symlink it into /usr/local/bin so `claude` works
-# from any shell, including sudo, scripts, and SDDM-launched apps.
+# Two-stage install:
+#   (a) bootstrap via mise+npm — gets us a working `claude` binary
+#   (b) `claude install` (native) — migrates to ~/.claude/local/, which is
+#       user-owned. Without this, `claude doctor` warns:
+#         "Insufficient permissions for auto-updates"
+#       because the npm-installed binary lives under a path the auto-update
+#       checker can't write to (mise prefix or symlinked into /usr/local/bin).
+#
+# After (b), the npm-installed copy is harmless leftovers — `claude install`
+# rewrites .bashrc/.zshrc to point at ~/.claude/local/claude. We keep the
+# /usr/local/bin/claude symlink as a fallback for non-interactive shells
+# (sudo, scripts) until the user verifies the native install resolves cleanly.
 if ! command -v claude >/dev/null; then
     if command -v mise >/dev/null; then
-        log "Installing node@lts via mise, then Claude Code via npm..."
-        # Bash's `cmd | tee` returns tee's exit, masking a failed install behind
-        # success. Redirect to the log file directly so the `if` sees the real
-        # exit status, then show the tail on failure.
+        log "Installing node@lts via mise, then Claude Code via npm (bootstrap)..."
         if ! mise use -g node@lts >>/tmp/mise-node.log 2>&1; then
             warn "mise node@lts install failed — tail of /tmp/mise-node.log:"
             tail -n 10 /tmp/mise-node.log >&2 || true
@@ -359,6 +414,18 @@ fi
 # every time so a node version bump silently refreshes the symlink target.
 if claude_bin=$(mise which claude 2>/dev/null) && [[ -x "$claude_bin" ]]; then
     sudo ln -sf "$claude_bin" /usr/local/bin/claude
+fi
+# Migrate to native install so auto-updates work without sudo.
+# `claude install` is idempotent: re-running on an already-native install
+# is a no-op. Pipe 'y' to auto-confirm any prompts (the command was
+# stabilized to non-interactive accept by 2.1.x).
+if command -v claude >/dev/null && [[ ! -d "$HOME/.claude/local" ]]; then
+    log "Migrating Claude Code to native install (unprivileged auto-updates)..."
+    if ! printf 'y\n' | claude install >/tmp/claude-install.log 2>&1; then
+        warn "claude install failed — tail of /tmp/claude-install.log:"
+        tail -n 10 /tmp/claude-install.log >&2 || true
+        warn "Run 'claude install' manually to fix the doctor's auto-update warning."
+    fi
 fi
 # Claude Code ships its own completions at runtime: `claude --print-completion zsh`
 # is wired in .zshrc below, no fragile external download needed.
@@ -474,7 +541,7 @@ fi
 
 # ---------- 7. pinpam TPM-PIN setup ----------
 # pinutil setup asks for a fresh PIN and stores it in TPM NVRAM.
-# Configured as 'sufficient' in PAM so your Linux password stays as fallback.
+# PAM wiring for PIN lives in §7a below (sudo + hyprlock only — not greetd).
 if command -v pinutil >/dev/null; then
     if [[ -z "${SKIP_PIN:-}" ]]; then
         # `pinutil setup` reads the new PIN interactively from stdin. Without a
@@ -487,27 +554,101 @@ if command -v pinutil >/dev/null; then
             # errexit (otherwise pipefail + set -e kills the script on pinutil's
             # non-zero exit before we can check for idempotency).
             if sudo pinutil setup 2>&1 | tee /tmp/pinutil-setup.log; then
-                log "TPM PIN set."
+                log "TPM PIN set (per pinutil)."
             elif grep -q 'already has a PIN' /tmp/pinutil-setup.log; then
                 log "TPM PIN already set — skipping (idempotent re-run)."
             else
                 warn "pinutil setup failed; PAM PIN unlock won't work until fixed."
             fi
+            # CRITICAL: pinutil setup can return success while the TPM NV
+            # write actually failed (TPM NVRAM full, NV index conflict with
+            # BitLocker or LUKS-TPM2 enrollment, etc). `pinutil status`
+            # is unreliable too — it returns {"Ok":null} even when the
+            # NV handle errors out (TPM_RC_HANDLE / 0x18B). The reliable
+            # smoke test is `pinutil test < /dev/null` — returns NoPinSet
+            # if the PIN didn't actually persist.
+            if pinutil test < /dev/null 2>&1 | grep -q NoPinSet; then
+                warn "pinutil test reports NoPinSet immediately after setup."
+                warn "This means the TPM NV write failed silently (likely NV"
+                warn "index conflict with BitLocker/LUKS-TPM2). PAM PIN auth"
+                warn "will NOT work until you reclaim NV space:"
+                warn "  sudo tpm2_nvreadpublic   # see what's allocated"
+                warn "  sudo tpm2_nvundefine 0xXXXX  # free the conflicting slot"
+                warn "  sudo pinutil delete && sudo pinutil setup"
+            fi
         else
             warn "No TTY — skipping 'pinutil setup'. Run it manually after login: sudo pinutil setup"
         fi
     fi
-    log "Wiring pinpam into sudo, polkit, hyprlock PAM stacks..."
-    for svc in sudo polkit-1 hyprlock; do
-        f="/etc/pam.d/$svc"
-        [[ -f "$f" ]] || continue
-        if ! sudo grep -q pam_pinpam "$f"; then
-            sudo sed -i '1i auth       sufficient   pam_pinpam.so' "$f"
-        fi
-    done
 else
     warn "pinutil not found; skipping TPM-PIN setup."
 fi
+
+# ---------- 7a. PAM stacks for sudo / hyprlock ----------
+# Two surfaces, two stacks here — see docs/reinstall-planning.md §5.
+# (greetd's PAM stack is installed by chroot.sh from
+# phase-3-arch-postinstall/system-files/pam.d/greetd; PIN is intentionally
+# excluded from greetd because cold-boot wants full credential per the
+# Windows Hello pattern.)
+#
+# Design invariant: fingerprint is ALWAYS an option and NEVER required.
+# User's finger can only physically reach the reader at cold boot (the
+# laptop goes under the desk after login). Primary auth at sudo/hyprlock
+# is therefore PIN (fast, one-handed, works docked); fingerprint is still
+# wired in as a second-position sufficient module with a short timeout so
+# a user who did leave a finger within reach can still use it — but PIN
+# prompts first, so the common case never sees a blocking finger prompt.
+#
+#   sudo     : PIN → fingerprint(5s) → password. PIN primary; finger as a
+#              5s-timeout shortcut; pam_unix via system-auth as fallback.
+#   hyprlock : PIN → fingerprint(5s) → password. Same shape; `login`
+#              include provides pam_unix fallback.
+#
+# Module name quirk: pinpam-git ships its module as `libpinpam.so` (not
+# the expected `pam_pinpam.so`). PAM resolves bare names against
+# `/usr/lib/security/`, so we reference `libpinpam.so` literally — the
+# old `pam_pinpam.so` reference dlopen-failed silently and PAM treated
+# it as a faulty module, which is what kept PIN auth from ever working
+# pre-2026-04-22 even when `pinutil setup` had succeeded.
+#
+# pinpam returns AUTHINFO_UNAVAIL when no PIN is provisioned, so
+# 'sufficient' falls through cleanly to pam_fprintd/pam_unix — first-boot
+# (pre-`pinutil setup`) still works.
+#
+# pam_fprintd options: `max-tries=1` = one finger attempt then fail;
+# `timeout=5` at sudo/hyprlock = give up after 5s of no finger and move
+# on to the password prompt, so Ctrl+C isn't needed.
+#
+# NEVER remove pam_unix from the stack via `system-auth`/`system-login`/
+# `login` includes — that's the last-resort password path.
+#
+# Fully idempotent: tee overwrites with identical bytes on re-run.
+log "Writing PAM stacks for sudo / hyprlock..."
+
+# sudo: PIN → fingerprint(5s) → password.
+sudo tee /etc/pam.d/sudo >/dev/null <<'SUDOPAMEOF'
+#%PAM-1.0
+# arch-setup: PIN primary, fingerprint optional (5s timeout), password fallback.
+# See postinstall.sh §7a.
+auth        sufficient  libpinpam.so
+auth        sufficient  pam_fprintd.so              max-tries=1 timeout=5
+auth        include     system-auth
+account     include     system-auth
+session     include     system-auth
+SUDOPAMEOF
+
+# hyprlock: PIN → fingerprint(5s) → password. Finger is unlikely to be
+# reachable while the laptop is docked, but including it preserves the
+# "any one of three methods" invariant and only costs a 5s timeout in
+# the uncommon case where the user Ctrl+C'd past the PIN prompt.
+sudo tee /etc/pam.d/hyprlock >/dev/null <<'HYPRLOCKPAMEOF'
+#%PAM-1.0
+# arch-setup: PIN primary, fingerprint optional (5s timeout), password fallback.
+# See postinstall.sh §7a.
+auth        sufficient  libpinpam.so
+auth        sufficient  pam_fprintd.so              max-tries=1 timeout=5
+auth        include     login
+HYPRLOCKPAMEOF
 
 # ---------- 7.5 LUKS TPM2 autounlock (FDE per decisions.md §Q11) ----------
 # install.sh sets the LUKS passphrase (key slot 0) at install time; this
@@ -525,26 +666,31 @@ fi
 # the "the boot chain was tampered with" signal we want to gate unsealing
 # on. PCRs 4/5/8/9 (bootloader + kernel measurements) change every kernel
 # upgrade, which would force the passphrase after every `pacman -Syu`.
-# Only cryptroot is TPM-enrolled. cryptvar auto-unlocks from a keyfile on
-# the (TPM-unlocked) cryptroot filesystem — a second TPM slot would burn
-# LUKS budget without adding at-rest protection.
+# cryptroot AND cryptswap are TPM-enrolled. cryptswap is opened in the
+# initramfs (crypttab.initramfs) BEFORE resume runs, so it needs a TPM
+# slot or every boot prompts for the LUKS passphrase to unlock swap.
+# cryptvar auto-unlocks from a keyfile on the (TPM-unlocked) cryptroot —
+# a second TPM slot would burn LUKS budget without adding at-rest
+# protection (the keyfile is only readable post-cryptroot-unlock).
 if [[ -c /dev/tpm0 || -c /dev/tpmrm0 ]] && [[ -z "${SKIP_TPM_LUKS:-}" ]]; then
-    dev="/dev/disk/by-partlabel/ArchRoot"
-    if [[ -b "$dev" ]]; then
+    for partlabel in ArchRoot ArchSwap; do
+        dev="/dev/disk/by-partlabel/$partlabel"
+        if [[ ! -b "$dev" ]]; then
+            warn "$dev not found — skipping TPM enroll for $partlabel."
+            continue
+        fi
         # systemd-cryptenroll with no action flag prints "SLOT TYPE" header
         # plus one line per key slot. Check for an existing tpm2 slot so a
         # re-run is idempotent (otherwise a second enroll adds a second
         # tpm2 slot, wastes LUKS slot budget, and silently succeeds).
         if sudo systemd-cryptenroll "$dev" 2>/dev/null | awk 'NR>1 && $2=="tpm2"{f=1} END{exit !f}'; then
-            log "TPM2 already enrolled on ArchRoot — skipping."
+            log "TPM2 already enrolled on $partlabel — skipping."
         else
-            log "Enrolling TPM2 autounlock for ArchRoot (enter the LUKS passphrase when prompted)..."
+            log "Enrolling TPM2 autounlock for $partlabel (enter the LUKS passphrase when prompted)..."
             sudo systemd-cryptenroll --tpm2-device=auto --tpm2-pcrs=0+7 "$dev" \
-                || warn "TPM enroll failed — boot still works with passphrase."
+                || warn "TPM enroll failed for $partlabel — boot still works with passphrase."
         fi
-    else
-        warn "$dev not found — skipping TPM enroll."
-    fi
+    done
 else
     warn "No TPM device (or SKIP_TPM_LUKS set) — boot will continue to prompt for the LUKS passphrase."
 fi
@@ -860,211 +1006,83 @@ ALIASEOF
 log "Pre-building zgenom plugin cache (so first login is fast)..."
 zsh -i -c 'echo zgenom warmup complete' 2>/dev/null || warn "zgenom warmup had issues; first login will rebuild."
 
-# ---------- 11. tmux config ----------
-log "Writing ~/.tmux.conf..."
-cat > "$HOME/.tmux.conf" <<'TMUXEOF'
-# Ctrl+a prefix (carried from fnwsl)
-unbind C-b
-set -g prefix C-a
-bind C-a send-prefix
+# ---------- 11. tmux config — handled by chezmoi (§13) ----------
+# dotfiles/dot_tmux.conf is the source of truth (Ctrl+a prefix, splits open
+# in pane CWD for the Claude Code worktree workflow, matugen-rendered colors
+# via ~/.config/tmux/colors.conf). No tpm — sesh-bin (§3 yay) covers session
+# switching, and matugen replaces the catppuccin/tmux plugin's coloring.
 
-set -g mouse on
-set -g history-limit 50000
-set -g base-index 1
-setw -g pane-base-index 1
-set -g renumber-windows on
-set -g default-terminal "tmux-256color"
-set -ag terminal-overrides ",xterm-256color:RGB,ghostty:RGB"
+# ---------- 12. Helix config — handled by chezmoi (§13) ----------
+# dotfiles/dot_config/helix/config.toml is the source of truth (theme = matugen).
+# No write here.
 
-bind | split-window -h -c "#{pane_current_path}"
-bind - split-window -v -c "#{pane_current_path}"
-bind c new-window -c "#{pane_current_path}"
-
-set -g @plugin 'tmux-plugins/tpm'
-set -g @plugin 'tmux-plugins/tmux-sensible'
-set -g @plugin 'catppuccin/tmux#v2.1.3'
-set -g @catppuccin_flavor 'mocha'
-run '~/.tmux/plugins/tpm/tpm'
-TMUXEOF
-
-if [[ ! -d "$HOME/.tmux/plugins/tpm" ]]; then
-    GIT_TEMPLATE_DIR="" git clone https://github.com/tmux-plugins/tpm "$HOME/.tmux/plugins/tpm"
-fi
-"$HOME/.tmux/plugins/tpm/scripts/install_plugins.sh" >/dev/null 2>&1 || \
-    warn "tpm install deferred to first tmux run"
-
-# ---------- 12. Helix config ----------
-log "Writing Helix config..."
-mkdir -p "$HOME/.config/helix"
-cat > "$HOME/.config/helix/config.toml" <<'HXEOF'
-theme = "catppuccin_mocha"
-
-[editor]
-line-number = "relative"
-mouse = true
-cursorline = true
-bufferline = "multiple"
-color-modes = true
-true-color = true
-
-[editor.cursor-shape]
-insert = "bar"
-normal = "block"
-select = "underline"
-
-[editor.indent-guides]
-render = true
-HXEOF
-
-# ---------- 13. Hyprland dotfiles (HyDE-Project/HyDE) ----------
-# Switched away from end-4/illogical-impulse to HyDE on 2026-04-20 (decisions.md
-# §Q10/§Q14): HyDE is bootloader-agnostic (we keep systemd-boot), ships
-# Catppuccin-Mocha as a bundled theme, doesn't require a fresh-install boot
-# (works as an overlay on existing Arch + Hyprland), and has a `theme-switch`
-# CLI for one-shot theme application. Trade-off vs Omarchy: Omarchy is a closer
-# fit (Ghostty default + opinionated keyboard-ninja UX) but mandates the
-# `limine` bootloader — out of scope until/unless we redo phase 2.
+# ---------- 13. Hyprland configs via chezmoi (bare-Hyprland design) ----------
+# Switched from HyDE → bare-Hyprland 2026-04-22 (decisions.md §Q10 + §Q-K +
+# desktop-requirements.md). Reasons in the memo: HyDE writes a wall of
+# upstream config we don't own, contaminates /boot loader entries on
+# install, and the "saves user time" value evaporated when the user said
+# "Claude does the tweaking." Now: Claude-authored configs live in
+# /root/arch-setup/dotfiles, applied via chezmoi.
 #
-# HyDE clobbers ~/.config/hypr/, ~/.config/waybar/, ~/.config/rofi/, etc.
-# It backs the prior tree up to ~/.config/cfg_backups/<timestamp>/ before
-# overwriting. Do NOT layer HyDE on top of end-4 — pick one and commit; if
-# end-4 was previously installed, this script's HyDE install will replace it
-# (the backup is your safety net).
+# Theme is matugen (Material You from wallpaper) — every component (waybar,
+# swaync, fuzzel, ghostty, helix, hypr-colors, tmux, gtk, qt) reads colors
+# from a matugen-rendered template. See dotfiles/dot_config/matugen/config.toml.
 #
-# Clone fresh at run time so the dots stay current and the repo stays lean.
-# GIT_TEMPLATE_DIR="" is the wsl-setup-lessons.md mitigation for stale
-# user-dir template hooks.
-if [[ ! -d "$HOME/HyDE" ]]; then
-    log "Cloning HyDE-Project/HyDE..."
-    GIT_TEMPLATE_DIR="" git clone --depth 1 https://github.com/HyDE-Project/HyDE.git \
-        "$HOME/HyDE" \
-        || warn "HyDE clone failed — network? Retry manually later: \
-GIT_TEMPLATE_DIR=\"\" git clone --depth 1 https://github.com/HyDE-Project/HyDE.git ~/HyDE"
+# Idempotent: chezmoi's `apply` is a no-op when source matches dest.
+DOTFILES_SRC="/root/arch-setup/dotfiles"
+if [[ ! -d "$DOTFILES_SRC" ]]; then
+    # Local fallback: dotfiles checkout co-located with this script
+    # (works when postinstall is run from /home/tom/arch-setup/ rather than
+    # the chroot-staged /root/arch-setup/).
+    DOTFILES_SRC="$SCRIPT_DIR/../dotfiles"
 fi
 
-if [[ -d "$HOME/HyDE/Scripts" ]]; then
-    # Idempotency guard: HyDE drops a marker into ~/.local/share/bin/ on first
-    # successful install (theme-switch.sh, Hyde.sh helpers). Skip re-run if
-    # those exist — re-running install.sh would re-clobber configs and bury
-    # the most-recent backup behind a useless overwrite-of-an-overwrite.
-    if [[ -x "$HOME/.local/share/bin/theme-switch.sh" ]] || [[ -d "$HOME/.local/lib/hyde" ]]; then
-        log "HyDE already installed (theme-switch.sh / .local/lib/hyde present) — skipping re-install."
-    else
-        log "Running HyDE install.sh (-drsn: noconfirm install + restore configs + enable services, skip NVIDIA)..."
-        # Pre-empt HyDE's own interactive prompts — `-d` covers pacman/yay
-        # --noconfirm but NOT HyDE's own bash `read` calls:
-        #   1. install_pre.sh chaotic-AUR prompt — prompt_timer 120, default
-        #      case installs chaotic-AUR. We don't want it. Feed 'n'.
-        #   2. install_pst.sh SDDM theme prompt (Candy vs Corners) — we use
-        #      catppuccin-sddm-theme-mocha (§1 pacman list) and don't want
-        #      HyDE's themes. Pre-create backup_the_hyde_project.conf — HyDE
-        #      checks for this file and skips the whole SDDM config block.
-        #   3. install.sh end-of-run reboot prompt — empty input → no reboot.
-        sudo install -d -m 755 /etc/sddm.conf.d
-        sudo touch /etc/sddm.conf.d/backup_the_hyde_project.conf
-        pushd "$HOME/HyDE/Scripts" >/dev/null
-        # HyDE's flag semantics: bare `-n` only marks nvidia as skipped and
-        # does NOTHING else. We need -d (install + noconfirm via
-        # use_default=--noconfirm), -r (restore configs), -s (enable services),
-        # -n (skip nvidia wiring — MX250 blacklisted per decisions.md §Q5).
-        # -d is used instead of -i so pacman/yay runs are non-interactive —
-        # this script is invoked from contexts (claude code, re-run loop)
-        # where interactive prompts hang.
-        printf 'n\n\n\n' | ./install.sh -drsn \
-            || warn "HyDE install.sh exited non-zero; review manually"
-        popd >/dev/null
-    fi
+if [[ ! -d "$DOTFILES_SRC" ]]; then
+    warn "dotfiles tree not found at /root/arch-setup/dotfiles or alongside this script."
+    warn "  Custom-ISO install bakes it in; Ventoy install copies it via install.sh §11."
+    warn "  Skipping chezmoi apply — Hyprland will start with empty config."
+elif ! command -v chezmoi >/dev/null; then
+    warn "chezmoi not installed — was it dropped from §1 pacman list?"
 else
-    warn "HyDE not available at ~/HyDE/Scripts — Hyprland config skipped."
-    warn "  Fix: GIT_TEMPLATE_DIR=\"\" git clone --depth 1 https://github.com/HyDE-Project/HyDE.git ~/HyDE"
-    warn "       then re-run this script."
+    log "Initializing chezmoi from $DOTFILES_SRC..."
+    chezmoi init --source="$DOTFILES_SRC" >/dev/null 2>&1 \
+        || warn "chezmoi init failed (already initialized? — non-fatal, continuing)."
+    log "Applying chezmoi (writes ~/.config, ~/.local/bin, ~/.local/share)..."
+    chezmoi apply --force \
+        || warn "chezmoi apply reported issues — check 'chezmoi status' and 'chezmoi diff'."
 fi
 
-# Force Catppuccin-Mocha theme. HyDE ships Catppuccin-Mocha in its bundled
-# theme list; theme-switch.sh is idempotent (no-op if already set).
-if [[ -x "$HOME/.local/share/bin/theme-switch.sh" ]]; then
-    log "Setting HyDE theme to Catppuccin-Mocha..."
-    "$HOME/.local/share/bin/theme-switch.sh" -s "Catppuccin-Mocha" \
-        || warn "theme-switch.sh failed — set manually with Ctrl+Super+T."
-fi
-
-# Defang end-4 / HyDE / kitty configs that hardcode `shell fish` or similar —
-# chroot.sh creates tom with zsh as login shell (and §18 below re-asserts if
-# anything drifted), but a terminal emulator config with `shell fish` inside
-# Hyprland would still spawn fish on every launch. Neutralize any such
-# override back to the user's login shell.
-for f in "$HOME/.config/kitty/kitty.conf" "$HOME/.config/foot/foot.ini" "$HOME/.config/ghostty/config"; do
-    if [[ -f "$f" ]] && grep -qE '^\s*shell\s*=?\s*(fish|/usr/bin/fish)' "$f"; then
-        log "Removing hardcoded fish shell override in $f..."
-        sed -i -E '/^\s*shell\s*=?\s*(fish|\/usr\/bin\/fish)\s*$/d' "$f"
+# Initial wallpaper render: chezmoi's run_once script downloads from callisto;
+# theme-toggle's first run picks one and renders matugen. Triggered manually
+# here so the first Hyprland launch has a complete palette.
+if command -v matugen >/dev/null && [[ -d "$HOME/Pictures/Wallpapers" ]]; then
+    log "Seeding initial matugen palette..."
+    if [[ -x "$HOME/.local/bin/wallpaper-rotate" ]]; then
+        "$HOME/.local/bin/wallpaper-rotate" --first \
+            || warn "wallpaper-rotate --first failed — Hyprland may start with default colors."
     fi
-done
-
-# ---------- 13a. Hyprland customizations layered on top of HyDE ----------
-# HyDE's install.sh overwrites ~/.config/hypr/* on every run. We patch + append
-# idempotently so re-runs restore our overrides. The marker comment makes the
-# append a one-shot.
-HYPR_CONF="$HOME/.config/hypr/hyprland.conf"
-
-# HyDE defaults the terminal var (`$term` or `$TERMINAL`) to kitty. The
-# daily-driver terminal is Ghostty (decisions.md §Q10-C). Rewrite both common
-# spellings so every keybind that uses the var launches Ghostty. sed is
-# inherently idempotent: once the line already says ghostty the pattern stops
-# matching.
-if [[ -f "$HYPR_CONF" ]]; then
-    sed -i -E 's#^\$(term|TERMINAL|terminal)\s*=\s*kitty\s*$#$\1 = ghostty#' "$HYPR_CONF"
-fi
-# HyDE may also keep the terminal pin in keybindings.conf — patch there too.
-HYPR_KEYBINDS="$HOME/.config/hypr/keybindings.conf"
-if [[ -f "$HYPR_KEYBINDS" ]]; then
-    sed -i -E 's#^\$(term|TERMINAL|terminal)\s*=\s*kitty\s*$#$\1 = ghostty#' "$HYPR_KEYBINDS"
 fi
 
-if [[ -f "$HYPR_CONF" ]] && ! grep -q '# arch-setup-customizations' "$HYPR_CONF"; then
-    log "Appending arch-setup customizations to $HYPR_CONF..."
-    cat >> "$HYPR_CONF" <<'HYPREOF'
-
-# arch-setup-customizations (do not remove this marker — postinstall.sh skips re-append on its presence)
-# Monitor layout is authored via `nwg-displays` → writes ~/.config/hypr/monitors.conf,
-# which hyprland.conf sources. Intended layout: Vizio V505-G9 (4K 50", DP-1) at
-# (0,0) scale 1.5 → logical 2560x1440; Dell Inspiron 7786 internal panel (eDP-1)
-# at (0, 1440) scale 1 → left edges aligned, laptop directly below the TV.
-# Do NOT pin `monitor = ...` lines here — the kernel-reported name for the TV is
-# DP-1 (DisplayPort-over-HDMI alt-mode), which varies by port/cable, and monitors.conf
-# is the single source of truth.
-#
-# nwg-displays gotcha: its visual canvas defaults monitor X positions to non-zero
-# values (~2000 for the 4K rectangle) even when the rectangles look "snapped" to
-# each other in the GUI. That makes the two screens overlap only at a corner
-# pixel and the cursor only transitions there. Fix: type `0` into the X field
-# for BOTH monitors explicitly, then Apply + Save.
-source = ~/.config/hypr/monitors.conf
-#
-# Lid close → disable internal panel; lid open → reload hyprland.conf so monitors.conf
-# reapplies the nwg-displays-authored layout. Laptop lives under a desk most of the
-# time; closing the lid is the normal "kiosk mode" signal.
-bindl = , switch:on:Lid Switch,  exec, hyprctl keyword monitor "eDP-1, disable"
-bindl = , switch:off:Lid Switch, exec, hyprctl reload
-#
-# 2-in-1 touch: 3-finger swipe = workspace switch (Hyprland built-in);
-# extra touch gestures (long-press, edge swipe to toggle wvkbd) come from the
-# hyprgrass plugin installed via `hyprpm` below.
-gestures {
-    workspace_swipe = true
-    workspace_swipe_fingers = 3
-}
-#
-# Screen rotation on tablet-mode flip via iio-hyprland (AUR). Reads the IIO
-# accelerometer and emits `hyprctl keyword monitor` transforms.
-exec-once = iio-hyprland
-HYPREOF
+# Enable user systemd timer for wallpaper rotation (every 6h).
+if [[ -f "$HOME/.config/systemd/user/wallpaper-rotate.timer" ]]; then
+    log "Enabling wallpaper-rotate.timer..."
+    systemctl --user daemon-reload
+    systemctl --user enable --now wallpaper-rotate.timer 2>/dev/null \
+        || warn "wallpaper-rotate.timer enable failed — re-run inside a graphical session."
 fi
 
-# Install hyprgrass touch-gesture plugin via hyprpm. Idempotent: hyprpm checks
-# if the plugin is already added before re-cloning.
-if command -v hyprpm >/dev/null && [[ -d "$HOME/.config/hypr" ]]; then
-    log "Ensuring hyprgrass plugin (touch gestures) is installed..."
+# Hyprland plugins via hyprpm. hyprexpo + hyprgrass per desktop-requirements.md.
+# Must run inside a Hyprland session to actually load (hyprpm enable signals
+# the live compositor). On first install, the user runs this section again
+# from inside Hyprland; on re-runs, the `add` is idempotent.
+if command -v hyprpm >/dev/null; then
+    log "Ensuring Hyprland plugins (hyprexpo + hyprgrass)..."
     hyprpm update >/dev/null 2>&1 || true
+    if ! hyprpm list 2>/dev/null | grep -q hyprexpo; then
+        hyprpm add https://github.com/hyprwm/hyprland-plugins \
+            && hyprpm enable hyprexpo \
+            || warn "hyprexpo install failed — re-run inside a Hyprland session."
+    fi
     if ! hyprpm list 2>/dev/null | grep -q hyprgrass; then
         hyprpm add https://github.com/horriblename/hyprgrass \
             && hyprpm enable hyprgrass \
@@ -1072,27 +1090,8 @@ if command -v hyprpm >/dev/null && [[ -d "$HOME/.config/hypr" ]]; then
     fi
 fi
 
-# ---------- 14. Ghostty Catppuccin ----------
-log "Writing Ghostty config..."
-mkdir -p "$HOME/.config/ghostty"
-cat > "$HOME/.config/ghostty/config" <<'GSEOF'
-font-family = "JetBrainsMono Nerd Font"
-font-size = 12
-theme = "Catppuccin Mocha"
-cursor-style = block
-cursor-style-blink = false
-window-decoration = false
-window-padding-x = 8
-window-padding-y = 8
-mouse-hide-while-typing = true
-copy-on-select = clipboard
-GSEOF
-
-# ---------- 15. SDDM Catppuccin theme ----------
-if pacman -Qi catppuccin-sddm-theme-mocha >/dev/null 2>&1; then
-    sudo mkdir -p /etc/sddm.conf.d
-    echo -e "[Theme]\nCurrent=catppuccin-mocha" | sudo tee /etc/sddm.conf.d/theme.conf >/dev/null
-fi
+# Ghostty config + greetd-regreet config are now part of dotfiles/system-files
+# (matugen-themed). No separate §14 / §15 needed — legacy blocks removed.
 
 # ---------- 16. Snapper: baseline snapshot of / ----------
 # NOTE: install.sh already created the @snapshots subvolume and mounted it at
@@ -1164,7 +1163,7 @@ fi
 if (( SKIP_VERIFY == 1 )); then
     log "Skipping verify (--no-verify). Re-run without the flag for the full sweep."
     echo
-    echo "Log out and back in (or reboot) to start Hyprland via SDDM."
+    echo "Log out and back in (or reboot) to start Hyprland via greetd."
     exit 0
 fi
 echo
@@ -1222,20 +1221,24 @@ check "yazi"                "command -v yazi"
 
 echo "-- terminal stack --"
 check "ghostty"             "command -v ghostty"
-check "foot (fallback)"     "command -v foot"
-check "ghostty config"      "test -f $HOME/.config/ghostty/config && grep -q 'Catppuccin Mocha' $HOME/.config/ghostty/config"
+check "ghostty config"      "test -f $HOME/.config/ghostty/config && grep -q 'theme = matugen' $HOME/.config/ghostty/config"
+check "tmux config (chezmoi)" "test -f $HOME/.tmux.conf && grep -q 'C-a' $HOME/.tmux.conf"
 
-echo "-- Hyprland / HyDE --"
-check "HyDE staged"         "test -d $HOME/HyDE/Scripts"
-check "HyDE installed"      "test -x $HOME/.local/share/bin/theme-switch.sh || test -d $HOME/.local/lib/hyde"
+echo "-- Hyprland (bare, chezmoi-managed) --"
 check "hyprland config"     "test -f $HOME/.config/hypr/hyprland.conf"
-check "arch-setup customs"  "grep -q 'arch-setup-customizations' $HOME/.config/hypr/hyprland.conf"
+check "binds.conf src"      "grep -q 'source = ~/.config/hypr/binds.conf' $HOME/.config/hypr/hyprland.conf"
 check "monitors.conf src"   "grep -q 'monitors.conf' $HOME/.config/hypr/hyprland.conf"
+check "matugen colors src"  "grep -q 'colors.conf' $HOME/.config/hypr/hyprland.conf"
+check "matugen config"      "test -f $HOME/.config/matugen/config.toml"
+check "validate-hypr-binds" "test -x $HOME/.local/bin/validate-hypr-binds"
+check "wallpaper-rotate"    "test -x $HOME/.local/bin/wallpaper-rotate"
+check "theme-toggle"        "test -x $HOME/.local/bin/theme-toggle"
 check "fuzzel"              "command -v fuzzel"
 check "cliphist"            "command -v cliphist"
-check "mako"                "command -v makoctl"
+check "swaync"              "command -v swaync && command -v swaync-client"
 check "satty"               "command -v satty"
-check "swww/awww"           "pacman -Q swww 2>/dev/null || command -v awww"
+check "awww (wallpaper)"    "command -v awww && command -v awww-daemon"
+check "matugen (palette)"   "command -v matugen"
 check "hyprshot"            "command -v hyprshot"
 check "wl-copy"             "command -v wl-copy"
 check "xdg-portal-gtk"      "pacman -Q xdg-desktop-portal-gtk"
@@ -1250,16 +1253,32 @@ check "hyprgrass plugin"    "hyprpm list 2>/dev/null | grep -q hyprgrass"
 
 echo "-- session / login / display --"
 check "NetworkManager"      "systemctl is-enabled NetworkManager"
-check "sddm"                "systemctl is-enabled sddm"
-check "sddm catppuccin"     "pacman -Q catppuccin-sddm-theme-mocha"
+check "greetd"              "systemctl is-enabled greetd"
+check "greetd-regreet"      "pacman -Q greetd-regreet"
 check "pipewire"            "pacman -Q pipewire wireplumber"
 check "bluetooth"           "systemctl is-enabled bluetooth"
+
+echo "-- printing (Canon Pro 9000 Mk II via USB) --"
+check "cups installed"      "pacman -Q cups"
+check "cups.socket enabled" "systemctl is-enabled cups.socket"
+check "gutenprint PPDs"     "test -d /usr/share/cups/model/gutenprint || ls /usr/share/cups/model 2>/dev/null | grep -q gutenprint"
+check "tom in lp group"     "id -nG tom | grep -qw lp"
 
 echo "-- secrets / auth --"
 check "fprintd enabled"     "systemctl is-enabled fprintd"
 check "fprintd enrolled"    "fprintd-list tom 2>/dev/null | grep -q 'Fingerprints for user tom'"
 check "pinutil (TPM PIN)"   "test -x /usr/bin/pinutil || command -v pinutil"
-check "pinpam in sudo"      "grep -q pam_pinpam /etc/pam.d/sudo"
+check "pinpam .so present"   "test -f /usr/lib/security/libpinpam.so"
+check "PIN actually persisted" "! pinutil test < /dev/null 2>&1 | grep -q NoPinSet"
+check "pinpam in sudo"       "grep -q libpinpam /etc/pam.d/sudo"
+check "pinpam in hyprlock"   "grep -q libpinpam /etc/pam.d/hyprlock"
+check "no pinpam in greetd"  "! grep -q libpinpam /etc/pam.d/greetd"
+check "fprintd in greetd"    "grep -q 'pam_fprintd.*max-tries=1.*timeout=10' /etc/pam.d/greetd"
+check "fprintd in sudo"      "grep -q 'pam_fprintd.*max-tries=1.*timeout=5' /etc/pam.d/sudo"
+check "fprintd in hyprlock"  "grep -q 'pam_fprintd.*max-tries=1.*timeout=5' /etc/pam.d/hyprlock"
+check "pinpam before fprintd sudo" "awk '/libpinpam/{p=NR} /pam_fprintd/{f=NR} END{exit !(p && f && p<f)}' /etc/pam.d/sudo"
+check "pinpam before fprintd hyprlock" "awk '/libpinpam/{p=NR} /pam_fprintd/{f=NR} END{exit !(p && f && p<f)}' /etc/pam.d/hyprlock"
+check "pam_unix in sys-auth" "grep -q pam_unix /etc/pam.d/system-auth"
 check "LUKS root TPM2"      "sudo systemd-cryptenroll /dev/disk/by-partlabel/ArchRoot 2>/dev/null | awk 'NR>1 && \$2==\"tpm2\"{f=1} END{exit !f}'"
 check "cryptvar keyfile"    "sudo test -f /etc/cryptsetup-keys.d/cryptvar.key"
 check "ssh agent wired"     "grep -q bitwarden-ssh-agent.sock $HOME/.ssh/config"
@@ -1277,7 +1296,10 @@ check "ufw default deny in" "sudo ufw status verbose | grep -qi 'Default: deny (
 
 echo "-- DDNS + Let's Encrypt --"
 check "azure-cli"           "command -v az"
-check "memtest86+ entry"   "test -f /boot/loader/entries/memtest86+.conf"
+check "memtest86+ entry"   "sudo grep -qE '^/Memtest86\\+' /boot/limine.conf"
+check "limine-snapper-sync" "pacman -Q limine-snapper-sync"
+check "sbctl installed"    "command -v sbctl"
+check "limine-redeploy hook" "test -x /usr/local/sbin/limine-redeploy"
 check "smartd enabled"      "systemctl is-enabled smartd.service"
 check "metis-ddns binary"   "test -x /usr/local/bin/metis-ddns"
 check "metis-ddns service"  "systemctl is-enabled metis-ddns.service 2>/dev/null || systemctl cat metis-ddns.service >/dev/null 2>&1"
@@ -1315,7 +1337,7 @@ cat <<'POSTINSTALL_OUTRO'
   ONE-TIME ACTIONS (only matter the first time you run this)
 ====================================================================
 
-[1] Reboot or log out → log back in via SDDM to start Hyprland.
+[1] Reboot or log out → log back in via greetd to start Hyprland.
 
 [2] Bitwarden desktop:
       - Launch, log in once with your master password.
@@ -1327,38 +1349,16 @@ cat <<'POSTINSTALL_OUTRO'
       Already wired if the first-login planter ran (see ~/.gitconfig.local).
       Otherwise: open a new terminal and `gh auth login` once.
 
-[4] Azure DDNS (metis.rhombus.rocks):
-      One-time service principal setup (run on this laptop or any machine
-      with the az CLI — `az` is now installed locally either way):
+[4] Azure DDNS (metis.rhombus.rocks) — one-time wiring via setup-azure-ddns.sh:
 
         az login
-        SUB=$(az account show --query id -o tsv)
-        RG=<resource-group-with-the-DNS-zone>      # fnrhombus knows this
-        ZONE_ID=$(az network dns zone show -g "$RG" -n rhombus.rocks --query id -o tsv)
-        az ad sp create-for-rbac \
-            --name metis-ddns \
-            --role "DNS Zone Contributor" \
-            --scopes "$ZONE_ID" \
-            --years 2
+        ~/setup-azure-ddns.sh           # idempotent; rotates secret on each run
 
-      Paste the output into /etc/metis-ddns.env  (mode 600, root):
-        AZ_TENANT_ID=<tenant>
-        AZ_CLIENT_ID=<appId>
-        AZ_CLIENT_SECRET=<password>
-        AZ_SUBSCRIPTION_ID=<SUB>
-        AZ_RESOURCE_GROUP=<RG>
-        # zone + record already set; DDNS_DISABLE_IPV4=1 is the default
-        # (router blocks v4 anyway). Flip to 0 if you ever expose v4.
-
-      Then:
-        sudo systemctl start metis-ddns.service
-        sudo journalctl -u metis-ddns -n 20
-      First call may 403 (role propagation, ~30s–5min) — just retry.
-      The timer + NetworkManager hook take over after first success.
+      The script writes /etc/metis-ddns.env + /etc/letsencrypt/azure.ini and
+      restarts metis-ddns. First call may 403 (role propagation, ~30s–5min)
+      — just retry. Timer + NM hook take over after first success.
 
 [5] Let's Encrypt cert for metis.rhombus.rocks (after step 4 succeeds):
-      Mirror the same SP creds into /etc/letsencrypt/azure.ini using its
-      INI keys (template already in place), then:
 
         sudo certbot certonly \
             --authenticator dns-azure \

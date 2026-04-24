@@ -91,9 +91,9 @@
 #   13. Print the disk state and next-steps for the Windows side.
 #
 # Filesystem UUID is preserved across device add/remove, so /etc/fstab
-# and systemd-boot entries (which use `root=UUID=...`) keep working
-# without edits. The PARTUUID does change — but no tooling in this
-# project depends on PARTUUID.
+# stays valid. limine's /boot/limine.conf references /dev/mapper/cryptroot
+# (the LUKS mapper, not the partition), which is also unchanged. The
+# PARTUUID does change — but no tooling in this project depends on it.
 
 set -euo pipefail
 
@@ -343,7 +343,7 @@ lsblk -o NAME,SIZE,PARTLABEL,FSTYPE,UUID "$SAMSUNG"
 echo
 cat <<SUMMARY
 NEXT STEPS (on the Windows side):
-  1. Reboot into Windows (pick "Windows Boot Manager" in systemd-boot).
+  1. Reboot into Windows (pick "Windows Boot Manager" from the limine menu).
   2. Right-click Start → Disk Management.
   3. Right-click the Windows C: partition → Extend Volume.
   4. Accept the default (extends into the ${S} GB unallocated space).
@@ -354,10 +354,10 @@ NEXT STEPS (on the Windows side):
 
 ROLLBACK (if something looks wrong BEFORE you touch Windows):
   - The original partition is gone but the data lives on the new one.
-  - Linux should boot normally; systemd-boot uses the filesystem UUID,
-    which btrfs preserves across device migration.
-  - If Linux fails to boot: from the live USB, mount the ArchRoot
-    partition, confirm /etc/fstab UUIDs match 'blkid', and check
-    /boot/loader/entries/arch.conf's root=UUID=... value.
+  - Linux should boot normally; limine's cmdline references the LUKS
+    mapper (/dev/mapper/cryptroot), unchanged by btrfs device migration.
+  - If Linux fails to boot: from the live USB, unlock LUKS, mount
+    ArchRoot, confirm /etc/fstab UUIDs match 'blkid', and verify
+    /boot/limine.conf's cmdline still says root=/dev/mapper/cryptroot.
 
 SUMMARY

@@ -10,8 +10,9 @@
 #                          random key per boot) + LUKS2 ext4 (~110 GB, keyfile-unlocked)
 #
 # Full-disk encryption per decisions.md §Q11 — parity with Windows BitLocker.
-# One passphrase unlocks both LUKS volumes at install; post-install phase 3
-# enrolls TPM2 so boot becomes silent (passphrase stays as recovery fallback).
+# Recovery key is auto-generated (BitLocker model: 48 hex chars, displayed
+# once for the user to photograph); post-install phase 3 enrolls TPM2 so
+# boot becomes silent (recovery key stays as fallback).
 #
 # All disk operations are size-gated: the script aborts if the expected
 # disks are absent or if anything looks off. Never silently clobbers.
@@ -52,24 +53,57 @@ prompt_password() {
     openssl passwd -6 "$p1"
 }
 
-# Prompt twice for a LUKS passphrase and print the plaintext on stdout.
-# Unlike prompt_password above (which hashes for /etc/shadow), cryptsetup needs
-# the plaintext — it hashes internally via argon2id. Caller must keep it in
-# memory only; never let it touch disk.
-prompt_luks() {
-    local label="$1" p1 p2
+# Auto-generate a BitLocker-style LUKS recovery key (48 hex chars in 8 groups
+# of 6, hyphen-separated). Display it to the user, pause for them to
+# photograph, and only continue when they explicitly acknowledge.
+#
+# Why generated, not user-typed:
+#   - Eliminates the fat-finger-twice-and-not-know-it failure mode the old
+#     prompt_luks had (mismatch only catches typos *between* the two entries,
+#     not consistent typos in both).
+#   - High entropy (~192 bits) — comparable to BitLocker's 48-digit key.
+#   - Symmetric UX with BitLocker: photograph once, transcribe to Bitwarden
+#     at leisure, never type again unless the TPM seal breaks.
+gen_and_show_luks_passphrase() {
+    # 24 random bytes → 48 hex chars → grouped 6-by-6 with hyphens.
+    local raw key
+    raw=$(openssl rand -hex 24)            # 48 chars, 0-9a-f, ~192 bits entropy
+    key=$(printf '%s' "$raw" | sed 's/.\{6\}/&-/g; s/-$//')
+
+    {
+        printf '\n'
+        printf '\033[1;33m'   # yellow bold for visibility on the live-ISO TTY
+        printf '================================================================\n'
+        printf '   LUKS RECOVERY KEY  --  PHOTOGRAPH THIS NOW\n'
+        printf '================================================================\n'
+        printf '\n'
+        printf '       \033[1;37m%s\033[1;33m\n' "$key"
+        printf '\n'
+        printf '================================================================\n'
+        printf '\033[0m\n'
+        printf '  This unlocks every encrypted volume on Metis (cryptroot,\n'
+        printf '  cryptvar, cryptswap) at boot if the TPM ever loses its seal\n'
+        printf '  -- same model as the BitLocker recovery key you stashed during\n'
+        printf '  the Windows install.\n\n'
+        printf '  WHAT TO DO RIGHT NOW:\n'
+        printf '    1. Take a phone photo of the key above. Make sure it'"'"'s sharp.\n'
+        printf '    2. Later, transcribe it to Bitwarden as "Metis LUKS recovery"\n'
+        printf '       (parallel to "Metis BitLocker recovery").\n\n'
+        printf '  IF YOU LOSE THIS KEY: the encrypted disks become unrecoverable\n'
+        printf '  the moment the TPM seal breaks (firmware update, secure-boot\n'
+        printf '  toggle, motherboard swap). No backdoor, no recovery -- same as\n'
+        printf '  BitLocker.\n\n'
+        printf '  Type \033[1mI HAVE THE KEY\033[0m (case-sensitive, exactly) to continue:\n'
+    } >&2
+
+    local ack
     while :; do
-        read -rsp "LUKS passphrase for $label: " p1 </dev/tty; printf '\n' >&2
-        read -rsp "  confirm $label passphrase: " p2 </dev/tty; printf '\n' >&2
-        if [[ ${#p1} -lt 8 ]]; then
-            warn "  (too short — 8+ chars; 12+ recommended. This is your recovery fallback if the TPM loses its seal.)"
-        elif [[ "$p1" != "$p2" ]]; then
-            warn "  (didn't match — try again)"
-        else
-            break
-        fi
+        read -rp '> ' ack </dev/tty
+        [[ "$ack" == "I HAVE THE KEY" ]] && break
+        printf '  (didn'"'"'t match — type "I HAVE THE KEY" exactly to confirm you photographed it)\n' >&2
     done
-    printf '%s' "$p1"
+
+    printf '%s' "$key"
 }
 
 # Cleanup trap: on any failure, unmount /mnt and close LUKS mappers so a
@@ -89,6 +123,7 @@ cleanup_on_fail() {
     umount -R /mnt 2>/dev/null || true
     # Close LUKS mappers in reverse order (cryptvar may depend on nothing,
     # but cryptroot's btrfs holds the cryptvar keyfile via /mnt mount).
+    cryptsetup close cryptswap 2>/dev/null || true
     cryptsetup close cryptvar  2>/dev/null || true
     cryptsetup close cryptroot 2>/dev/null || true
 }
@@ -106,7 +141,21 @@ confirm() {
 command -v pacstrap >/dev/null          || die "pacstrap missing — not in Arch live env?"
 command -v cryptsetup >/dev/null        || die "cryptsetup missing — not in Arch live env? (FDE requires it)"
 
-# ---------- 0.5 Ventoy data partition ----------
+# ---------- 0.5 source dir (custom ISO baked-in OR Ventoy USB) ----------
+# Two boot paths supported:
+#   (a) Custom Arch ISO with arch-setup/ baked into /root/arch-setup/ at ISO
+#       build time (phase-1-iso/). This is the preferred path post-2026-04
+#       because USB drives have been flaky on this machine.
+#   (b) Vanilla Arch ISO booted from a Ventoy USB stick that ALSO holds the
+#       arch-setup repo at its root. Original (and still-supported) path.
+#
+# Probe (a) first; fall back to (b) if it's not present.
+SOURCE_DIR=""
+if [[ -f /root/arch-setup/phase-2-arch-install/chroot.sh ]]; then
+    SOURCE_DIR=/root/arch-setup
+    log "Source: baked-in custom ISO ($SOURCE_DIR)."
+fi
+
 # Ventoy boots the Arch ISO via a dm-linear target on /dev/sdX. While that
 # parent disk can still be read (dm is a passthrough, not an exclusive
 # claim), the kernel-synthesised partition node /dev/sdX1 is held busy by
@@ -118,7 +167,7 @@ command -v cryptsetup >/dev/null        || die "cryptsetup missing — not in Ar
 # is to build a fresh dm-linear against the parent disk at partition 1's
 # sector offset, and mount *that* mapper device.
 VENTOY_MNT=/run/ventoy
-if ! mountpoint -q "$VENTOY_MNT"; then
+if [[ -z "$SOURCE_DIR" ]] && ! mountpoint -q "$VENTOY_MNT"; then
     # Find the USB disk. Prefer the "ventoy" dm target (present on the
     # initial boot), but if the stick was unplugged + replugged the target
     # is orphaned; fall back to blkid-by-label, then any USB-TRAN disk.
@@ -164,8 +213,14 @@ if ! mountpoint -q "$VENTOY_MNT"; then
         || die "Failed to mount /dev/mapper/$VENTOY_PART at $VENTOY_MNT."
     log "Ventoy data partition mounted at $VENTOY_MNT (ro, via dm passthrough)."
 fi
-[[ -f "$VENTOY_MNT/phase-2-arch-install/chroot.sh" ]] \
-    || die "$VENTOY_MNT is mounted but chroot.sh is missing — wrong USB stick?"
+
+# Resolve SOURCE_DIR (Ventoy fallback if baked-in path didn't exist).
+if [[ -z "$SOURCE_DIR" ]]; then
+    [[ -f "$VENTOY_MNT/phase-2-arch-install/chroot.sh" ]] \
+        || die "$VENTOY_MNT is mounted but chroot.sh is missing — wrong USB stick?"
+    SOURCE_DIR="$VENTOY_MNT"
+    log "Source: Ventoy USB ($SOURCE_DIR)."
+fi
 
 # ---------- 1. locate disks by size ----------
 # decisions.md §Q9: Samsung 512 GB nominal (~476 GiB actual), Netac 128 GB nominal (~119 GiB actual).
@@ -238,12 +293,12 @@ timedatectl set-ntp true
 # LUKS passphrase stays in an in-memory variable for the duration of this
 # script — used to luksFormat both volumes and to luksAddKey the cryptvar
 # keyfile — then unset before exit. Never touches disk.
-command -v openssl >/dev/null || die "openssl not found in live env — needed for password hashing."
-log "Collecting passwords + LUKS passphrase now (you won't be prompted again during install)."
-log "The LUKS passphrase is what you'll type at boot if the TPM ever loses its seal — stash it in Bitwarden."
+command -v openssl >/dev/null || die "openssl not found in live env — needed for password hashing + LUKS key generation."
+log "Collecting passwords now (you won't be prompted again during install)."
+log "After the two account passwords, a 48-char LUKS recovery key will be generated and displayed for you to photograph."
 ROOT_PW_HASH=$(prompt_password "root")
 TOM_PW_HASH=$(prompt_password "tom")
-LUKS_PW=$(prompt_luks "disk encryption (used for both Samsung root and Netac /var)")
+LUKS_PW=$(gen_and_show_luks_passphrase)
 
 # ---------- 3. confirm ----------
 cat <<EOF
@@ -328,13 +383,21 @@ printf '%s' "$LUKS_PW" | cryptsetup luksFormat --type luks2 --batch-mode \
     --label ArchVarLUKS --key-file=- "$NETAC_VAR"
 printf '%s' "$LUKS_PW" | cryptsetup open --key-file=- "$NETAC_VAR" cryptvar
 
+# Hibernate-ready swap: persistent LUKS header (NOT random key per boot).
+# Random key would make resume images unreadable on next boot — fine when
+# we don't hibernate, broken now that we do. Reuses the same passphrase
+# for crisis-recovery; phase-3 enrolls a TPM2 slot for silent unlock.
+log "Encrypting Netac swap ($NETAC_SWAP) with LUKS2 (persistent — hibernate-ready)..."
+printf '%s' "$LUKS_PW" | cryptsetup luksFormat --type luks2 --batch-mode \
+    --label ArchSwapLUKS --key-file=- "$NETAC_SWAP"
+printf '%s' "$LUKS_PW" | cryptsetup open --key-file=- "$NETAC_SWAP" cryptswap
+
 log "Creating filesystems on LUKS mappers..."
 mkfs.btrfs -f -L ArchRoot /dev/mapper/cryptroot
 mkfs.ext4  -F -L ArchVar  /dev/mapper/cryptvar
-# Swap is encrypted via /dev/urandom per boot (see /etc/crypttab in chroot.sh)
-# so we don't mkswap here — crypttab's `swap` option does it each boot against
-# /dev/mapper/cryptswap. The live ISO doesn't need swap (16 GB RAM is plenty
-# for pacstrap), so there's no benefit to swapon-ing a plaintext fallback.
+mkswap     -L ArchSwap    /dev/mapper/cryptswap
+# Don't swapon during install — pacstrap doesn't need it (16 GB RAM is plenty)
+# and an active swap mapping would block the cryptsetup close at the bottom.
 # NETAC_RECOVERY stays raw and unencrypted — we dd the Arch ISO onto it later.
 # (Rationale: recovery partition is intentionally bootable as-is; encrypting
 # it would defeat the "boot this from F12 if Arch is hosed" survival path.)
@@ -400,7 +463,7 @@ pacstrap -K /mnt \
     efibootmgr \
     man-db man-pages texinfo \
     pipewire pipewire-pulse pipewire-jack wireplumber \
-    sddm hyprland xdg-desktop-portal-hyprland \
+    hyprland xdg-desktop-portal-hyprland xdg-desktop-portal-gtk \
     polkit \
     noto-fonts noto-fonts-emoji ttf-jetbrains-mono-nerd \
     mesa intel-media-driver vulkan-intel libva-intel-driver \
@@ -435,9 +498,15 @@ with open(p, "w") as f: f.write("\n".join(out) + "\n")
 PYEOF
 
 # ---------- 11. chroot config ----------
-log "Staging chroot script..."
-cp "$VENTOY_MNT/phase-2-arch-install/chroot.sh" /mnt/root/chroot.sh
+log "Staging chroot script + repo..."
+cp "$SOURCE_DIR/phase-2-arch-install/chroot.sh" /mnt/root/chroot.sh
 chmod +x /mnt/root/chroot.sh
+
+# Stage the entire repo at /root/arch-setup/ inside the chroot so chroot.sh
+# can install greetd system-files from phase-3-arch-postinstall/system-files/
+# and so postinstall can find dotfiles/ for chezmoi init.
+mkdir -p /mnt/root/arch-setup
+cp -r "$SOURCE_DIR"/. /mnt/root/arch-setup/
 
 # Hand the pre-hashed passwords to the chroot via a root-owned mode-600
 # file. chroot.sh reads + shreds it. cleanup_on_fail also rm -f's it so an
@@ -446,18 +515,18 @@ chmod +x /mnt/root/chroot.sh
 
 # Hand the LUKS partition UUIDs to chroot.sh (no passphrase — that stays
 # in-memory here). chroot.sh needs these for /etc/crypttab.initramfs +
-# /etc/crypttab + kernel cmdline. Use UUID (LUKS header) for cryptroot +
-# cryptvar so the mapping survives partition-table renumbering; PARTUUID
-# for cryptswap because there's no LUKS header (random-key plain dm-crypt).
+# /etc/crypttab + kernel cmdline. UUID (LUKS header) for all three now —
+# swap is a persistent LUKS volume (hibernate-ready) so it has a header.
 LUKS_ROOT_UUID=$(blkid -s UUID -o value "$SAMSUNG_ROOT")
 LUKS_VAR_UUID=$(blkid -s UUID -o value "$NETAC_VAR")
-SWAP_PARTUUID=$(blkid -s PARTUUID -o value "$NETAC_SWAP")
-[[ -n "$LUKS_ROOT_UUID" && -n "$LUKS_VAR_UUID" && -n "$SWAP_PARTUUID" ]] \
+LUKS_SWAP_UUID=$(blkid -s UUID -o value "$NETAC_SWAP")
+[[ -n "$LUKS_ROOT_UUID" && -n "$LUKS_VAR_UUID" && -n "$LUKS_SWAP_UUID" ]] \
     || die "Failed to resolve LUKS UUIDs (blkid returned empty)."
 (umask 077 && cat > /mnt/root/.luks <<EOF
 LUKS_ROOT_UUID=$LUKS_ROOT_UUID
 LUKS_VAR_UUID=$LUKS_VAR_UUID
-SWAP_PARTUUID=$SWAP_PARTUUID
+LUKS_SWAP_UUID=$LUKS_SWAP_UUID
+SAMSUNG_DISK=$SAMSUNG
 EOF
 )
 
@@ -469,8 +538,19 @@ unset LUKS_PW
 
 # ---------- 12. recovery partition ----------
 log "Writing Arch ISO to recovery partition $NETAC_RECOVERY..."
-ARCH_ISO=$(ls "$VENTOY_MNT"/archlinux-*.iso 2>/dev/null | head -1 || true)
-[[ -n "$ARCH_ISO" && -f "$ARCH_ISO" ]] || die "No Arch ISO found on Ventoy."
+# Look for the Arch ISO at: (a) Ventoy USB root, (b) custom-ISO source dir
+# fallback (the live system itself is the recovery image candidate).
+ARCH_ISO=$(ls "$SOURCE_DIR"/archlinux-*.iso 2>/dev/null | head -1 || true)
+if [[ -z "$ARCH_ISO" || ! -f "$ARCH_ISO" ]] && [[ -d /run/archiso/bootmnt ]]; then
+    # Custom-ISO boot path: the running ISO IS what we'd dd. Use the live
+    # device. /run/archiso/bootmnt is the archiso default mount.
+    log "  No Arch ISO file in source; falling back to the live ISO image itself."
+    LIVE_ISO_DEV=$(findmnt -no SOURCE /run/archiso/bootmnt 2>/dev/null | head -1)
+    if [[ -b "$LIVE_ISO_DEV" ]]; then
+        ARCH_ISO="$LIVE_ISO_DEV"
+    fi
+fi
+[[ -n "$ARCH_ISO" ]] || die "No Arch ISO found (checked $SOURCE_DIR + /run/archiso)."
 # Size-gate: NETAC_RECOVERY is 1536 MiB. A larger ISO would dd past the
 # partition boundary into NETAC_SWAP with no error, silently corrupting swap.
 ISO_BYTES=$(stat -c%s "$ARCH_ISO")
@@ -481,13 +561,16 @@ fi
 dd if="$ARCH_ISO" of="$NETAC_RECOVERY" bs=4M status=progress conv=fsync
 
 # ---------- 13. post-install hook ----------
-# Stage phase-3 script where the user can run it after first login.
-mkdir -p /mnt/home/tom
-cp "$VENTOY_MNT/phase-3-arch-postinstall/postinstall.sh" /mnt/home/tom/postinstall.sh 2>/dev/null || warn "phase-3 script missing — you can copy it later."
-# p10k.zsh sidecar — postinstall.sh's SCRIPT_DIR lookup expects it next to itself.
-cp "$VENTOY_MNT/phase-3-arch-postinstall/p10k.zsh" /mnt/home/tom/p10k.zsh 2>/dev/null || true
-# Dotfiles (end-4/dots-hyprland) are cloned from GitHub by postinstall.sh at
-# first boot — keeps the USB lean and the dots current. Network required.
+# Stage phase-3 script + setup-azure-ddns + the dotfiles tree where the
+# user can run them after first login. (The full repo is already at
+# /mnt/root/arch-setup/ from the staging step in §11.)
+install -d -m 755 /mnt/home/tom
+cp "$SOURCE_DIR/phase-3-arch-postinstall/postinstall.sh"     /mnt/home/tom/postinstall.sh 2>/dev/null \
+    || warn "phase-3 script missing — copy it later from /root/arch-setup."
+cp "$SOURCE_DIR/phase-3-arch-postinstall/setup-azure-ddns.sh" /mnt/home/tom/setup-azure-ddns.sh 2>/dev/null || true
+chmod +x /mnt/home/tom/postinstall.sh /mnt/home/tom/setup-azure-ddns.sh 2>/dev/null || true
+# Dotfiles (Claude-authored, chezmoi-managed) live at /root/arch-setup/dotfiles
+# and are applied by postinstall via `chezmoi init --source=...`.
 arch-chroot /mnt chown -R tom:tom /home/tom
 
 # ---------- 14. cleanup ----------
@@ -497,6 +580,7 @@ umount -R /mnt
 # Close LUKS mappers so a retry (or a manual `cryptsetup luksFormat` later)
 # doesn't trip on "device still in use". No swap was mounted — cryptswap is
 # a boot-time construct — so no swapoff needed here.
+cryptsetup close cryptswap || true
 cryptsetup close cryptvar  || true
 cryptsetup close cryptroot || true
 
@@ -506,7 +590,8 @@ Done. Remove the USB and reboot.
 
 First boot asks for the LUKS passphrase (you set it at the top of this run).
 Log in as 'tom', then:
-    ./postinstall.sh           # installs yay, zgenom, illogical-impulse dots,
-                               # catppuccin, chezmoi, fingerprint, TPM2 enroll
-                               # for silent LUKS unlock, etc.
+    ./postinstall.sh           # installs yay, zgenom, chezmoi (applies the
+                               # bare-Hyprland dotfiles + matugen pipeline),
+                               # fingerprint, TPM2 enroll for silent LUKS
+                               # unlock, ufw, metis-ddns, printer drivers, etc.
 EOF

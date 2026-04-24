@@ -11,6 +11,12 @@
 # to keep V: free. Machine-specific, never commit.
 /assets/Win11_*.iso
 
+# Custom live ISOs built by `pnpm iso` (scripts/build-custom-iso.sh).
+# These are large (~1.5 GB) and build-reproducible — regenerate instead
+# of committing.
+/assets/arch-setup-*.iso
+/assets/arch-setup-*.iso.sha256
+
 # npm/pnpm
 /node_modules/
 

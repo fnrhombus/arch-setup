@@ -1,0 +1,109 @@
+/* waybar — top-level styling. Colors come from colors.css (matugen-rendered). */
+
+@import url("colors.css");
+
+* {
+    font-family: "JetBrainsMono Nerd Font", "Symbols Nerd Font", monospace;
+    font-size: 13px;
+    min-height: 0;
+    border: none;
+    border-radius: 0;
+}
+
+window#waybar {
+    background-color: alpha(@surface-container, 0.85);
+    color: @on-surface;
+    border-radius: 12px;
+    transition: background-color 0.3s ease;
+}
+
+window#waybar.empty {
+    background-color: transparent;
+}
+
+#workspaces {
+    background-color: alpha(@surface, 0.6);
+    border-radius: 10px;
+    margin: 4px 6px;
+    padding: 0 4px;
+}
+
+#workspaces button {
+    color: @outline;
+    padding: 0 8px;
+    background-color: transparent;
+    border-radius: 8px;
+    transition: all 0.2s ease;
+}
+
+#workspaces button:hover {
+    color: @on-surface;
+    background-color: @surface-container;
+    box-shadow: none;
+}
+
+#workspaces button.active {
+    color: @on-primary;
+    background-color: @primary;
+}
+
+#workspaces button.urgent {
+    color: white;
+    background-color: @error;
+}
+
+#window {
+    color: @on-surface;
+    padding: 0 8px;
+    font-style: italic;
+}
+
+#clock {
+    color: @on-primary-container;
+    background-color: @primary-container;
+    padding: 0 14px;
+    border-radius: 10px;
+    margin: 4px 0;
+}
+
+#tray,
+#wireplumber,
+#battery,
+#custom-network,
+#custom-notifications,
+#custom-theme-toggle,
+#custom-power {
+    color: @on-surface;
+    background-color: alpha(@surface, 0.6);
+    padding: 0 10px;
+    border-radius: 10px;
+    margin: 4px 2px;
+}
+
+#custom-notifications.dnd-notification,
+#custom-notifications.dnd-none,
+#custom-notifications.inhibited-notification,
+#custom-notifications.dnd-inhibited-notification {
+    color: @error;
+}
+
+#battery.warning  { color: @secondary; }
+#battery.critical { color: @error; }
+#battery.charging { color: @tertiary; }
+
+#custom-power {
+    color: @error;
+    padding: 0 12px;
+}
+
+#tray menu {
+    background-color: @surface-high;
+    color: @on-surface;
+}
+
+tooltip {
+    background-color: @surface-high;
+    color: @on-surface;
+    border: 1px solid @primary;
+    border-radius: 8px;
+}

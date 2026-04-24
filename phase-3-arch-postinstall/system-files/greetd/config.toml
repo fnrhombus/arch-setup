@@ -1,0 +1,17 @@
+# greetd — Wayland greeter daemon. Replaces SDDM per docs/decisions.md §D.
+# Installed by postinstall.sh (script-implementation pass) to /etc/greetd/config.toml.
+#
+# `command` runs ReGreet which then launches Hyprland after authentication.
+
+[terminal]
+vt = 1
+
+[default_session]
+command = "regreet -l debug -- hyprland"
+user = "greeter"
+
+[initial_session]
+# Disabled — we want the greeter to show, not autologin to the user.
+# Uncomment + set user = "tom" to enable autologin (rare on this setup).
+# command = "Hyprland"
+# user = "tom"

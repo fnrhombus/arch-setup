@@ -1,0 +1,26 @@
+# ReGreet config — installed to /etc/greetd/regreet.toml by postinstall.
+# Visual theming via /etc/greetd/regreet.css (matugen-rendered to user
+# cache then copied here).
+
+[background]
+path = "/etc/greetd/wallpaper.jpg"
+fit = "Cover"
+
+[GTK]
+application_prefer_dark_theme = true
+cursor_theme_name = "Bibata-Modern-Classic"
+font_name = "Noto Sans 11"
+icon_theme_name = "Papirus-Dark"
+theme_name = "Adwaita-dark"
+
+[appearance]
+greeting_msg = "Welcome to Metis"
+
+[commands]
+reboot = ["systemctl", "reboot"]
+poweroff = ["systemctl", "poweroff"]
+
+[widget.clock]
+format = "%a %b %e   %H:%M"
+resolution = "500ms"
+label_width = 240
