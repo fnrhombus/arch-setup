@@ -321,6 +321,18 @@ log "EFI System partition: $SAMSUNG_EFI"
 #                     the Arch ISO dd'd onto it in §12.
 if (( VENTOY_ON_NETAC )); then
     log "Partitioning $NETAC reserved region (Ventoy data + VTOYEFI preserved)..."
+    # A previous aborted install.sh run (or any prior LUKS attempt) may have
+    # left partitions 3+/4+ in place. sgdisk --new refuses to overwrite an
+    # existing partition number — it'll log "Could not create partition N
+    # from 40 to 2047" and abort. Delete partitions > 2 in reverse order so
+    # the table doesn't get renumbered mid-loop, leaving sdb1 (Ventoy data)
+    # + sdb2 (VTOYEFI) intact.
+    for n in $(sgdisk --print "$NETAC" | awk '$1 ~ /^[0-9]+$/ && $1 > 2 {print $1}' | sort -rn); do
+        log "  removing stale Netac partition ${NETAC}${n}"
+        sgdisk --delete="$n" "$NETAC"
+    done
+    partprobe "$NETAC"
+    udevadm settle
     # sgdisk --new=N:0:... starts at the first free sector after the highest
     # existing partition — which is VTOYEFI (partition 2) for Ventoy-on-Netac
     # installed via Ventoy2Disk -r. So partitions 3 + 4 land in the reserved
