@@ -363,6 +363,17 @@ fi
 unset -f _netac_part
 unset _NETAC_RECOVERY_N _NETAC_SWAP_N _NETAC_VAR_N
 
+# Defensive: the two block devices below get separate cryptsetup luksFormat
+# calls, so they MUST be distinct block devices. If they collide (something
+# wrong with the resolver or the kernel's view of the partition table), the
+# second luksFormat fails mid-way with "device in use" AFTER the first has
+# written a LUKS header — leaving the retry needing a `cryptsetup close`
+# that the cleanup trap does but the user can't see. Fail loud, up front.
+log "Resolved Netac partitions: SWAP=$NETAC_SWAP  VAR=$NETAC_VAR  RECOVERY=${NETAC_RECOVERY:-<none>}"
+[[ -b "$NETAC_SWAP" ]] || die "NETAC_SWAP=$NETAC_SWAP is not a block device. Kernel may not have re-read the partition table after sgdisk — try \`blockdev --rereadpt $NETAC\` manually and retry."
+[[ -b "$NETAC_VAR"  ]] || die "NETAC_VAR=$NETAC_VAR is not a block device. Same cause as above."
+[[ "$NETAC_SWAP" != "$NETAC_VAR" ]] || die "NETAC_SWAP and NETAC_VAR both resolved to $NETAC_SWAP. Resolver bug or sgdisk didn't create both partitions."
+
 # ---------- 6. LUKS format + filesystems ----------
 # Encrypt both data partitions with the same passphrase. The passphrase is
 # the ONLY key at install time; phase 3's postinstall.sh enrolls TPM2 later
