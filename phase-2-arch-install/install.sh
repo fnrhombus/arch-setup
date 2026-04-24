@@ -547,34 +547,42 @@ rm -f /mnt/root/.pw /mnt/root/.luks
 unset LUKS_PW
 
 # ---------- 12. recovery partition ----------
-# Skipped in the Ventoy-on-Netac bootstrap: the Netac's Ventoy data
-# partition already carries the bootable Arch ISO, so it IS the recovery.
-# NETAC_RECOVERY is empty in that branch (set by §5 when VENTOY_ON_NETAC=1).
+# Skipped if NETAC_RECOVERY is empty (no separate recovery partition in the
+# chosen layout). Otherwise tries to dd an Arch ISO onto it; if no ISO is
+# available (e.g. the Netac-Ventoy bootstrap wiped the ISO source along
+# with the Netac in §5, and the live ISO isn't reachable as a block device
+# either), WARN instead of dying — install completes with an empty recovery
+# partition, user populates it manually later. Better than aborting after
+# pacstrap + chroot have already succeeded.
 if [[ -z "$NETAC_RECOVERY" ]]; then
-    log "Ventoy-on-Netac: skipping recovery-partition write (the Ventoy ISO is the recovery)."
+    log "No separate recovery partition in this layout; skipping ISO write."
 else
-    log "Writing Arch ISO to recovery partition $NETAC_RECOVERY..."
-    # Look for the Arch ISO at: (a) Ventoy USB root, (b) custom-ISO source dir
-    # fallback (the live system itself is the recovery image candidate).
+    # Look for the Arch ISO at: (a) SOURCE_DIR, (b) custom-ISO live-boot
+    # fallback (the running ISO IS what we'd dd; use the live device).
     ARCH_ISO=$(ls "$SOURCE_DIR"/archlinux-*.iso 2>/dev/null | head -1 || true)
     if [[ -z "$ARCH_ISO" || ! -f "$ARCH_ISO" ]] && [[ -d /run/archiso/bootmnt ]]; then
-        # Custom-ISO boot path: the running ISO IS what we'd dd. Use the live
-        # device. /run/archiso/bootmnt is the archiso default mount.
-        log "  No Arch ISO file in source; falling back to the live ISO image itself."
+        log "  No Arch ISO file in source; checking the live ISO image itself."
         LIVE_ISO_DEV=$(findmnt -no SOURCE /run/archiso/bootmnt 2>/dev/null | head -1)
         if [[ -b "$LIVE_ISO_DEV" ]]; then
             ARCH_ISO="$LIVE_ISO_DEV"
         fi
     fi
-    [[ -n "$ARCH_ISO" ]] || die "No Arch ISO found (checked $SOURCE_DIR + /run/archiso)."
-    # Size-gate: NETAC_RECOVERY is 1536 MiB. A larger ISO would dd past the
-    # partition boundary into NETAC_SWAP with no error, silently corrupting swap.
-    ISO_BYTES=$(stat -c%s "$ARCH_ISO")
-    PART_BYTES=$(blockdev --getsize64 "$NETAC_RECOVERY")
-    if (( ISO_BYTES > PART_BYTES )); then
-        die "Arch ISO ($ISO_BYTES bytes) is larger than recovery partition ($PART_BYTES bytes). Resize NETAC_RECOVERY in install.sh or use a smaller ISO."
+    if [[ -z "$ARCH_ISO" ]]; then
+        warn "No Arch ISO found (checked $SOURCE_DIR + /run/archiso). Skipping recovery write."
+        warn "  Populate manually after boot: sudo dd if=/path/to/archlinux-x86_64.iso of=$NETAC_RECOVERY bs=4M conv=fsync"
+    else
+        log "Writing Arch ISO to recovery partition $NETAC_RECOVERY..."
+        # Size-gate: NETAC_RECOVERY is 1536 MiB. A larger ISO would dd past the
+        # partition boundary into NETAC_SWAP with no error, silently corrupting swap.
+        ISO_BYTES=$(stat -c%s "$ARCH_ISO")
+        PART_BYTES=$(blockdev --getsize64 "$NETAC_RECOVERY")
+        if (( ISO_BYTES > PART_BYTES )); then
+            warn "Arch ISO ($ISO_BYTES bytes) is larger than recovery partition ($PART_BYTES bytes). Skipping."
+            warn "  Resize NETAC_RECOVERY in install.sh or populate with a smaller ISO later."
+        else
+            dd if="$ARCH_ISO" of="$NETAC_RECOVERY" bs=4M status=progress conv=fsync
+        fi
     fi
-    dd if="$ARCH_ISO" of="$NETAC_RECOVERY" bs=4M status=progress conv=fsync
 fi
 
 # ---------- 13. post-install hook ----------
