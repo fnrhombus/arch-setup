@@ -53,37 +53,44 @@ prompt_password() {
     openssl passwd -6 "$p1"
 }
 
-# Auto-generate a BitLocker-style LUKS recovery key (48 hex chars in 8 groups
-# of 6, hyphen-separated). Display it to the user, pause for them to
-# photograph, and only continue when they explicitly acknowledge.
+# Auto-generate a BitLocker-style LUKS recovery key (48 numeric digits).
+# Display in 8 space-separated groups of 6 for readability, but the
+# spaces are display-only — the actual passphrase passed to luksFormat
+# (and typed at boot) is the raw 48-digit string with no separators.
+# That matches BitLocker's recovery-key UX exactly: digits + visual
+# grouping + no need to type the separators.
 #
 # Why generated, not user-typed:
 #   - Eliminates the fat-finger-twice-and-not-know-it failure mode the old
 #     prompt_luks had (mismatch only catches typos *between* the two entries,
 #     not consistent typos in both).
-#   - High entropy (~192 bits) — comparable to BitLocker's 48-digit key.
+#   - 48 digits = ~159 bits entropy — strong enough; KDF stretches further.
 #   - Symmetric UX with BitLocker: photograph once, transcribe to Bitwarden
 #     at leisure, never type again unless the TPM seal breaks.
 gen_and_show_luks_passphrase() {
-    # 24 random bytes → 48 hex chars → grouped 6-by-6 with hyphens.
-    local raw key ack
-    raw=$(openssl rand -hex 24)            # 48 chars, 0-9a-f, ~192 bits entropy
-    key=$(printf '%s' "$raw" | sed 's/.\{6\}/&-/g; s/-$//')
+    local key display_key ack
+    # 48 numeric digits from /dev/urandom. tr -dc strips everything but
+    # 0-9; head -c 48 caps the stream. /dev/urandom is the cryptographic
+    # PRNG; openssl rand isn't needed (and `openssl rand -hex` would give
+    # us 0-9a-f which is what we *don't* want here).
+    key=$(tr -dc '0-9' </dev/urandom | head -c 48)
+    # Display form only: insert a space every 6 digits.
+    display_key=$(printf '%s' "$key" | sed 's/.\{6\}/& /g; s/ $//')
 
     # Red-banner BitLocker-style box (ported from install-auto-luks) plus
-    # main's lighter "I HAVE THE KEY" ack (no full retype — 55 chars is a
-    # lot to fat-finger on a TTY). Symmetric UX with the Windows-side
-    # BitLocker recovery dialog.
+    # main's lighter "I HAVE THE KEY" ack (no full retype — 48 digits is
+    # already plenty to fat-finger on a TTY).
     {
         printf '\n'
         printf '\033[1;37;41m%s\033[0m\n' "╔══════════════════════════════════════════════════════════════════════╗"
         printf '\033[1;37;41m%s\033[0m\n' "║                  LUKS RECOVERY KEY — SAVE THIS NOW                   ║"
         printf '\033[1;37;41m%s\033[0m\n' "║                                                                      ║"
-        printf '\033[1;37;41m║   \033[1;33;41m%s\033[1;37;41m   ║\033[0m\n' "$key"
+        printf '\033[1;37;41m║   \033[1;33;41m%s\033[1;37;41m   ║\033[0m\n' "$display_key"
         printf '\033[1;37;41m%s\033[0m\n' "║                                                                      ║"
         printf '\033[1;37;41m%s\033[0m\n' "║   Save to Bitwarden as 'Metis LUKS'. This key will NOT be written    ║"
         printf '\033[1;37;41m%s\033[0m\n' "║   to any disk. Once install continues, it exists only inside the     ║"
         printf '\033[1;37;41m%s\033[0m\n' "║   LUKS header — no paper trail, no backup, no recovery from us.      ║"
+        printf '\033[1;37;41m%s\033[0m\n' "║   When typing at the LUKS prompt: digits ONLY, no spaces.            ║"
         printf '\033[1;37;41m%s\033[0m\n' "╚══════════════════════════════════════════════════════════════════════╝"
         printf '\n'
         printf '  Type \033[1mI HAVE THE KEY\033[0m (case-sensitive, exactly) to continue:\n'
