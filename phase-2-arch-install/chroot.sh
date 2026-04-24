@@ -7,7 +7,7 @@
 #   - limine bootloader (shares the EFI Windows created at /boot, written
 #     to the fallback path \EFI\BOOT\BOOTX64.EFI so Windows NVRAM resets
 #     don't kill us)
-#   - hibernate-ready cryptswap with TPM2 sealing + resume= cmdline
+#   - plain dm-crypt cryptswap (per-boot random key; no hibernate)
 #   - NVIDIA blacklist (MX250 Optimus — Intel iGPU only, decisions.md §Q5)
 #   - NetworkManager + greetd + bluetooth + fprintd enabled
 #   - greetd PAM stack from system-files/pam.d/greetd (gnome-keyring + fprintd)
@@ -35,8 +35,8 @@ trap 'shred -u /root/.pw /root/.luks 2>/dev/null || rm -f /root/.pw /root/.luks'
 [[ -s /root/.luks ]] || die "/root/.luks missing — install.sh should have written LUKS UUIDs + SAMSUNG_DISK."
 # shellcheck disable=SC1091
 . /root/.luks
-[[ -n "${LUKS_ROOT_UUID:-}" && -n "${LUKS_VAR_UUID:-}" && -n "${LUKS_SWAP_UUID:-}" ]] \
-    || die "/root/.luks is missing one or more UUIDs."
+[[ -n "${LUKS_ROOT_UUID:-}" && -n "${LUKS_VAR_UUID:-}" && -n "${SWAP_PARTUUID:-}" ]] \
+    || die "/root/.luks is missing one or more identifiers (LUKS_ROOT_UUID / LUKS_VAR_UUID / SWAP_PARTUUID)."
 [[ -n "${SAMSUNG_DISK:-}" && -b "$SAMSUNG_DISK" ]] \
     || die "/root/.luks is missing SAMSUNG_DISK or it isn't a block device."
 
@@ -127,38 +127,28 @@ EOF
 #                               Opens cryptvar from the on-root keyfile, then
 #                               cryptswap with a fresh /dev/urandom key per
 #                               boot.
-log "Writing /etc/crypttab.initramfs (cryptroot + cryptswap, passphrase-only) + /etc/crypttab (cryptvar)..."
-# NO tpm2-device=auto in crypttab.initramfs at install time: no TPM2
-# keyslot has been enrolled yet, and systemd-cryptsetup's tpm2-device
-# path does NOT cleanly fall back to passphrase when the keyslot is
-# missing — it blocks waiting for TPM and silently masks the password
-# agent on the second volume (refs: systemd/systemd#39049, #36293).
-# Result: first boot hangs after the cryptroot passphrase is accepted,
-# because cryptswap is waiting for a TPM unlock that can never come.
-# Phase-3 postinstall runs `systemd-cryptenroll --tpm2-device=auto` on
-# both devices and THEN adds `tpm2-device=auto` to these two lines +
-# `mkinitcpio -P` — subsequent boots are silent. Until then, both
-# volumes prompt for the passphrase; sd-encrypt's keyring cache means
-# you type it once and cryptswap picks it up from the cache.
+log "Writing /etc/crypttab.initramfs (cryptroot only) + /etc/crypttab (cryptvar + cryptswap)..."
+# Only cryptroot goes in crypttab.initramfs — the initramfs sd-encrypt
+# hook opens it to let the kernel mount root. NO tpm2-device=auto until
+# phase-3 postinstall has actually enrolled a TPM2 slot (the option
+# blocks waiting for a non-existent slot and hangs boot; see install.sh
+# comment for the systemd bug refs).
 #
-# cryptvar is unlocked from a keyfile stored on the (now-unlocked) cryptroot
-# filesystem. Intentionally NOT TPM-enrolled — once cryptroot is open, the
-# keyfile is readable by root, so a redundant TPM slot would only waste LUKS
-# slot budget without adding any at-rest protection.
+# cryptvar opens post-pivot via a keyfile on cryptroot.
+#
+# cryptswap is plain dm-crypt with a per-boot /dev/urandom key —
+# simpler, no enrollment needed, mkswap runs inside
+# systemd-cryptsetup@cryptswap.service at every boot. Rules out S4
+# hibernate (fresh key per boot can't decrypt a stored resume image)
+# but matches the proven install-auto-luks pattern.
 cat > /etc/crypttab.initramfs <<EOF
 cryptroot UUID=$LUKS_ROOT_UUID none luks,discard
-cryptswap UUID=$LUKS_SWAP_UUID none luks,discard
 EOF
 cat > /etc/crypttab <<EOF
 cryptvar  UUID=$LUKS_VAR_UUID  /etc/cryptsetup-keys.d/cryptvar.key  luks,discard
+cryptswap PARTUUID=$SWAP_PARTUUID /dev/urandom swap,cipher=aes-xts-plain64,size=256,discard
 EOF
 chmod 600 /etc/crypttab /etc/crypttab.initramfs
-
-# cryptswap moved to crypttab.initramfs (above) so the resume codepath
-# can find the RAM image during initramfs — resume happens BEFORE root
-# is mounted, so cryptswap must be opened in the initramfs. Phase-3
-# postinstall enrolls TPM2 on cryptswap (same as cryptroot/cryptvar).
-# Until enrolled, the LUKS passphrase prompt fires for swap at first boot.
 
 # ---------- fstab fixups for encrypted devices ----------
 # genfstab (run in install.sh) emitted entries keyed off the currently-mounted
@@ -228,21 +218,21 @@ default_entry: 1
     kernel_path: boot():/vmlinuz-linux
     module_path: boot():/intel-ucode.img
     module_path: boot():/initramfs-linux.img
-    cmdline: root=/dev/mapper/cryptroot rootflags=subvol=@ resume=/dev/mapper/cryptswap rw quiet
+    cmdline: root=/dev/mapper/cryptroot rootflags=subvol=@ rw quiet
 
 /Arch Linux (LTS)
     protocol: linux
     kernel_path: boot():/vmlinuz-linux-lts
     module_path: boot():/intel-ucode.img
     module_path: boot():/initramfs-linux-lts.img
-    cmdline: root=/dev/mapper/cryptroot rootflags=subvol=@ resume=/dev/mapper/cryptswap rw quiet
+    cmdline: root=/dev/mapper/cryptroot rootflags=subvol=@ rw quiet
 
 /Arch Linux (Fallback)
     protocol: linux
     kernel_path: boot():/vmlinuz-linux
     module_path: boot():/intel-ucode.img
     module_path: boot():/initramfs-linux-fallback.img
-    cmdline: root=/dev/mapper/cryptroot rootflags=subvol=@ resume=/dev/mapper/cryptswap rw
+    cmdline: root=/dev/mapper/cryptroot rootflags=subvol=@ rw
 
 /Windows Boot Manager
     protocol: efi_chainload
