@@ -133,6 +133,22 @@ confirm() {
 command -v pacstrap >/dev/null          || die "pacstrap missing — not in Arch live env?"
 command -v cryptsetup >/dev/null        || die "cryptsetup missing — not in Arch live env? (FDE requires it)"
 
+# Defensive: close any leftover dm-crypt mappers from a prior aborted run.
+# cleanup_on_fail handles normal aborts, but hard crashes (power, kernel
+# panic) or a user Ctrl+C between steps can leave mappers open. sgdisk
+# then refuses to repartition, cryptsetup luksFormat errors with "device
+# in use", etc. Close in reverse dependency order; errors are tolerated
+# because the common case is nothing to close.
+swapoff -a 2>/dev/null || true
+umount -R /mnt 2>/dev/null || true
+for _map in cryptswap cryptvar cryptroot; do
+    [[ -e "/dev/mapper/$_map" ]] && {
+        log "Closing stale mapper /dev/mapper/$_map from a previous run..."
+        cryptsetup close "$_map" 2>/dev/null || warn "  couldn't close $_map — continuing anyway"
+    }
+done
+unset _map
+
 # ---------- 0.5 source dir (repo clone, resolved from the script's own path) ----------
 # Canonical install: boot vanilla Arch ISO (from Ventoy — USB or Netac),
 # `git clone https://github.com/fnrhombus/arch-setup ...`, run this script
