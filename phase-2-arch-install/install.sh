@@ -360,8 +360,14 @@ partprobe "$NETAC"
 udevadm settle
 
 # Portable partition-device resolver (sda<N> vs nvme0n1p<N>).
+# CAREFUL: split the two `local` statements. Bash evaluates `${n}` in
+# `local n="$1" path="${NETAC}${n}"` using the OUTER scope's `n` (the
+# `for n in ...` prune loop above leaves outer n=last_pruned_partition),
+# not the just-declared local. That made every call resolve to the same
+# wrong device.
 _netac_part() {
-    local n="$1" path="${NETAC}${n}"
+    local n="$1"
+    local path="${NETAC}${n}"
     [[ -b "$path" ]] || path="${NETAC}p${n}"
     printf '%s' "$path"
 }
