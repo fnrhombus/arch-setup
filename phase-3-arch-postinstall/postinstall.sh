@@ -105,8 +105,13 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$HOME"
 
 # ---------- 1. pacman: repo packages (signed, fast) ----------
+# --overwrite '/boot/memtest86+/*': on re-runs (or when an earlier failed
+# transaction left orphan files behind), pacman aborts with "exists in
+# filesystem" for /boot/memtest86+/memtest.{bin,efi}. Same bytes, same
+# package version — overwriting is safe and idempotent.
 log "Installing pacman packages from official repos..."
 sudo pacman -Syu --noconfirm --needed \
+    --overwrite '/boot/memtest86+/*' \
     base-devel git curl wget openssh \
     zsh tmux helix \
     bat fd ripgrep eza lsd btop jq fzf zoxide direnv \
