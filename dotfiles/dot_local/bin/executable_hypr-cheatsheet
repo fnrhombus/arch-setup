@@ -116,4 +116,4 @@ hyprctl binds -j 2>/dev/null \
         format_bind "$modmask" "$key" "$description" "$dispatcher" "$arg"
     done \
   | sort \
-  | fuzzel --dmenu --width 100 --lines 35 --prompt "Hyprland binds: " >/dev/null
+  | fuzzel --dmenu --width 100 --lines 20 --prompt "Hyprland binds: " >/dev/null
