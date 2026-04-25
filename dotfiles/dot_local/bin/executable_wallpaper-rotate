@@ -5,13 +5,21 @@
 # Modes:
 #   --first   : called from Hyprland exec-once at session start. Uses last
 #               wallpaper if known; otherwise picks one at random.
-#   (default) : pick next wallpaper (random; not-current).
-#   --pick X  : explicit wallpaper path.
+#               Forces non-interactive matugen (no TTY at exec-once).
+#   --auto    : explicit non-interactive (matugen --source-color-index 0).
+#               Used by the systemd user timer.
+#   --pick X  : explicit wallpaper path. Interactive matugen if a TTY is
+#               available, non-interactive otherwise.
+#   (default) : pick next wallpaper (random; not-current). Interactive
+#               matugen if invoked from a terminal — the user gets to
+#               choose the seed accent color from the wallpaper-derived
+#               candidates. Falls through to auto when no TTY (rare).
 #
 # Trigger paths:
 #   - exec-once at Hyprland startup (--first)
-#   - systemd user timer every 6h (default — see wallpaper-rotate.timer)
-#   - manual via Super+Shift+W
+#   - systemd user timer every 6h (--auto — see wallpaper-rotate.timer)
+#   - manual via Super+Shift+W (wrapped in ghostty so the matugen picker
+#     has a TTY — see binds.conf)
 #   - control-panel → "Wallpaper: rotate now"
 
 set -euo pipefail
@@ -31,6 +39,20 @@ fi
 mode="dark"
 [[ -f "$mode_file" ]] && mode=$(<"$mode_file")
 
+# ---- Decide interactive vs auto matugen mode ----
+# `--first` and `--auto` always force non-interactive (no TTY at exec-
+# once / systemd context). Otherwise honor TTY presence — manual runs
+# from a terminal get the picker; weird headless invocations don't.
+interactive=1
+case "${1:-}" in
+    --first|--auto) interactive=0 ;;
+    *)
+        if ! [[ -t 0 && -t 1 ]]; then
+            interactive=0
+        fi
+        ;;
+esac
+
 # ---- Pick wallpaper ----
 case "${1:-}" in
     --first)
@@ -41,6 +63,19 @@ case "${1:-}" in
                 \( -iname '*.jpg' -o -iname '*.jpeg' -o -iname '*.png' -o -iname '*.webp' \) \
                 | shuf -n 1)
         fi
+        ;;
+    --auto)
+        # Same selection logic as default (random; not-current),
+        # just bypasses the matugen interactive picker.
+        current=""
+        [[ -f "$wp_file" ]] && current=$(<"$wp_file")
+        wallpaper=$(find "$wp_dir" -maxdepth 1 -type f \
+            \( -iname '*.jpg' -o -iname '*.jpeg' -o -iname '*.png' -o -iname '*.webp' \) \
+            | grep -vxF "$current" 2>/dev/null \
+            | shuf -n 1 || true)
+        [[ -z "$wallpaper" ]] && wallpaper=$(find "$wp_dir" -maxdepth 1 -type f \
+            \( -iname '*.jpg' -o -iname '*.jpeg' -o -iname '*.png' -o -iname '*.webp' \) \
+            | shuf -n 1)
         ;;
     --pick)
         [[ -n "${2:-}" ]] || { echo "usage: --pick <path>" >&2; exit 2; }
@@ -71,10 +106,14 @@ awww img "$wallpaper" --transition-type any --transition-duration 1.5 >/dev/null
 echo "$wallpaper" > "$wp_file"
 
 # ---- Regenerate matugen palette + reload dependents ----
-# --source-color-index 0 picks the most-prominent extracted color
-# automatically. matugen v4 added an interactive picker as the default;
-# this flag bypasses it. Verbatim per matugen v4.0.0 release notes.
-matugen --mode "$mode" --source-color-index 0 image "$wallpaper" </dev/null >/dev/null
+# Interactive: let matugen show its accent picker (user chooses one of
+# the wallpaper-derived candidates). Auto: --source-color-index 0 picks
+# the most prominent extracted color silently.
+if (( interactive == 1 )); then
+    matugen --mode "$mode" image "$wallpaper"
+else
+    matugen --mode "$mode" --source-color-index 0 image "$wallpaper" </dev/null >/dev/null
+fi
 
 # ---- Update bar (theme-toggle icon may not change but custom modules might) ----
 pkill -SIGRTMIN+8 waybar 2>/dev/null || true

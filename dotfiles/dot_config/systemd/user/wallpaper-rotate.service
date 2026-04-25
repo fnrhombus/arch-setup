@@ -4,7 +4,7 @@ ConditionEnvironment=WAYLAND_DISPLAY
 
 [Service]
 Type=oneshot
-ExecStart=%h/.local/bin/wallpaper-rotate
+ExecStart=%h/.local/bin/wallpaper-rotate --auto
 
 [Install]
 WantedBy=default.target
