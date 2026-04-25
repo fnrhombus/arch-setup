@@ -121,7 +121,7 @@ sudo pacman -Syu --noconfirm --needed \
     hyprland hyprlock hypridle hyprpolkitagent hyprpicker \
     waybar swaync swayosd \
     xdg-desktop-portal-gtk xdg-desktop-portal-hyprland \
-    network-manager-applet pwvucontrol \
+    network-manager-applet \
     nwg-look nwg-displays \
     qt5ct qt6ct papirus-icon-theme \
     imv zathura zathura-pdf-poppler \
@@ -237,6 +237,10 @@ log "Installing AUR-exclusive apps (VSCode, Edge, Claude, awww, matugen, overskr
 #   - sesh-bin       — was once available as bare `sesh` somewhere;
 #                      currently AUR-only as `sesh-bin`.
 #   - wvkbd          — moved here from §1 pacman: NOT in extra, AUR-only.
+#   - pwvucontrol    — AUR-only as of 2026-04: extra packaging stalled on
+#                      upstream's libwireplumber 0.5.x migration (the
+#                      wireplumber-rs crate is unmaintained). AUR build
+#                      stays pinned to 0.4.17 and works fine.
 #   - bibata-cursor-theme  — Xcursor format. Used as Xwayland fallback.
 #   - hyprcursor-format Bibata: NO clean AUR package as of 2026-04. The
 #     LOSEARDES77/Bibata-Cursor-hyprcursor github repo is the source;
@@ -259,7 +263,8 @@ yay -S --noconfirm --needed \
     wleave \
     bibata-cursor-theme \
     pacseek \
-    limine-snapper-sync
+    limine-snapper-sync \
+    pwvucontrol
 
 # ---------- 3a. certbot-dns-azure plugin (pipx — not packaged for Arch) ----------
 # certbot-dns-azure is PyPI-only: not in extra, not in AUR, not community-
