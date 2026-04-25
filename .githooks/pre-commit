@@ -20,12 +20,16 @@ fi
 repo_root="$(git rev-parse --show-toplevel)"
 validator="$repo_root/dotfiles/dot_local/bin/executable_validate-hypr-binds"
 
-if [[ ! -x "$validator" ]]; then
+if [[ ! -f "$validator" ]]; then
     echo "pre-commit: validate-hypr-binds not found at $validator (skipping)" >&2
     exit 0
 fi
 
-if ! HYPR_DIR="$repo_root/dotfiles/dot_config/hypr" "$validator"; then
+# Invoke via bash so the in-repo file doesn't need its +x bit — chezmoi's
+# `executable_` prefix only sets exec bit on the APPLIED copy, not the
+# source. (We do chmod +x it in-repo for direct invocations, but belt-
+# and-braces.)
+if ! HYPR_DIR="$repo_root/dotfiles/dot_config/hypr" bash "$validator"; then
     cat >&2 <<EOF
 
 ================================================================================
