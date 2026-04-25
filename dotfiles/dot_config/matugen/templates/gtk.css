@@ -1,7 +1,11 @@
-/* GTK 3 / GTK 4 color overrides from matugen.
- * Adwaita / libadwaita read freedesktop color-scheme + their own
- * accent palette. We override accent + surface roles to match. */
+/* GTK 3 / GTK 4 color overrides — STATIC VS Code-grey fills,
+ * matugen-derived accents only. Adwaita / libadwaita read freedesktop
+ * color-scheme + their own accent palette; we override accent + surface
+ * roles. Same theme philosophy as the other matugen templates: GTK app
+ * windows look the same regardless of wallpaper, accent buttons /
+ * focus rings / destructive actions follow the wallpaper. */
 
+/* Matugen accents (wallpaper-derived, used for buttons/focus/badges) */
 @define-color accent_color {{colors.primary.default.hex}};
 @define-color accent_bg_color {{colors.primary.default.hex}};
 @define-color accent_fg_color {{colors.on_primary.default.hex}};
@@ -13,12 +17,13 @@
 @define-color success_color {{colors.tertiary.default.hex}};
 @define-color warning_color {{colors.secondary.default.hex}};
 
-@define-color window_bg_color {{colors.background.default.hex}};
-@define-color window_fg_color {{colors.on_background.default.hex}};
-@define-color view_bg_color {{colors.surface.default.hex}};
-@define-color view_fg_color {{colors.on_surface.default.hex}};
-@define-color headerbar_bg_color {{colors.surface_container.default.hex}};
-@define-color headerbar_fg_color {{colors.on_surface.default.hex}};
-@define-color sidebar_bg_color {{colors.surface_container_low.default.hex}};
-@define-color card_bg_color {{colors.surface_container.default.hex}};
-@define-color popover_bg_color {{colors.surface_container_high.default.hex}};
+/* Static surfaces (VS Code Default Dark+) */
+@define-color window_bg_color    #1e1e1e;
+@define-color window_fg_color    #d4d4d4;
+@define-color view_bg_color      #252526;
+@define-color view_fg_color      #d4d4d4;
+@define-color headerbar_bg_color #2d2d30;
+@define-color headerbar_fg_color #d4d4d4;
+@define-color sidebar_bg_color   #1e1e1e;
+@define-color card_bg_color      #2d2d30;
+@define-color popover_bg_color   #3c3c3c;

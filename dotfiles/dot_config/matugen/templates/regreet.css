@@ -1,15 +1,21 @@
-/* regreet (greetd greeter) — matugen-generated GTK CSS.
- * After matugen renders this to ~/.cache/matugen/regreet.css, postinstall
+/* regreet (greetd greeter) — STATIC VS Code-grey fills + matugen accents.
+ * Matugen renders this to ~/.cache/matugen/regreet.css; postinstall
  * (or a polkit-allowed cp) installs it to /etc/greetd/regreet.css.
- * regreet picks up CSS on next greeter restart (every cold boot). */
+ * regreet picks up CSS on next greeter restart (every cold boot).
+ *
+ * Static greys for the login form, matugen accent for focused field
+ * border + primary action button. */
 
-@define-color background        {{colors.background.default.hex}};
-@define-color surface           {{colors.surface.default.hex}};
-@define-color surface-container {{colors.surface_container.default.hex}};
-@define-color on-surface        {{colors.on_surface.default.hex}};
+/* Static fills (VS Code Default Dark+) */
+@define-color background        #1e1e1e;
+@define-color surface           #252526;
+@define-color surface-container #2d2d30;
+@define-color on-surface        #d4d4d4;
+@define-color outline           #3c3c3c;
+
+/* Matugen accents */
 @define-color primary           {{colors.primary.default.hex}};
 @define-color on-primary        {{colors.on_primary.default.hex}};
-@define-color outline           {{colors.outline.default.hex}};
 
 window {
     background-color: @background;

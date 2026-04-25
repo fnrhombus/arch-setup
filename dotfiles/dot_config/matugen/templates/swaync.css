@@ -1,12 +1,19 @@
-/* swaync — matugen-rendered colors. Imported by ~/.config/swaync/style.css. */
+/* swaync — STATIC VS Code-grey fills + matugen accents.
+ * Imported by ~/.config/swaync/style.css.
+ *
+ * Same theme philosophy as waybar.css: static greys for the panel
+ * itself, matugen-derived for accent highlights (notification urgency
+ * stripe, action button hover, etc.). */
 
-@define-color background        {{colors.background.default.hex}};
-@define-color surface           {{colors.surface.default.hex}};
-@define-color surface-container {{colors.surface_container.default.hex}};
-@define-color surface-high      {{colors.surface_container_high.default.hex}};
-@define-color on-surface        {{colors.on_surface.default.hex}};
-@define-color outline           {{colors.outline.default.hex}};
+/* Static fills (VS Code Default Dark+) */
+@define-color background        #1e1e1e;
+@define-color surface           #252526;
+@define-color surface-container #2d2d30;
+@define-color surface-high      #3c3c3c;
+@define-color on-surface        #d4d4d4;
+@define-color outline           #3c3c3c;
 
+/* Matugen-derived accents (wallpaper-tinted highlights) */
 @define-color primary           {{colors.primary.default.hex}};
 @define-color on-primary        {{colors.on_primary.default.hex}};
 @define-color primary-container {{colors.primary_container.default.hex}};
