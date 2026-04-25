@@ -7,7 +7,7 @@
 #   - limine bootloader (shares the EFI Windows created at /boot, written
 #     to the fallback path \EFI\BOOT\BOOTX64.EFI so Windows NVRAM resets
 #     don't kill us)
-#   - plain dm-crypt cryptswap (per-boot random key; no hibernate)
+#   - persistent LUKS2 cryptswap (hibernate-ready; resume= in cmdline)
 #   - NVIDIA blacklist (MX250 Optimus — Intel iGPU only, decisions.md §Q5)
 #   - NetworkManager + greetd + bluetooth + fprintd enabled
 #   - greetd PAM stack from system-files/pam.d/greetd (gnome-keyring + fprintd)
@@ -35,8 +35,8 @@ trap 'shred -u /root/.pw /root/.luks 2>/dev/null || rm -f /root/.pw /root/.luks'
 [[ -s /root/.luks ]] || die "/root/.luks missing — install.sh should have written LUKS UUIDs + SAMSUNG_DISK."
 # shellcheck disable=SC1091
 . /root/.luks
-[[ -n "${LUKS_ROOT_UUID:-}" && -n "${LUKS_VAR_UUID:-}" && -n "${SWAP_PARTUUID:-}" ]] \
-    || die "/root/.luks is missing one or more identifiers (LUKS_ROOT_UUID / LUKS_VAR_UUID / SWAP_PARTUUID)."
+[[ -n "${LUKS_ROOT_UUID:-}" && -n "${LUKS_VAR_UUID:-}" && -n "${LUKS_SWAP_UUID:-}" ]] \
+    || die "/root/.luks is missing one or more UUIDs (LUKS_ROOT_UUID / LUKS_VAR_UUID / LUKS_SWAP_UUID)."
 [[ -n "${SAMSUNG_DISK:-}" && -b "$SAMSUNG_DISK" ]] \
     || die "/root/.luks is missing SAMSUNG_DISK or it isn't a block device."
 
@@ -127,26 +127,30 @@ EOF
 #                               Opens cryptvar from the on-root keyfile, then
 #                               cryptswap with a fresh /dev/urandom key per
 #                               boot.
-log "Writing /etc/crypttab.initramfs (cryptroot only) + /etc/crypttab (cryptvar + cryptswap)..."
-# Only cryptroot goes in crypttab.initramfs — the initramfs sd-encrypt
-# hook opens it to let the kernel mount root. NO tpm2-device=auto until
-# phase-3 postinstall has actually enrolled a TPM2 slot (the option
-# blocks waiting for a non-existent slot and hangs boot; see install.sh
-# comment for the systemd bug refs).
+log "Writing /etc/crypttab.initramfs (cryptroot + cryptswap) + /etc/crypttab (cryptvar)..."
+# Both cryptroot and cryptswap go in crypttab.initramfs. cryptswap has
+# to be opened before pivot so the kernel's resume= codepath (which
+# runs in initramfs) can read the hibernate image.
 #
-# cryptvar opens post-pivot via a keyfile on cryptroot.
+# NO tpm2-device=auto on either line at install time — the option
+# blocks waiting for a non-existent TPM2 slot and hangs first boot
+# (systemd/systemd#39049, #36293). Both entries just have the passphrase
+# slot enrolled. sd-encrypt's kernel-keyring cache takes the cryptroot
+# passphrase and automatically tries it against cryptswap — since both
+# share the same LUKS_PW, cryptswap unlocks silently. One passphrase
+# prompt, two volumes opened.
 #
-# cryptswap is plain dm-crypt with a per-boot /dev/urandom key —
-# simpler, no enrollment needed, mkswap runs inside
-# systemd-cryptsetup@cryptswap.service at every boot. Rules out S4
-# hibernate (fresh key per boot can't decrypt a stored resume image)
-# but matches the proven install-auto-luks pattern.
+# Phase-3 postinstall runs \`systemd-cryptenroll --tpm2-device=auto\` on
+# both volumes, then flips tpm2-device=auto on in both lines and
+# regenerates the initramfs — subsequent boots are silent.
+#
+# cryptvar opens post-pivot via a keyfile on cryptroot (§7a).
 cat > /etc/crypttab.initramfs <<EOF
 cryptroot UUID=$LUKS_ROOT_UUID none luks,discard
+cryptswap UUID=$LUKS_SWAP_UUID none luks,discard
 EOF
 cat > /etc/crypttab <<EOF
 cryptvar  UUID=$LUKS_VAR_UUID  /etc/cryptsetup-keys.d/cryptvar.key  luks,discard
-cryptswap PARTUUID=$SWAP_PARTUUID /dev/urandom swap,cipher=aes-xts-plain64,size=256,discard
 EOF
 chmod 600 /etc/crypttab /etc/crypttab.initramfs
 
@@ -218,21 +222,21 @@ default_entry: 1
     kernel_path: boot():/vmlinuz-linux
     module_path: boot():/intel-ucode.img
     module_path: boot():/initramfs-linux.img
-    cmdline: root=/dev/mapper/cryptroot rootflags=subvol=@ rw quiet
+    cmdline: root=/dev/mapper/cryptroot rootflags=subvol=@ resume=/dev/mapper/cryptswap rw quiet
 
 /Arch Linux (LTS)
     protocol: linux
     kernel_path: boot():/vmlinuz-linux-lts
     module_path: boot():/intel-ucode.img
     module_path: boot():/initramfs-linux-lts.img
-    cmdline: root=/dev/mapper/cryptroot rootflags=subvol=@ rw quiet
+    cmdline: root=/dev/mapper/cryptroot rootflags=subvol=@ resume=/dev/mapper/cryptswap rw quiet
 
 /Arch Linux (Fallback)
     protocol: linux
     kernel_path: boot():/vmlinuz-linux
     module_path: boot():/intel-ucode.img
     module_path: boot():/initramfs-linux-fallback.img
-    cmdline: root=/dev/mapper/cryptroot rootflags=subvol=@ rw
+    cmdline: root=/dev/mapper/cryptroot rootflags=subvol=@ resume=/dev/mapper/cryptswap rw
 
 /Windows Boot Manager
     protocol: efi_chainload
