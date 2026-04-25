@@ -769,6 +769,7 @@ if [[ -c /dev/tpm0 || -c /dev/tpmrm0 ]] && [[ -z "${SKIP_TPM_LUKS:-}" ]]; then
     # crypttab.initramfs (cryptswap is there so `resume=` can read the
     # hibernate image pre-pivot). cryptvar opens from a keyfile on
     # the (TPM-unlocked) cryptroot, so it doesn't need its own TPM slot.
+    NEED_TPM_ENROLL=()
     for partlabel in ArchRoot ArchSwap; do
         dev="/dev/disk/by-partlabel/$partlabel"
         if [[ ! -b "$dev" ]]; then
@@ -778,11 +779,45 @@ if [[ -c /dev/tpm0 || -c /dev/tpmrm0 ]] && [[ -z "${SKIP_TPM_LUKS:-}" ]]; then
         if sudo systemd-cryptenroll "$dev" 2>/dev/null | awk 'NR>1 && $2=="tpm2"{f=1} END{exit !f}'; then
             log "TPM2 already enrolled on $partlabel — skipping."
         else
-            log "Enrolling TPM2 autounlock for $partlabel (enter the LUKS passphrase when prompted)..."
-            sudo systemd-cryptenroll --tpm2-device=auto --tpm2-pcrs=0+7 "$dev" \
-                || warn "TPM enroll failed for $partlabel — boot still works with passphrase."
+            NEED_TPM_ENROLL+=("$partlabel")
         fi
     done
+
+    if (( ${#NEED_TPM_ENROLL[@]} > 0 )); then
+        if [[ -t 0 ]]; then
+            # Prompt for the LUKS passphrase once, cache in a tmpfs file
+            # (/run is RAM-backed; never hits disk), reuse for every
+            # systemd-cryptenroll call via --unlock-key-file. Saves the
+            # user from typing the 48-digit recovery key twice. install.sh
+            # uses the same passphrase for ArchRoot and ArchSwap so a
+            # single read works for both.
+            log "Enrolling TPM2 on: ${NEED_TPM_ENROLL[*]}"
+            printf '\033[1;33m[?]\033[0m Enter your LUKS passphrase ONCE (echoes nothing): '
+            read -rs _LUKS_PASS
+            echo
+            _PASS_FILE=$(sudo mktemp /run/luks-pass-XXXXXX)
+            sudo chmod 600 "$_PASS_FILE"
+            printf '%s' "$_LUKS_PASS" | sudo tee "$_PASS_FILE" >/dev/null
+            unset _LUKS_PASS
+            for partlabel in "${NEED_TPM_ENROLL[@]}"; do
+                dev="/dev/disk/by-partlabel/$partlabel"
+                log "Enrolling TPM2 autounlock for $partlabel..."
+                sudo systemd-cryptenroll --unlock-key-file="$_PASS_FILE" \
+                    --tpm2-device=auto --tpm2-pcrs=0+7 "$dev" \
+                    || warn "TPM enroll failed for $partlabel — boot still works with passphrase."
+            done
+            sudo shred -u "$_PASS_FILE" 2>/dev/null || sudo rm -f "$_PASS_FILE"
+        else
+            # Non-interactive (no TTY) — fall back to per-volume prompting
+            # via systemd-cryptenroll's own readline.
+            for partlabel in "${NEED_TPM_ENROLL[@]}"; do
+                dev="/dev/disk/by-partlabel/$partlabel"
+                log "Enrolling TPM2 autounlock for $partlabel (enter the LUKS passphrase when prompted)..."
+                sudo systemd-cryptenroll --tpm2-device=auto --tpm2-pcrs=0+7 "$dev" \
+                    || warn "TPM enroll failed for $partlabel — boot still works with passphrase."
+            done
+        fi
+    fi
 
     # After enrollment, flip `tpm2-device=auto` on in /etc/crypttab.initramfs
     # for each volume that now has a TPM2 slot. chroot.sh wrote both lines
