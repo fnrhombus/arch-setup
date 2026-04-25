@@ -39,7 +39,7 @@ mods_to_label() {
 }
 
 format_bind() {
-    local modmask="$1" key="$2" dispatcher="$3" arg="$4"
+    local modmask="$1" key="$2" description="$3" dispatcher="$4" arg="$5"
     local label
     label=$(mods_to_label "$modmask")
     local combo
@@ -48,18 +48,25 @@ format_bind() {
     else
         combo="${label}+${key}"
     fi
-    if [[ -z "$arg" || "$arg" == "null" ]]; then
-        printf '%-28s   %s\n' "$combo" "$dispatcher"
+    # Prefer the human-friendly description (set via `bindd` in
+    # binds.conf). Fall back to dispatcher+arg for any binding still
+    # using bare `bind` or pulled in from plugin configs.
+    local rhs
+    if [[ -n "$description" && "$description" != "null" ]]; then
+        rhs="$description"
+    elif [[ -z "$arg" || "$arg" == "null" ]]; then
+        rhs="$dispatcher"
     else
-        printf '%-28s   %s %s\n' "$combo" "$dispatcher" "$arg"
+        rhs="$dispatcher $arg"
     fi
+    printf '%-28s   %s\n' "$combo" "$rhs"
 }
 
 # Walk the JSON output of `hyprctl binds -j`, sort by mod label then key.
 hyprctl binds -j 2>/dev/null \
-  | jq -r '.[] | [.modmask, .key, .dispatcher, (.arg // "")] | @tsv' \
-  | while IFS=$'\t' read -r modmask key dispatcher arg; do
-        format_bind "$modmask" "$key" "$dispatcher" "$arg"
+  | jq -r '.[] | [.modmask, .key, (.description // ""), .dispatcher, (.arg // "")] | @tsv' \
+  | while IFS=$'\t' read -r modmask key description dispatcher arg; do
+        format_bind "$modmask" "$key" "$description" "$dispatcher" "$arg"
     done \
   | sort \
-  | fuzzel --dmenu --width 80 --lines 30 --prompt "Hyprland binds: " >/dev/null
+  | fuzzel --dmenu --width 90 --lines 30 --prompt "Hyprland binds: " >/dev/null
