@@ -681,33 +681,7 @@ if command -v pinutil >/dev/null; then
             if sudo pinutil setup 2>&1 | tee /tmp/pinutil-setup.log; then
                 log "TPM PIN set (per pinutil)."
             elif grep -q 'already has a PIN' /tmp/pinutil-setup.log; then
-                # pinutil's "already has a PIN" claim is unreliable (stale
-                # NV index from a prior install can trip it without any
-                # real PIN ever having been set — and the user has no way
-                # to know which it is from the message alone). Offer the
-                # choice instead of silently skipping: keep what's there,
-                # or wipe + re-create now while we have an interactive TTY.
-                printf '\n\033[1;33m[?]\033[0m pinutil reports a PIN is already set.\n'
-                printf '    If you remember setting one, type \033[1mk\033[0m to keep it.\n'
-                printf '    If you do NOT remember setting one (stale TPM NV index from a prior\n'
-                printf '    install can cause this), type \033[1mr\033[0m to reset and create a fresh one.\n'
-                printf '    [k]eep / [r]eset (default: keep): '
-                read -r _pin_choice </dev/tty
-                case "${_pin_choice:-k}" in
-                    r|R)
-                        log "Resetting TPM PIN..."
-                        sudo pinutil delete 2>&1 | tee -a /tmp/pinutil-setup.log || \
-                            warn "pinutil delete failed — manual cleanup may be needed (sudo tpm2_nvreadpublic)."
-                        if sudo pinutil setup 2>&1 | tee -a /tmp/pinutil-setup.log; then
-                            log "TPM PIN set (per pinutil)."
-                        else
-                            warn "pinutil setup failed after reset; PAM PIN unlock won't work until fixed."
-                        fi
-                        ;;
-                    *)
-                        log "Keeping existing TPM PIN per pinutil."
-                        ;;
-                esac
+                log "TPM PIN already set — keeping (idempotent re-run)."
             else
                 warn "pinutil setup failed; PAM PIN unlock won't work until fixed."
             fi
