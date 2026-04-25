@@ -767,8 +767,10 @@ fi
 # (pre-`pinutil setup`) still works.
 #
 # pam_fprintd options: `max-tries=1` = one finger attempt then fail;
-# `timeout=5` at sudo/hyprlock = give up after 5s of no finger and move
-# on to the password prompt, so Ctrl+C isn't needed.
+# `timeout=20` at sudo/hyprlock = give up after 20s of no finger and
+# fall through to the password prompt. 20s is comfortable on the
+# Inspiron 7786 (fingerprint reader is in the power button — needs a
+# moment to reach for); shorter values felt rushed in real use.
 #
 # NEVER remove pam_unix from the stack via `system-auth`/`system-login`/
 # `login` includes — that's the last-resort password path.
@@ -779,25 +781,25 @@ log "Writing PAM stacks for sudo / hyprlock..."
 # sudo: PIN → fingerprint(5s) → password.
 sudo tee /etc/pam.d/sudo >/dev/null <<'SUDOPAMEOF'
 #%PAM-1.0
-# arch-setup: PIN primary, fingerprint optional (5s timeout), password fallback.
+# arch-setup: PIN primary, fingerprint optional (20s timeout), password fallback.
 # See postinstall.sh §7a.
 auth        sufficient  libpinpam.so
-auth        sufficient  pam_fprintd.so              max-tries=1 timeout=5
+auth        sufficient  pam_fprintd.so              max-tries=1 timeout=20
 auth        include     system-auth
 account     include     system-auth
 session     include     system-auth
 SUDOPAMEOF
 
-# hyprlock: PIN → fingerprint(5s) → password. Finger is unlikely to be
-# reachable while the laptop is docked, but including it preserves the
-# "any one of three methods" invariant and only costs a 5s timeout in
-# the uncommon case where the user Ctrl+C'd past the PIN prompt.
+# hyprlock: PIN → fingerprint(20s) → password. Finger is unlikely to
+# be reachable while the laptop is docked, but including it preserves
+# the "any one of three methods" invariant. The 20s timeout is only
+# hit if the user Ctrl+C'd past the PIN prompt.
 sudo tee /etc/pam.d/hyprlock >/dev/null <<'HYPRLOCKPAMEOF'
 #%PAM-1.0
-# arch-setup: PIN primary, fingerprint optional (5s timeout), password fallback.
+# arch-setup: PIN primary, fingerprint optional (20s timeout), password fallback.
 # See postinstall.sh §7a.
 auth        sufficient  libpinpam.so
-auth        sufficient  pam_fprintd.so              max-tries=1 timeout=5
+auth        sufficient  pam_fprintd.so              max-tries=1 timeout=20
 auth        include     login
 HYPRLOCKPAMEOF
 
@@ -1556,8 +1558,8 @@ check "pinpam in sudo"       "grep -q libpinpam /etc/pam.d/sudo"
 check "pinpam in hyprlock"   "grep -q libpinpam /etc/pam.d/hyprlock"
 check "no pinpam in greetd"  "! grep -q libpinpam /etc/pam.d/greetd"
 check "fprintd in greetd"    "grep -q 'pam_fprintd.*max-tries=1.*timeout=10' /etc/pam.d/greetd"
-check "fprintd in sudo"      "grep -q 'pam_fprintd.*max-tries=1.*timeout=5' /etc/pam.d/sudo"
-check "fprintd in hyprlock"  "grep -q 'pam_fprintd.*max-tries=1.*timeout=5' /etc/pam.d/hyprlock"
+check "fprintd in sudo"      "grep -q 'pam_fprintd.*max-tries=1.*timeout=20' /etc/pam.d/sudo"
+check "fprintd in hyprlock"  "grep -q 'pam_fprintd.*max-tries=1.*timeout=20' /etc/pam.d/hyprlock"
 check "pinpam before fprintd sudo" "awk '/libpinpam/{p=NR} /pam_fprintd/{f=NR} END{exit !(p && f && p<f)}' /etc/pam.d/sudo"
 check "pinpam before fprintd hyprlock" "awk '/libpinpam/{p=NR} /pam_fprintd/{f=NR} END{exit !(p && f && p<f)}' /etc/pam.d/hyprlock"
 check "pam_unix in sys-auth" "grep -q pam_unix /etc/pam.d/system-auth"
