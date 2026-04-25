@@ -271,22 +271,40 @@ log "Installing AUR-exclusive apps (VSCode, Edge, Claude, awww, matugen, overskr
 #       git clone https://github.com/LOSEARDES77/Bibata-Cursor-hyprcursor ~/.icons/Bibata-hyprcursor
 #     Until then, Hyprland falls back to the Xcursor build (works fine,
 #     just larger ~44 MB resident vs ~6.6 MB hyprcursor).
-yay -S --noconfirm --needed \
-    visual-studio-code-bin \
-    microsoft-edge-stable-bin \
-    claude-desktop-native \
-    pinpam-git \
-    sesh-bin \
-    wvkbd \
-    iio-hyprland-git \
-    powershell-bin \
-    awww-bin \
-    matugen-bin \
-    overskride \
-    wleave \
-    bibata-cursor-theme \
-    pacseek \
+# Per-package install (vs one batched yay -S call) so that one bad apple
+# doesn't abort the whole list — common AUR failure modes (source-vs-bin
+# variant conflicts, transient build breaks, key-rotation PGP fails) are
+# all per-package. A failure prints a warning and the loop continues;
+# the verify block at the end will list any missing tool as FAIL so
+# nothing slips through silently.
+AUR_PACKAGES=(
+    visual-studio-code-bin
+    microsoft-edge-stable-bin
+    claude-desktop-native
+    pinpam-git
+    sesh-bin
+    wvkbd
+    iio-hyprland-git
+    powershell-bin
+    awww-bin
+    matugen-bin
+    overskride
+    wleave
+    bibata-cursor-theme
+    pacseek
     limine-snapper-sync
+)
+AUR_FAILED=()
+for pkg in "${AUR_PACKAGES[@]}"; do
+    if ! yay -S --noconfirm --needed "$pkg"; then
+        warn "yay -S $pkg failed — see scrollback. Continuing with the rest."
+        AUR_FAILED+=("$pkg")
+    fi
+done
+if (( ${#AUR_FAILED[@]} > 0 )); then
+    warn "AUR install failures: ${AUR_FAILED[*]}"
+    warn "Resolve manually (often: 'pacman -R <conflicting-variant>' then 'yay -S <pkg>'), then re-run this script."
+fi
 
 # ---------- 3a. certbot-dns-azure plugin (pipx — not packaged for Arch) ----------
 # certbot-dns-azure is PyPI-only: not in extra, not in AUR, not community-
