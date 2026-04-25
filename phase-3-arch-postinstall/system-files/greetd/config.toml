@@ -2,6 +2,15 @@
 # Installed by postinstall.sh (script-implementation pass) to /etc/greetd/config.toml.
 #
 # `command` runs ReGreet which then launches Hyprland after authentication.
+#
+# NO `[initial_session]` section: greetd treats the TOML section header as
+# a hard declaration, so even a header with all properties commented out
+# crashes the daemon with "initial_session contains no command" and it
+# restart-loops until start-limit-hit. Autologin is off by design; if
+# ever wanted, add the block back as:
+#     [initial_session]
+#     command = "Hyprland"
+#     user = "tom"
 
 [terminal]
 vt = 1
@@ -9,9 +18,3 @@ vt = 1
 [default_session]
 command = "regreet -l debug -- hyprland"
 user = "greeter"
-
-[initial_session]
-# Disabled — we want the greeter to show, not autologin to the user.
-# Uncomment + set user = "tom" to enable autologin (rare on this setup).
-# command = "Hyprland"
-# user = "tom"
