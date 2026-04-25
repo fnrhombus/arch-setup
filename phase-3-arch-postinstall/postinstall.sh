@@ -851,18 +851,31 @@ if [[ -c /dev/tpm0 || -c /dev/tpmrm0 ]] && [[ -z "${SKIP_TPM_LUKS:-}" ]]; then
             warn "$dev not found — skipping TPM enroll for $partlabel."
             continue
         fi
-        # Always (re-)enroll. Reason: `systemd-cryptenroll <dev>` reports
-        # the LUKS HEADER's view, not the TPM's. After tpm2_clear (BIOS
-        # clear, motherboard swap), the LUKS header still says "tpm2
-        # slot exists" but the sealed key is gone from the TPM, and
-        # every boot falls back to passphrase prompt. There's no
-        # reliable read-only probe to distinguish "slot works" from
-        # "slot is metadata-only zombie", so we always wipe and
-        # re-enroll. The enrollment call below uses `--wipe-slot=tpm2`,
-        # so this is safe whether or not a TPM2 slot already exists.
-        # Costs one passphrase prompt per postinstall run (single
-        # prompt for both volumes via the /run cache) — acceptable.
-        NEED_TPM_ENROLL+=("$partlabel")
+        # Three states to distinguish — and we want different behavior in each:
+        #   (a) NO TPM2 token in LUKS header           → enroll fresh
+        #   (b) TPM2 token present, TPM has the key    → SKIP (BitLocker parity:
+        #                                                      silent re-runs)
+        #   (c) TPM2 token present but TPM was cleared → wipe + re-enroll (the
+        #                                                tpm2_clear recovery case)
+        #
+        # `systemd-cryptenroll <dev>` only sees (a) vs (b)|(c) — it reads the
+        # LUKS header, not the TPM. To distinguish (b) from (c) we need a
+        # read-only probe-unseal. `cryptsetup --test-passphrase --token-only`
+        # tries to unlock using ONLY tokens (no passphrase prompt) and exits
+        # 0/non-zero based on success — exactly what we need. No mapper device
+        # is created (--test-passphrase short-circuits before activation).
+        if ! sudo systemd-cryptenroll "$dev" 2>/dev/null \
+             | awk 'NR>1 && $2=="tpm2"{f=1} END{exit !f}'; then
+            # State (a): no TPM2 token — fresh enroll.
+            NEED_TPM_ENROLL+=("$partlabel")
+        elif sudo cryptsetup --test-passphrase --token-only luksOpen "$dev" _probe 2>/dev/null; then
+            # State (b): TPM2 token works. BitLocker-parity path.
+            log "TPM2 already enrolled on $partlabel (probe-unseal OK) — skipping."
+        else
+            # State (c): zombie token, TPM was cleared since enrollment.
+            warn "TPM2 keyslot on $partlabel is dead (TPM was cleared since enrollment) — will wipe + re-enroll."
+            NEED_TPM_ENROLL+=("$partlabel")
+        fi
     done
 
     if (( ${#NEED_TPM_ENROLL[@]} > 0 )); then
