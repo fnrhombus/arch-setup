@@ -42,12 +42,20 @@
 set -euo pipefail
 
 log()  { printf '\033[1;32m[+]\033[0m %s\n' "$*"; }
-warn() { printf '\033[1;33m[!]\033[0m %s\n' "$*" >&2; }
+warn() { printf '\033[1;33m[!]\033[0m %s\n' "$*" >&2; RUN_WARNINGS+=("$*"); }
 die()  { printf '\033[1;31m[✗]\033[0m %s\n' "$*" >&2; exit 1; }
 
+# Every warn() call appends here. Surfaced as a summary panel at the end
+# of the run (right after the verify block) so issues that happened on
+# screen 3 of 30 don't get lost in scrollback.
+RUN_WARNINGS=()
+
 # retry <cmd> [args...] — 4 attempts, exponential backoff (2/4/8s between).
-# For network ops that flap (AUR, GitHub, PyPI). pacman/yay are already
-# multi-mirror so they don't need this.
+# For network ops that flap on transient connection drops. We use this
+# even on yay -S: yay's RPC client to aur.archlinux.org/rpc does NOT
+# retry on EOF and just returns "Failed to find AUR package for X",
+# which on a flaky link can wrongly mark a perfectly-good package as
+# unfindable. pacman is multi-mirror so it doesn't need this.
 retry() {
     local delay=2 attempt
     for attempt in 1 2 3 4; do
@@ -59,6 +67,24 @@ retry() {
         fi
     done
     die "retry: gave up after 4 attempts: $*"
+}
+
+# retry_soft is retry's non-fatal sibling: same backoff, but on terminal
+# failure it warns and returns 1 instead of die-ing. Use this when the
+# script can continue without this particular thing succeeding (e.g.
+# one AUR package out of 14 in the AUR loop).
+retry_soft() {
+    local delay=2 attempt
+    for attempt in 1 2 3 4; do
+        if "$@"; then return 0; fi
+        if [[ $attempt -lt 4 ]]; then
+            warn "retry_soft ($attempt/4) — sleeping ${delay}s before retrying: $*"
+            sleep "$delay"
+            delay=$((delay * 2))
+        fi
+    done
+    warn "retry_soft: gave up after 4 attempts: $*"
+    return 1
 }
 
 # Per docs/wsl-setup-lessons.md: every `git clone` in this repo's setup
@@ -296,8 +322,8 @@ AUR_PACKAGES=(
 )
 AUR_FAILED=()
 for pkg in "${AUR_PACKAGES[@]}"; do
-    if ! yay -S --noconfirm --needed "$pkg"; then
-        warn "yay -S $pkg failed — see scrollback. Continuing with the rest."
+    # retry_soft: 4 attempts on AUR RPC EOF, then warn and continue.
+    if ! retry_soft yay -S --noconfirm --needed "$pkg"; then
         AUR_FAILED+=("$pkg")
     fi
 done
@@ -511,7 +537,7 @@ if [[ -z "${SKIP_FPRINT:-}" ]] && command -v lsusb >/dev/null && lsusb | grep -q
         ) || warn "libfprint-tod-git build failed — fingerprint will not work."
         rm -rf "$tmpd"
     fi
-    yay -S --noconfirm --needed libfprint-goodix-53xc || \
+    retry_soft yay -S --noconfirm --needed libfprint-goodix-53xc || \
         warn "libfprint-goodix-53xc install failed — see AUR comments."
 fi
 if [[ -z "${SKIP_FPRINT:-}" ]]; then
@@ -575,7 +601,7 @@ if [[ -z "${SKIP_FPRINT:-}" ]]; then
             if pacman -Q libfprint >/dev/null 2>&1 && ! pacman -Q libfprint-git >/dev/null 2>&1; then
                 sudo pacman -Rdd --noconfirm libfprint || warn "Could not remove stock libfprint — conflict will still block install."
             fi
-            if yay -S --noconfirm --needed libfprint-git && sudo systemctl restart fprintd; then
+            if retry_soft yay -S --noconfirm --needed libfprint-git && sudo systemctl restart fprintd; then
                 sudo fprintd-enroll -f right-index-finger tom || warn "libfprint-git retry also failed — likely unsupported reader. See https://fprint.freedesktop.org/supported-devices.html"
             else
                 warn "libfprint-git install failed — see https://fprint.freedesktop.org/supported-devices.html"
@@ -1399,6 +1425,17 @@ else
     echo "Failed checks:"
     for n in "${VERIFY_FAILED_NAMES[@]}"; do
         printf '  - %s\n' "$n"
+    done
+fi
+
+# Warnings panel — every warn() call accumulates into RUN_WARNINGS so
+# anything that happened earlier (and probably scrolled past) is right
+# here at the end of the run, in order.
+if (( ${#RUN_WARNINGS[@]} > 0 )); then
+    echo
+    printf '\033[1;33m=== %d warning(s) during this run ===\033[0m\n' "${#RUN_WARNINGS[@]}"
+    for w in "${RUN_WARNINGS[@]}"; do
+        printf '  \033[1;33m[!]\033[0m %s\n' "$w"
     done
 fi
 
