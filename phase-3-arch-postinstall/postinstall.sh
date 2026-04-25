@@ -709,12 +709,22 @@ else
     warn "pinutil not found; skipping TPM-PIN setup."
 fi
 
-# ---------- 7a. PAM stacks for sudo / hyprlock ----------
-# Two surfaces, two stacks here — see docs/reinstall-planning.md §5.
-# (greetd's PAM stack is installed by chroot.sh from
-# phase-3-arch-postinstall/system-files/pam.d/greetd; PIN is intentionally
-# excluded from greetd because cold-boot wants full credential per the
-# Windows Hello pattern.)
+# ---------- 7a. PAM stacks for sudo / hyprlock / greetd ----------
+# Three surfaces — see docs/reinstall-planning.md §5.
+# greetd: PIN intentionally excluded (cold-boot wants full credential
+# per the Windows Hello pattern). chroot.sh installs the canonical
+# template from phase-3-arch-postinstall/system-files/pam.d/greetd at
+# install time; we re-stomp it here on every postinstall run so any
+# drift (manual edits, stale entries from prior postinstall iterations)
+# gets corrected. The template ships with this script's directory, so
+# locate it via SCRIPT_DIR.
+GREETD_PAM_TEMPLATE="$SCRIPT_DIR/system-files/pam.d/greetd"
+if [[ -f "$GREETD_PAM_TEMPLATE" ]]; then
+    log "Re-installing /etc/pam.d/greetd from canonical template (drift correction)..."
+    sudo install -m 644 "$GREETD_PAM_TEMPLATE" /etc/pam.d/greetd
+else
+    warn "Couldn't locate greetd PAM template at $GREETD_PAM_TEMPLATE — leaving /etc/pam.d/greetd as-is."
+fi
 #
 # Design invariant: fingerprint is ALWAYS an option and NEVER required.
 # User's finger can only physically reach the reader at cold boot (the
@@ -1539,7 +1549,7 @@ check "bluetooth"           "systemctl is-enabled bluetooth"
 echo "-- printing (Canon Pro 9000 Mk II via USB) --"
 check "cups installed"      "pacman -Q cups"
 check "cups.socket enabled" "systemctl is-enabled cups.socket"
-check "gutenprint PPDs"     "test -d /usr/share/cups/model/gutenprint || ls /usr/share/cups/model 2>/dev/null | grep -q gutenprint"
+check "gutenprint PPDs"     "ls -d /usr/share/cups/model/gutenprint* 2>/dev/null | head -1 | grep -q gutenprint"
 check "tom in lp group"     "id -nG tom | grep -qw lp"
 
 echo "-- secrets / auth --"

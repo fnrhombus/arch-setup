@@ -56,9 +56,9 @@ if [[ -z "$wallpaper" ]]; then
 fi
 
 # ---- Render matugen ----
-# --type pins the M3 scheme so matugen doesn't drop into an interactive
-# accent picker; </dev/null is defense-in-depth against future prompts.
-matugen --mode "$new" --type scheme-tonal-spot image "$wallpaper" </dev/null >/dev/null
+# --source-color-index 0 picks the most-prominent extracted color
+# automatically (matugen v4+ defaults to interactive picker without it).
+matugen --mode "$new" --source-color-index 0 image "$wallpaper" </dev/null >/dev/null
 
 # ---- Broadcast color-scheme to apps that read the freedesktop portal ----
 case "$new" in
