@@ -390,7 +390,12 @@ fi
 # postinstall in phase-3/system-files/ and are installed here at
 # chroot-time so first boot comes up directly into greetd.
 log "Installing greetd + ReGreet config + PAM stack..."
-pacman -S --noconfirm --needed greetd greetd-regreet
+# `cage` is a minimal single-app Wayland compositor. ReGreet is a GTK
+# Wayland app with no compositor of its own — without cage underneath
+# it, GTK has no surface to draw into and fails with "Failed to
+# initialize GTK", greetd restart-loops, login screen never appears.
+# Standard greetd+ReGreet pairing per the ReGreet README.
+pacman -S --noconfirm --needed greetd greetd-regreet cage
 GREETD_SRC="/root/arch-setup/phase-3-arch-postinstall/system-files"
 if [[ -d "$GREETD_SRC" ]]; then
     install -d -m 755 /etc/greetd

@@ -16,10 +16,15 @@
 vt = 1
 
 [default_session]
-# ReGreet takes NO positional session argument. It reads the session list
-# from /usr/share/wayland-sessions/*.desktop and lets the user pick in
-# its UI (with Hyprland as the default once hyprland.desktop is present).
-# `-- hyprland` makes regreet's clap parser error with
+# ReGreet is a GTK Wayland app — it can't draw a surface on its own.
+# Wrap it in `cage` (minimal single-app Wayland compositor) so GTK has
+# a surface to render into. Without the cage prefix, regreet fails with
+# "Failed to initialize GTK" and greetd restart-loops.
+#
+# ReGreet itself takes NO positional session argument — it reads the
+# session list from /usr/share/wayland-sessions/*.desktop and lets the
+# user pick in its UI (Hyprland is the default once hyprland.desktop is
+# present). `-- hyprland` would make regreet's clap parser error with
 # "unexpected argument 'hyprland' found".
-command = "regreet -l debug"
+command = "cage -s -- regreet -l debug"
 user = "greeter"
