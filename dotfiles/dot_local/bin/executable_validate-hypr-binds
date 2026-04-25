@@ -95,11 +95,21 @@ for f in "${files[@]}"; do
     while IFS= read -r raw; do
         # Match bind variants. Strip leading whitespace + match.
         line=$(echo "$raw" | sed -E 's/^\s+//; s/\s+#.*$//')
-        [[ "$line" =~ ^bind[a-z]*\ *= ]] || continue
+        [[ "$line" =~ ^bind([a-z]*)[[:space:]]*= ]] || continue
+        flags="${BASH_REMATCH[1]}"
         # Strip the "bindXXX = " prefix
         rhs=$(echo "$line" | sed -E 's/^bind[a-z]*\s*=\s*//')
-        # Split on commas: MOD, KEY, DISPATCHER, args...
-        IFS=',' read -r mod key dispatcher rest <<<"$rhs"
+        # Field layout depends on whether this is a description-bearing
+        # variant (any flag containing `d`):
+        #   bindd / binddl / binddel / bindde / binddm:
+        #     MOD, KEY, DESCRIPTION, dispatcher[, args]
+        #   bind / bindl / bindel / binde / bindm:
+        #     MOD, KEY, dispatcher[, args]
+        if [[ "$flags" == *d* ]]; then
+            IFS=',' read -r mod key description dispatcher rest <<<"$rhs"
+        else
+            IFS=',' read -r mod key dispatcher rest <<<"$rhs"
+        fi
         mod=$(echo "${mod:-}" | xargs)
         key=$(echo "${key:-}" | xargs)
         dispatcher=$(echo "${dispatcher:-}" | xargs)
