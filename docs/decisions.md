@@ -248,7 +248,7 @@ and accepted on the "clean-slate, no bias" principle. See
 - **OSD popups**: SwayOSD — GTK4, in extra; volume/brightness/caps-lock; CSS themed via matugen.
 - **Network UI**: nm-connection-editor for full config + a custom waybar nmcli module for at-a-glance state. Skip nm-applet (the tray icon is redundant).
 - **Bluetooth UI**: overskride (AUR) — GTK4/libadwaita, Wayland-native. Blueman is the GTK3 fallback.
-- **Audio mixer GUI**: pwvucontrol — PipeWire-native (no PulseAudio shim). pavucontrol is the legacy fallback.
+- **Audio mixer GUI**: pavucontrol (extra). Goes through PipeWire's pulse compat shim (already pulled in by `pipewire-pulse`). The PipeWire-native `pwvucontrol` was the original pick, but as of 2026-04 its AUR build is broken — upstream is blocked on the unmaintained `wireplumber-rs` crate (issue #10), and the AUR's only path forward is a `libwireplumber-4.0-compat` shim that itself breaks every pipewire bump. Switched to pavucontrol to get out of the AUR-babysitting business; revisit if pwvucontrol ever lands in extra.
 - **Color picker**: hyprpicker — Wayland-native, magnifier loupe, autocopy.
 - **Power menu**: wleave (AUR) — GTK4 fork of wlogout, themes via matugen.
 - **Image viewer**: imv — fast, reliable, modal keys. (Loupe rejected: libadwaita ignores GTK theming, won't follow matugen.)
@@ -303,7 +303,7 @@ present.
 - **Bar + notifications + launcher + OSD**: `waybar`, `swaync`, `fuzzel`, `swayosd`.
 - **Screenshots + clipboard**: `hyprshot`, `satty`, `wl-clipboard`, `cliphist`.
 - **XDG portals**: `xdg-desktop-portal-hyprland` (phase-2 pacstrap), `xdg-desktop-portal-gtk` (phase-3 postinstall).
-- **Network + audio UIs**: `network-manager-applet` (provides nm-connection-editor), `pwvucontrol`.
+- **Network + audio UIs**: `network-manager-applet` (provides nm-connection-editor), `pavucontrol`.
 - **Theme tooling**: `nwg-look` (GTK3/4 settings), `qt5ct` + `qt6ct` (Qt theme), `papirus-icon-theme`.
 - **Apps**: `imv` (image viewer), `zathura` + `zathura-pdf-poppler`.
 - **Audio**: `pipewire`, `pipewire-pulse`, `pipewire-jack`, `wireplumber`.

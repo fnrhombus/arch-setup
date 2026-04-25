@@ -43,7 +43,7 @@ swayosd
 nwg-displays                     # display config
 network-manager-applet           # provides nm-connection-editor
 overskride                       # AUR — Bluetooth (GTK4)
-pwvucontrol                      # PipeWire-native audio mixer
+pavucontrol                      # extra — audio mixer (via pipewire-pulse shim)
 mission-center                   # extra — resource/process monitor (GUI)
 pacseek                          # AUR — TUI package install/remove
 
