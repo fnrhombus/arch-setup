@@ -44,7 +44,7 @@
     },
 
     "clock": {
-        "format": "{:%a %b %e  %I:%M %p}",
+        "format": "{:%a %b %e  %l:%M %p}",
         "format-alt": "{:%Y-%m-%d %H:%M:%S}",
         "tooltip-format": "<big>{:%Y %B}</big>\n<tt><small>{calendar}</small></tt>",
         "calendar": {
