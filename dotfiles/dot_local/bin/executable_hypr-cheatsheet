@@ -1,0 +1,65 @@
+#!/usr/bin/env bash
+# hypr-cheatsheet — searchable GUI cheatsheet of every active Hyprland
+# binding. Reads the live state via `hyprctl binds -j`, formats each
+# entry as "MODS+KEY → action", and feeds the list through fuzzel's
+# dmenu mode. Themed via matugen's fuzzel template, so it looks like
+# the rest of the desktop.
+#
+# Bound to Super+/ in binds.conf.
+#
+# Selecting an entry just dismisses; we don't auto-fire the action
+# because dispatchers like `killactive` would do unexpected things to
+# whatever was focused before fuzzel popped open.
+
+set -euo pipefail
+
+if ! command -v hyprctl >/dev/null; then
+    notify-send -u critical "hypr-cheatsheet" "hyprctl not on PATH; are you in Hyprland?" 2>/dev/null
+    exit 1
+fi
+
+mods_to_label() {
+    case "$1" in
+        0)   echo "" ;;
+        1)   echo "Shift" ;;
+        4)   echo "Ctrl" ;;
+        5)   echo "Ctrl+Shift" ;;
+        8)   echo "Alt" ;;
+        9)   echo "Alt+Shift" ;;
+        12)  echo "Ctrl+Alt" ;;
+        13)  echo "Ctrl+Alt+Shift" ;;
+        64)  echo "Super" ;;
+        65)  echo "Super+Shift" ;;
+        68)  echo "Super+Ctrl" ;;
+        69)  echo "Super+Ctrl+Shift" ;;
+        72)  echo "Super+Alt" ;;
+        73)  echo "Super+Alt+Shift" ;;
+        *)   echo "mod${1}" ;;
+    esac
+}
+
+format_bind() {
+    local modmask="$1" key="$2" dispatcher="$3" arg="$4"
+    local label
+    label=$(mods_to_label "$modmask")
+    local combo
+    if [[ -z "$label" ]]; then
+        combo="$key"
+    else
+        combo="${label}+${key}"
+    fi
+    if [[ -z "$arg" || "$arg" == "null" ]]; then
+        printf '%-28s   %s\n' "$combo" "$dispatcher"
+    else
+        printf '%-28s   %s %s\n' "$combo" "$dispatcher" "$arg"
+    fi
+}
+
+# Walk the JSON output of `hyprctl binds -j`, sort by mod label then key.
+hyprctl binds -j 2>/dev/null \
+  | jq -r '.[] | [.modmask, .key, .dispatcher, (.arg // "")] | @tsv' \
+  | while IFS=$'\t' read -r modmask key dispatcher arg; do
+        format_bind "$modmask" "$key" "$dispatcher" "$arg"
+    done \
+  | sort \
+  | fuzzel --dmenu --width 80 --lines 30 --prompt "Hyprland binds: " >/dev/null

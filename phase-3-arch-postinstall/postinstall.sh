@@ -189,7 +189,8 @@ sudo pacman -Syu --noconfirm --needed \
     mise chezmoi github-cli \
     docker docker-compose docker-buildx \
     snapper snap-pac \
-    cmake cpio
+    cmake cpio \
+    keyd
 
 sudo pkgfile -u
 
@@ -428,6 +429,28 @@ sudo ufw default allow outgoing
 sudo ufw allow 22/tcp comment 'sshd (Callisto + others)'
 sudo ufw --force enable
 sudo systemctl enable --now ufw.service
+
+# ---------- 4c-keyd. keyd: Super-tap-to-launcher (Windows-Start key) ----------
+# Hyprland (and Wayland in general) can't natively detect "modifier
+# pressed-and-released without another key in between" — needed for the
+# GNOME/Plasma "tap Super -> open launcher" UX. keyd handles tap-vs-hold
+# at /dev/input level, before Wayland even sees the events.
+#
+# Mapping: leftmeta tap -> F20 (an unused key, no conflict with anything
+# in our binds), hold -> normal Super. Hyprland binds F20 -> fuzzel.
+log "Writing /etc/keyd/default.conf (Super-tap launcher mapping)..."
+sudo install -d -m 755 /etc/keyd
+sudo tee /etc/keyd/default.conf >/dev/null <<'KEYDEOF'
+# Tap left-Super -> F20 (bound to fuzzel in Hyprland binds.conf).
+# Hold left-Super -> acts as the regular Super modifier so existing
+# Super+X bindings keep working unchanged.
+[ids]
+*
+
+[main]
+leftmeta = overload(meta, f20)
+KEYDEOF
+sudo systemctl enable --now keyd.service
 
 # ---------- 4d. metis-ddns: Azure DNS dynamic updater ----------
 # Keeps metis.rhombus.rocks A+AAAA records pointed at this host's current
