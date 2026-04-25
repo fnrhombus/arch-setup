@@ -1,9 +1,15 @@
 #%PAM-1.0
-# arch-setup: greetd PAM stack. Mirrors the prior SDDM design (per
-# docs/reinstall-planning.md §5): NO PIN at cold boot (TPM PCR state not
-# stable yet, matches Windows Hello "full credential at first sign-in"),
-# fingerprint with 10s timeout (reader IS reachable at the greeter, so it
-# goes first as a sufficient match), password fallback via system-login.
+# arch-setup: greetd PAM stack — PASSWORD ONLY at the greeter.
+#
+# Originally had pam_fprintd as `sufficient` ahead of system-login so a
+# touch on the reader could log you in. In practice it hogged input —
+# you couldn't type a password while pam_fprintd was waiting (up to
+# max-tries × timeout seconds), and each timeout incremented
+# pam_faillock until the account locked for 10 minutes. Removed.
+#
+# Fingerprint stays available at sudo + hyprlock (where input handling
+# is different and the password prompt remains usable in parallel).
+# At cold boot, just type the password.
 #
 # pam_gnome_keyring lines: auth + session + password are all needed.
 #   - auth     optional  → passes the typed password to the keyring
@@ -21,14 +27,13 @@
 # `auth include system-login` so PAM_AUTHTOK is populated by the time
 # pam_gnome_keyring reads it.
 #
-# Module name quirk: pinpam-git ships as libpinpam.so (not pam_pinpam.so).
-# We do NOT include libpinpam here on purpose — PIN is not a greeter-tier
-# auth method on this design.
+# Module name quirk: pinpam-git ships its module as libpinpam.so (not
+# pam_pinpam.so). We do NOT include libpinpam at the greeter on purpose
+# — PIN is not a greeter-tier auth method on this design.
 #
 # Installed to /etc/pam.d/greetd by phase-2-arch-install/chroot.sh AND
 # re-stomped on every postinstall run by phase-3 §7a (drift correction).
 
-auth        sufficient  pam_fprintd.so              max-tries=5 timeout=20
 auth        include     system-login
 auth        optional    pam_gnome_keyring.so
 
