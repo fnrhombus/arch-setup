@@ -673,34 +673,50 @@ HYPRLOCKPAMEOF
 # a second TPM slot would burn LUKS budget without adding at-rest
 # protection (the keyfile is only readable post-cryptroot-unlock).
 if [[ -c /dev/tpm0 || -c /dev/tpmrm0 ]] && [[ -z "${SKIP_TPM_LUKS:-}" ]]; then
-    # Only cryptroot gets TPM2-enrolled now. cryptvar opens from a keyfile
-    # on the (TPM-unlocked) cryptroot; cryptswap is plain dm-crypt with a
-    # per-boot random key (no LUKS header, nothing to enroll).
-    dev=/dev/disk/by-partlabel/ArchRoot
-    if [[ ! -b "$dev" ]]; then
-        warn "$dev not found — skipping TPM enroll for cryptroot."
-    elif sudo systemd-cryptenroll "$dev" 2>/dev/null | awk 'NR>1 && $2=="tpm2"{f=1} END{exit !f}'; then
-        log "TPM2 already enrolled on ArchRoot — skipping."
-    else
-        log "Enrolling TPM2 autounlock for ArchRoot (enter the LUKS passphrase when prompted)..."
-        sudo systemd-cryptenroll --tpm2-device=auto --tpm2-pcrs=0+7 "$dev" \
-            || warn "TPM enroll failed — boot still works with passphrase."
-    fi
+    # Enroll TPM2 on BOTH cryptroot and cryptswap — both live in
+    # crypttab.initramfs (cryptswap is there so `resume=` can read the
+    # hibernate image pre-pivot). cryptvar opens from a keyfile on
+    # the (TPM-unlocked) cryptroot, so it doesn't need its own TPM slot.
+    for partlabel in ArchRoot ArchSwap; do
+        dev="/dev/disk/by-partlabel/$partlabel"
+        if [[ ! -b "$dev" ]]; then
+            warn "$dev not found — skipping TPM enroll for $partlabel."
+            continue
+        fi
+        if sudo systemd-cryptenroll "$dev" 2>/dev/null | awk 'NR>1 && $2=="tpm2"{f=1} END{exit !f}'; then
+            log "TPM2 already enrolled on $partlabel — skipping."
+        else
+            log "Enrolling TPM2 autounlock for $partlabel (enter the LUKS passphrase when prompted)..."
+            sudo systemd-cryptenroll --tpm2-device=auto --tpm2-pcrs=0+7 "$dev" \
+                || warn "TPM enroll failed for $partlabel — boot still works with passphrase."
+        fi
+    done
 
     # After enrollment, flip `tpm2-device=auto` on in /etc/crypttab.initramfs
-    # so the next boot uses the TPM2 slot first (silent). chroot.sh wrote
-    # the cryptroot line WITHOUT that option: pre-enrollment, the option
-    # blocks boot waiting for a non-existent slot (systemd#39049, #36293).
-    # Idempotent: sed only matches a line still ending in `luks,discard`.
-    if sudo systemd-cryptenroll "$dev" 2>/dev/null | awk 'NR>1 && $2=="tpm2"{f=1} END{exit !f}'; then
-        if sudo grep -qE '^cryptroot .*luks,discard$' /etc/crypttab.initramfs; then
-            log "Adding tpm2-device=auto to cryptroot in /etc/crypttab.initramfs..."
-            sudo sed -i '/^cryptroot /s/luks,discard$/luks,discard,tpm2-device=auto/' /etc/crypttab.initramfs
-            log "Regenerating initramfs (mkinitcpio -P) so TPM2 unlock takes effect next boot..."
-            sudo mkinitcpio -P
+    # for each volume that now has a TPM2 slot. chroot.sh wrote both lines
+    # WITHOUT that option — pre-enrollment, it blocks boot waiting for a
+    # non-existent slot (systemd#39049, #36293). Idempotent: the sed only
+    # matches lines still ending in `luks,discard`.
+    _crypttab_changed=0
+    for pair in "cryptroot:ArchRoot" "cryptswap:ArchSwap"; do
+        _crypt_name="${pair%:*}"
+        _partlabel="${pair#*:}"
+        _dev="/dev/disk/by-partlabel/$_partlabel"
+        [[ -b "$_dev" ]] || continue
+        if sudo systemd-cryptenroll "$_dev" 2>/dev/null | awk 'NR>1 && $2=="tpm2"{f=1} END{exit !f}'; then
+            if sudo grep -qE "^${_crypt_name} .*luks,discard$" /etc/crypttab.initramfs; then
+                log "Adding tpm2-device=auto to $_crypt_name in /etc/crypttab.initramfs..."
+                sudo sed -i "/^${_crypt_name} /s/luks,discard\$/luks,discard,tpm2-device=auto/" /etc/crypttab.initramfs
+                _crypttab_changed=1
+            fi
         fi
+    done
+    unset _crypt_name _partlabel _dev pair
+    if (( _crypttab_changed )); then
+        log "Regenerating initramfs (mkinitcpio -P) so TPM2 unlock takes effect next boot..."
+        sudo mkinitcpio -P
     fi
-    unset dev
+    unset _crypttab_changed
 else
     warn "No TPM device (or SKIP_TPM_LUKS set) — boot will continue to prompt for the LUKS passphrase."
 fi

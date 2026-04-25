@@ -434,20 +434,24 @@ printf '%s' "$LUKS_PW" | cryptsetup luksFormat --type luks2 --batch-mode \
     --label ArchVarLUKS --key-file=- "$NETAC_VAR"
 printf '%s' "$LUKS_PW" | cryptsetup open --key-file=- "$NETAC_VAR" cryptvar
 
-# Swap is intentionally plain dm-crypt with a per-boot random key (not
-# LUKS-formatted). Simpler, needs no LUKS slot, no TPM enrollment; boot
-# process reads /etc/crypttab, sees the /dev/urandom keyfile on the
-# cryptswap line, creates the mapper fresh every boot. Downside: hibernate
-# (S4) needs a stable swap key to read back the resume image, so this
-# rules out hibernate. We accept that — previous attempt with persistent-
-# LUKS swap + cryptswap-in-initramfs hung first boot regardless of the
-# tpm2-device=auto setting. Simpler beats cleverer here.
+# Hibernate-ready swap: persistent LUKS2 (NOT a per-boot random key) so
+# the resume-from-hibernate image survives a power cycle. Same passphrase
+# as cryptroot — sd-encrypt's keyring cache opens cryptswap silently from
+# the cryptroot passphrase during first boot, so users only type it once
+# even though cryptswap is in crypttab.initramfs (required by resume=).
+# Phase-3 postinstall enrolls TPM2 on both volumes, flipping the boot to
+# fully silent from the second boot onward.
+log "Encrypting Netac swap ($NETAC_SWAP) with LUKS2 (persistent, hibernate-ready)..."
+printf '%s' "$LUKS_PW" | cryptsetup luksFormat --type luks2 --batch-mode \
+    --label ArchSwapLUKS --key-file=- "$NETAC_SWAP"
+printf '%s' "$LUKS_PW" | cryptsetup open --key-file=- "$NETAC_SWAP" cryptswap
 
 log "Creating filesystems on LUKS mappers..."
 mkfs.btrfs -f -L ArchRoot /dev/mapper/cryptroot
 mkfs.ext4  -F -L ArchVar  /dev/mapper/cryptvar
-# No mkswap — cryptswap is plain dm-crypt with per-boot key; mkswap runs
-# inside systemd-cryptsetup@cryptswap.service at every boot.
+mkswap     -L ArchSwap    /dev/mapper/cryptswap
+# Don't swapon at install time — pacstrap doesn't need it (16 GB RAM) and
+# an active swap would block the cryptsetup close at the bottom of install.
 # NETAC_RECOVERY stays raw and unencrypted — we dd the Arch ISO onto it later.
 # (Rationale: recovery partition is intentionally bootable as-is; encrypting
 # it would defeat the "boot this from F12 if Arch is hosed" survival path.)
@@ -563,18 +567,17 @@ cp -r "$SOURCE_DIR"/. /mnt/root/arch-setup/
 # abort mid-chroot doesn't leave hashes behind on the freshly-installed fs.
 (umask 077 && printf '%s\n%s\n' "$ROOT_PW_HASH" "$TOM_PW_HASH" > /mnt/root/.pw)
 
-# Hand partition identifiers to chroot.sh for crypttab + cmdline wiring.
-#   cryptroot / cryptvar → LUKS UUID (persistent LUKS headers)
-#   cryptswap            → PARTUUID (plain dm-crypt, no LUKS header)
+# Hand partition LUKS UUIDs to chroot.sh for crypttab + cmdline wiring.
+# All three now have persistent LUKS2 headers.
 LUKS_ROOT_UUID=$(blkid -s UUID -o value "$SAMSUNG_ROOT")
 LUKS_VAR_UUID=$(blkid -s UUID -o value "$NETAC_VAR")
-SWAP_PARTUUID=$(blkid -s PARTUUID -o value "$NETAC_SWAP")
-[[ -n "$LUKS_ROOT_UUID" && -n "$LUKS_VAR_UUID" && -n "$SWAP_PARTUUID" ]] \
-    || die "Failed to resolve LUKS UUIDs / swap PARTUUID (blkid returned empty)."
+LUKS_SWAP_UUID=$(blkid -s UUID -o value "$NETAC_SWAP")
+[[ -n "$LUKS_ROOT_UUID" && -n "$LUKS_VAR_UUID" && -n "$LUKS_SWAP_UUID" ]] \
+    || die "Failed to resolve LUKS UUIDs (blkid returned empty)."
 (umask 077 && cat > /mnt/root/.luks <<EOF
 LUKS_ROOT_UUID=$LUKS_ROOT_UUID
 LUKS_VAR_UUID=$LUKS_VAR_UUID
-SWAP_PARTUUID=$SWAP_PARTUUID
+LUKS_SWAP_UUID=$LUKS_SWAP_UUID
 SAMSUNG_DISK=$SAMSUNG
 EOF
 )
@@ -642,9 +645,9 @@ log "Syncing + unmounting..."
 sync
 umount -R /mnt
 # Close LUKS mappers so a retry (or a manual `cryptsetup luksFormat` later)
-# doesn't trip on "device still in use". cryptswap isn't opened at install
-# time (it's a boot-time plain dm-crypt construct created by crypttab on
-# first boot), so nothing to close there.
+# doesn't trip on "device still in use". All three have LUKS headers now;
+# cryptswap was opened at §6 for mkswap, so close it here too.
+cryptsetup close cryptswap || true
 cryptsetup close cryptvar  || true
 cryptsetup close cryptroot || true
 
