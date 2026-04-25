@@ -5,7 +5,9 @@
 # Modes:
 #   --first   : called from Hyprland exec-once at session start. Uses last
 #               wallpaper if known; otherwise picks one at random.
-#               Forces non-interactive matugen (no TTY at exec-once).
+#               Interactive if a TTY is attached (e.g. when postinstall
+#               invokes it from your terminal); auto otherwise (e.g. from
+#               Hyprland's exec-once at session start, where there's no TTY).
 #   --auto    : explicit non-interactive (matugen --source-color-index 0).
 #               Used by the systemd user timer.
 #   --pick X  : explicit wallpaper path. Interactive matugen if a TTY is
@@ -40,12 +42,18 @@ mode="dark"
 [[ -f "$mode_file" ]] && mode=$(<"$mode_file")
 
 # ---- Decide interactive vs auto matugen mode ----
-# `--first` and `--auto` always force non-interactive (no TTY at exec-
-# once / systemd context). Otherwise honor TTY presence — manual runs
-# from a terminal get the picker; weird headless invocations don't.
+# `--auto` always forces non-interactive (no prompt — used by the
+# systemd user timer in the background). All other modes — including
+# `--first` — defer to TTY presence: interactive iff stdin AND stdout
+# are TTYs. So:
+#   - Hyprland exec-once at startup (--first, no TTY)        → auto
+#   - Postinstall manual run (--first, has terminal)         → interactive
+#   - Systemd timer (--auto)                                  → auto
+#   - Manual default mode from terminal                       → interactive
+#   - Super+Shift+W (wrapped in `ghostty -e ...`)             → interactive
 interactive=1
 case "${1:-}" in
-    --first|--auto) interactive=0 ;;
+    --auto) interactive=0 ;;
     *)
         if ! [[ -t 0 && -t 1 ]]; then
             interactive=0
