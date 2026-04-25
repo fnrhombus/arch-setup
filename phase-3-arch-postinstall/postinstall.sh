@@ -867,11 +867,18 @@ if [[ -c /dev/tpm0 || -c /dev/tpmrm0 ]] && [[ -z "${SKIP_TPM_LUKS:-}" ]]; then
             warn "$dev not found — skipping TPM enroll for $partlabel."
             continue
         fi
-        if sudo systemd-cryptenroll "$dev" 2>/dev/null | awk 'NR>1 && $2=="tpm2"{f=1} END{exit !f}'; then
-            log "TPM2 already enrolled on $partlabel — skipping."
-        else
-            NEED_TPM_ENROLL+=("$partlabel")
-        fi
+        # Always (re-)enroll. Reason: `systemd-cryptenroll <dev>` reports
+        # the LUKS HEADER's view, not the TPM's. After tpm2_clear (BIOS
+        # clear, motherboard swap), the LUKS header still says "tpm2
+        # slot exists" but the sealed key is gone from the TPM, and
+        # every boot falls back to passphrase prompt. There's no
+        # reliable read-only probe to distinguish "slot works" from
+        # "slot is metadata-only zombie", so we always wipe and
+        # re-enroll. The enrollment call below uses `--wipe-slot=tpm2`,
+        # so this is safe whether or not a TPM2 slot already exists.
+        # Costs one passphrase prompt per postinstall run (single
+        # prompt for both volumes via the /run cache) — acceptable.
+        NEED_TPM_ENROLL+=("$partlabel")
     done
 
     if (( ${#NEED_TPM_ENROLL[@]} > 0 )); then
@@ -893,8 +900,11 @@ if [[ -c /dev/tpm0 || -c /dev/tpmrm0 ]] && [[ -z "${SKIP_TPM_LUKS:-}" ]]; then
             for partlabel in "${NEED_TPM_ENROLL[@]}"; do
                 dev="/dev/disk/by-partlabel/$partlabel"
                 log "Enrolling TPM2 autounlock for $partlabel..."
+                # --wipe-slot=tpm2 first so re-enrollment after tpm2_clear
+                # doesn't double-bind two TPM2 keyslots (one dead, one new)
+                # and consume LUKS slot quota.
                 sudo systemd-cryptenroll --unlock-key-file="$_PASS_FILE" \
-                    --tpm2-device=auto --tpm2-pcrs=0+7 "$dev" \
+                    --wipe-slot=tpm2 --tpm2-device=auto --tpm2-pcrs=0+7 "$dev" \
                     || warn "TPM enroll failed for $partlabel — boot still works with passphrase."
             done
             sudo shred -u "$_PASS_FILE" 2>/dev/null || sudo rm -f "$_PASS_FILE"
@@ -904,7 +914,7 @@ if [[ -c /dev/tpm0 || -c /dev/tpmrm0 ]] && [[ -z "${SKIP_TPM_LUKS:-}" ]]; then
             for partlabel in "${NEED_TPM_ENROLL[@]}"; do
                 dev="/dev/disk/by-partlabel/$partlabel"
                 log "Enrolling TPM2 autounlock for $partlabel (enter the LUKS passphrase when prompted)..."
-                sudo systemd-cryptenroll --tpm2-device=auto --tpm2-pcrs=0+7 "$dev" \
+                sudo systemd-cryptenroll --wipe-slot=tpm2 --tpm2-device=auto --tpm2-pcrs=0+7 "$dev" \
                     || warn "TPM enroll failed for $partlabel — boot still works with passphrase."
             done
         fi
