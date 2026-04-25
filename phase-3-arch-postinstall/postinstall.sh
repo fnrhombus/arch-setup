@@ -543,23 +543,33 @@ fi
 # libfprint-tod-git fails to build with LTO (strips ABI symbol versioning),
 # so we pre-build it with !lto before letting yay pull it as a dep.
 if [[ -z "${SKIP_FPRINT:-}" ]] && command -v lsusb >/dev/null && lsusb | grep -qi '27c6:538c'; then
-    log "Goodix 538C detected — installing libfprint-goodix-53xc (older Dell blob via TOD)..."
-    if ! pacman -Q libfprint-tod-git >/dev/null 2>&1; then
-        # libfprint-tod-git replaces stock libfprint; pull stock first.
-        if pacman -Q libfprint >/dev/null 2>&1; then
-            sudo pacman -Rdd --noconfirm libfprint || warn "Could not remove stock libfprint."
+    # Skip the libfprint-tod-git build path entirely if fingerprints are
+    # already enrolled — that means stock libfprint already supports the
+    # reader and we'd just be wasting cycles on a build that fails (the
+    # libfprint-tod-git PKGBUILD has a recurring 'no symbol version
+    # section for versioned symbol' linker error against current stock
+    # libfprint, and the fallback isn't needed when stock works).
+    if command -v fprintd-list >/dev/null && sudo fprintd-list tom 2>/dev/null | grep -qi 'finger'; then
+        log "Goodix 538C detected, but fingerprints already enrolled via stock libfprint — skipping libfprint-tod-git fallback."
+    else
+        log "Goodix 538C detected — installing libfprint-goodix-53xc (older Dell blob via TOD)..."
+        if ! pacman -Q libfprint-tod-git >/dev/null 2>&1; then
+            # libfprint-tod-git replaces stock libfprint; pull stock first.
+            if pacman -Q libfprint >/dev/null 2>&1; then
+                sudo pacman -Rdd --noconfirm libfprint || warn "Could not remove stock libfprint."
+            fi
+            tmpd=$(mktemp -d) && (
+                cd "$tmpd" \
+                && yay -G libfprint-tod-git \
+                && cd libfprint-tod-git \
+                && sed -i 's|^options=(|options=(!lto |' PKGBUILD \
+                && makepkg -si --noconfirm
+            ) || warn "libfprint-tod-git build failed — fingerprint will not work."
+            rm -rf "$tmpd"
         fi
-        tmpd=$(mktemp -d) && (
-            cd "$tmpd" \
-            && yay -G libfprint-tod-git \
-            && cd libfprint-tod-git \
-            && sed -i 's|^options=(|options=(!lto |' PKGBUILD \
-            && makepkg -si --noconfirm
-        ) || warn "libfprint-tod-git build failed — fingerprint will not work."
-        rm -rf "$tmpd"
+        retry_soft yay -S --noconfirm --needed libfprint-goodix-53xc || \
+            warn "libfprint-goodix-53xc install failed — see AUR comments."
     fi
-    retry_soft yay -S --noconfirm --needed libfprint-goodix-53xc || \
-        warn "libfprint-goodix-53xc install failed — see AUR comments."
 fi
 if [[ -z "${SKIP_FPRINT:-}" ]]; then
     GOODIX_PRESENT=0
