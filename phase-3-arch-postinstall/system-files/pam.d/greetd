@@ -5,19 +5,37 @@
 # fingerprint with 10s timeout (reader IS reachable at the greeter, so it
 # goes first as a sufficient match), password fallback via system-login.
 #
-# NEVER remove pam_unix from system-login — that's the last-resort path.
+# pam_gnome_keyring lines: auth + session + password are all needed.
+#   - auth     optional  → passes the typed password to the keyring
+#                          daemon via PAM_AUTHTOK so it can unlock
+#                          ~/.local/share/keyrings/Default.keyring
+#                          silently. WITHOUT this line the daemon
+#                          starts (via session) but never gets the
+#                          password, so apps prompt for it later.
+#   - session  optional auto_start → starts gnome-keyring-daemon for
+#                          the session.
+#   - password optional → keeps the keyring password in sync if the
+#                          user ever changes their UNIX password.
+#
+# Order constraint: `auth optional pam_gnome_keyring.so` must be AFTER
+# `auth include system-login` so PAM_AUTHTOK is populated by the time
+# pam_gnome_keyring reads it.
+#
 # Module name quirk: pinpam-git ships as libpinpam.so (not pam_pinpam.so).
 # We do NOT include libpinpam here on purpose — PIN is not a greeter-tier
 # auth method on this design.
 #
-# Installed to /etc/pam.d/greetd by phase-2-arch-install/chroot.sh.
+# Installed to /etc/pam.d/greetd by phase-2-arch-install/chroot.sh AND
+# re-stomped on every postinstall run by phase-3 §7a (drift correction).
 
 auth        sufficient  pam_fprintd.so              max-tries=1 timeout=10
 auth        include     system-login
+auth        optional    pam_gnome_keyring.so
 
 account     include     system-login
 
 password    include     system-login
+password    optional    pam_gnome_keyring.so
 
 session     include     system-login
 session     optional    pam_gnome_keyring.so auto_start
