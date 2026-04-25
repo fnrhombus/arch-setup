@@ -16,5 +16,10 @@
 vt = 1
 
 [default_session]
-command = "regreet -l debug -- hyprland"
+# ReGreet takes NO positional session argument. It reads the session list
+# from /usr/share/wayland-sessions/*.desktop and lets the user pick in
+# its UI (with Hyprland as the default once hyprland.desktop is present).
+# `-- hyprland` makes regreet's clap parser error with
+# "unexpected argument 'hyprland' found".
+command = "regreet -l debug"
 user = "greeter"
