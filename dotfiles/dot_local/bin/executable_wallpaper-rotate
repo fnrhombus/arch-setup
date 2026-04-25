@@ -71,7 +71,12 @@ awww img "$wallpaper" --transition-type any --transition-duration 1.5 >/dev/null
 echo "$wallpaper" > "$wp_file"
 
 # ---- Regenerate matugen palette + reload dependents ----
-matugen --mode "$mode" image "$wallpaper" >/dev/null
+# --type scheme-tonal-spot pins the M3 scheme algorithm so newer matugen
+# versions don't drop into an interactive accent picker. Redirect stdin
+# from /dev/null as a defense-in-depth: if matugen ever adds another
+# interactive prompt, it'll get EOF and fall through to defaults rather
+# than blocking the script.
+matugen --mode "$mode" --type scheme-tonal-spot image "$wallpaper" </dev/null >/dev/null
 
 # ---- Update bar (theme-toggle icon may not change but custom modules might) ----
 pkill -SIGRTMIN+8 waybar 2>/dev/null || true
