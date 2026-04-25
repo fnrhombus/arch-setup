@@ -320,10 +320,30 @@ AUR_PACKAGES=(
     pacseek
     limine-snapper-sync
 )
+# yay -S --needed exits 0 even when its AUR RPC query EOFs out — it
+# treats "couldn't query AUR" as "package not selected, nothing to do"
+# and reports success. So we have to inspect output: if we see the
+# specific RPC-failure markers, treat it as failure and let retry_soft
+# kick in. Tee preserves live output to the user's terminal so progress
+# is still visible during the build.
+yay_install_one() {
+    local pkg="$1"
+    local logf
+    logf=$(mktemp -t yay-install-XXXXXX.log)
+    yay -S --noconfirm --needed "$pkg" 2>&1 | tee "$logf"
+    local rc=${PIPESTATUS[0]}
+    if grep -qE 'request failed.*EOF|Failed to find AUR package for|No AUR package found' "$logf"; then
+        rm -f "$logf"
+        return 1
+    fi
+    rm -f "$logf"
+    return "$rc"
+}
+
 AUR_FAILED=()
 for pkg in "${AUR_PACKAGES[@]}"; do
     # retry_soft: 4 attempts on AUR RPC EOF, then warn and continue.
-    if ! retry_soft yay -S --noconfirm --needed "$pkg"; then
+    if ! retry_soft yay_install_one "$pkg"; then
         AUR_FAILED+=("$pkg")
     fi
 done
