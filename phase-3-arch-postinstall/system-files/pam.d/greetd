@@ -28,7 +28,7 @@
 # Installed to /etc/pam.d/greetd by phase-2-arch-install/chroot.sh AND
 # re-stomped on every postinstall run by phase-3 §7a (drift correction).
 
-auth        sufficient  pam_fprintd.so              max-tries=1 timeout=10
+auth        sufficient  pam_fprintd.so              max-tries=5 timeout=20
 auth        include     system-login
 auth        optional    pam_gnome_keyring.so
 

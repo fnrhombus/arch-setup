@@ -1587,7 +1587,7 @@ check "PIN actually persisted" "! pinutil test < /dev/null 2>&1 | grep -q NoPinS
 check "pinpam in sudo"       "grep -q libpinpam /etc/pam.d/sudo"
 check "pinpam in hyprlock"   "grep -q libpinpam /etc/pam.d/hyprlock"
 check "no pinpam in greetd"  "! grep -q libpinpam /etc/pam.d/greetd"
-check "fprintd in greetd"    "grep -q 'pam_fprintd.*max-tries=1.*timeout=10' /etc/pam.d/greetd"
+check "fprintd in greetd"    "grep -q 'pam_fprintd.*max-tries=5.*timeout=20' /etc/pam.d/greetd"
 check "fprintd in sudo"      "grep -q 'pam_fprintd.*max-tries=5.*timeout=20' /etc/pam.d/sudo"
 check "fprintd in hyprlock"  "grep -q 'pam_fprintd.*max-tries=5.*timeout=20' /etc/pam.d/hyprlock"
 check "pinpam before fprintd sudo" "awk '/libpinpam/{p=NR} /pam_fprintd/{f=NR} END{exit !(p && f && p<f)}' /etc/pam.d/sudo"
