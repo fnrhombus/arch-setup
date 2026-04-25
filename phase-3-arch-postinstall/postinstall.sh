@@ -233,6 +233,16 @@ if ! id -nG tom | grep -qw docker; then
     warn "Added tom to docker group — log out and back in for it to take effect."
 fi
 
+# ---------- 1a-tss. TPM access for tom (needed by pinutil) ----------
+# /dev/tpmrm0 is mode 660 root:tss, so tom needs to be in the `tss`
+# group to call pinutil without sudo. pinutil scopes the PIN to the
+# effective user, so it MUST run as tom (not via sudo) for libpinpam.so
+# to find the PIN at PAM time. See §7 for the rationale.
+if ! id -nG tom | grep -qw tss; then
+    sudo usermod -aG tss tom
+    warn "Added tom to tss group — log out and back in for it to take effect (or pinutil setup will be skipped this run)."
+fi
+
 # ---------- 1b. user services ----------
 # hyprpolkitagent ships a user unit but the preset doesn't auto-activate on
 # a fresh install — apps that need PolicyKit auth (Bitwarden unlock, mount
@@ -665,20 +675,30 @@ if [[ -z "${SKIP_FPRINT:-}" ]]; then
 fi
 
 # ---------- 7. pinpam TPM-PIN setup ----------
-# pinutil setup asks for a fresh PIN and stores it in TPM NVRAM.
+# pinutil setup asks for a fresh PIN and stores it in TPM NVRAM,
+# scoped to the EFFECTIVE USER running the command (per `pinutil --help`:
+# "Set up a new PIN (root or user for self)"). At PAM time, libpinpam.so
+# looks up the PIN keyed to PAM_USER (tom for `sudo -v`), so the PIN
+# MUST be set for tom — NOT for root. Earlier versions of this section
+# used `sudo pinutil setup`, which (because postinstall already runs as
+# tom and `sudo` elevates to root) stored the PIN for root and made
+# `sudo -v` later report "PIN authentication is not configured".
+#
+# Prereq: tom must be in the `tss` group to access /dev/tpmrm0 directly,
+# without root. Postinstall §1 below adds tom to tss; verify with
+# `groups | grep -w tss`. New-group membership only takes effect on the
+# NEXT login, so the very first postinstall run after the install may
+# need to be re-run from a fresh shell — or the user can run pinutil
+# manually after logging out and back in.
+#
 # PAM wiring for PIN lives in §7a below (sudo + hyprlock only — not greetd).
 if command -v pinutil >/dev/null; then
     if [[ -z "${SKIP_PIN:-}" ]]; then
-        # `pinutil setup` reads the new PIN interactively from stdin. Without a
-        # TTY (postinstall piped over ssh, or run from a headless systemd unit)
-        # it'd block forever with no way to type. Skip and warn instead.
-        if [[ -t 0 ]]; then
-            log "Setting up TPM-backed PIN (follow prompt; 6+ chars recommended)..."
-            # tee lets the user see pinutil's prompts while we capture output
-            # for the "already has a PIN" check. The `if` wrapper disables
-            # errexit (otherwise pipefail + set -e kills the script on pinutil's
-            # non-zero exit before we can check for idempotency).
-            if sudo pinutil setup 2>&1 | tee /tmp/pinutil-setup.log; then
+        if [[ -t 0 ]] && id -nG tom | grep -qw tss; then
+            log "Setting up TPM-backed PIN for tom (digits-only, 6+ chars)..."
+            # No sudo — the PIN must belong to tom, not root. tom needs
+            # tss-group membership for /dev/tpmrm0 access (handled by §1).
+            if pinutil setup 2>&1 | tee /tmp/pinutil-setup.log; then
                 log "TPM PIN set (per pinutil)."
             elif grep -q 'already has a PIN' /tmp/pinutil-setup.log; then
                 log "TPM PIN already set — keeping (idempotent re-run)."
@@ -699,10 +719,14 @@ if command -v pinutil >/dev/null; then
                 warn "will NOT work until you reclaim NV space:"
                 warn "  sudo tpm2_nvreadpublic   # see what's allocated"
                 warn "  sudo tpm2_nvundefine 0xXXXX  # free the conflicting slot"
-                warn "  sudo pinutil delete && sudo pinutil setup"
+                warn "  pinutil delete && pinutil setup     # (no sudo!)"
             fi
+        elif [[ -t 0 ]]; then
+            warn "Skipping pinutil setup — tom is not yet in the tss group."
+            warn "  Log out and back in (group membership refreshes on login),"
+            warn "  then run: pinutil setup"
         else
-            warn "No TTY — skipping 'pinutil setup'. Run it manually after login: sudo pinutil setup"
+            warn "No TTY — skipping 'pinutil setup'. Run it manually after login: pinutil setup"
         fi
     fi
 else
