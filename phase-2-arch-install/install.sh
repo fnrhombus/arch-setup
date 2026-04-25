@@ -224,6 +224,7 @@ WIFI_PROFILES=(
     "ATTgs5BwGZ:t8ueiz43ueaf"
     "rhombus:n3wPassword"
     "rhombus_legacy:n3wPassword"
+    "Ganymede:n3wPassword"
 )
 
 if ! ping -c1 -W3 archlinux.org >/dev/null 2>&1; then

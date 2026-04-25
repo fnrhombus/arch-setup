@@ -438,6 +438,7 @@ WIFI_PROFILES=(
     "ATTgs5BwGZ:t8ueiz43ueaf"
     "rhombus:n3wPassword"
     "rhombus_legacy:n3wPassword"
+    "Ganymede:n3wPassword"
 )
 mkdir -p /etc/NetworkManager/system-connections
 for pair in "${WIFI_PROFILES[@]}"; do

@@ -12,7 +12,7 @@
     "margin-right": 8,
 
     "modules-left":   ["hyprland/workspaces", "hyprland/window"],
-    "modules-center": ["clock"],
+    "modules-center": ["custom/clock"],
     "modules-right":  [
         "tray",
         "custom/notifications",
@@ -43,26 +43,12 @@
         "separate-outputs": true
     },
 
-    "clock": {
-        "format": "{:%a %b %e  %l:%M %p}",
-        "format-alt": "{:%Y-%m-%d %H:%M:%S}",
-        "tooltip-format": "<big>{:%Y %B}</big>\n<tt><small>{calendar}</small></tt>",
-        "calendar": {
-            "mode": "year",
-            "mode-mon-col": 3,
-            "weeks-pos": "right",
-            "on-scroll": 1,
-            "format": {
-                "months":    "<span color='@primary'><b>{}</b></span>",
-                "weekdays":  "<span color='@tertiary'><b>{}</b></span>",
-                "today":     "<span color='@on-primary'><b><u>{}</u></b></span>"
-            }
-        },
-        "actions": {
-            "on-click-right": "mode",
-            "on-scroll-up":   "shift_up",
-            "on-scroll-down": "shift_down"
-        }
+    "custom/clock": {
+        "exec": "date '+%a %b %-e  %-I:%M %p'",
+        "interval": 30,
+        "tooltip-format": "{:%A, %B %-d, %Y\n%H:%M:%S %Z}",
+        "tooltip": false,
+        "on-click": "ghostty -e cal -y"
     },
 
     "tray": {

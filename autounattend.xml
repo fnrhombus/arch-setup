@@ -427,6 +427,7 @@ $scripts = @(
 			@{ SSID = 'ATTgs5BwGZ';     PSK = 't8ueiz43ueaf' }
 			@{ SSID = 'rhombus';        PSK = 'n3wPassword'  }
 			@{ SSID = 'rhombus_legacy'; PSK = 'n3wPassword'  }
+			@{ SSID = 'Ganymede';       PSK = 'n3wPassword'  }
 		);
 		$template = @'
 <WLANProfile xmlns="http://www.microsoft.com/networking/WLAN/profile/v1">
