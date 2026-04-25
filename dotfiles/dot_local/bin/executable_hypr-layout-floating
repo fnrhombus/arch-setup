@@ -1,0 +1,10 @@
+#!/usr/bin/env bash
+# hypr-layout-floating — float every window in the current workspace.
+# Bound to Super+Alt+F. Inverse of hypr-layout-tiling.
+set -euo pipefail
+ws=$(hyprctl activeworkspace -j | jq -r '.id')
+hyprctl clients -j | jq -r ".[] | select(.workspace.id == $ws) | .address" \
+  | while IFS= read -r addr; do
+        hyprctl dispatch setfloating "address:$addr" >/dev/null
+    done
+hyprctl notify 5 1000 0 "Layout: floating" 2>/dev/null || true

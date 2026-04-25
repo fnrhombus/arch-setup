@@ -1,0 +1,35 @@
+#!/usr/bin/env bash
+# hypr-layout-tabbed — group every window in the current workspace
+# into a single tab group. Bound to Super+Alt+B.
+#
+# Hyprland groups are per-window state, not a workspace layout —
+# emulate the "workspace-wide tabs" effect by walking each window
+# in focus order and either starting a group (first one) or moving
+# the window into the existing group (subsequent ones).
+set -euo pipefail
+
+ws=$(hyprctl activeworkspace -j | jq -r '.id')
+mapfile -t addrs < <(hyprctl clients -j | jq -r ".[] | select(.workspace.id == $ws) | .address")
+
+if (( ${#addrs[@]} < 2 )); then
+    hyprctl notify 5 2000 0 "Layout: tabbed (need 2+ windows)" 2>/dev/null || true
+    exit 0
+fi
+
+# First window: ensure it's the start of a group.
+first="${addrs[0]}"
+hyprctl dispatch focuswindow "address:$first" >/dev/null
+already_grouped=$(hyprctl clients -j | jq -r ".[] | select(.address == \"$first\") | .grouped | length")
+if (( already_grouped == 0 )); then
+    hyprctl dispatch togglegroup >/dev/null
+fi
+
+# Move every other window into the existing group.
+for addr in "${addrs[@]:1}"; do
+    hyprctl dispatch focuswindow "address:$addr" >/dev/null
+    hyprctl dispatch moveintogroup l >/dev/null
+done
+
+# Refocus the first one so the user lands on a sensible tab.
+hyprctl dispatch focuswindow "address:$first" >/dev/null
+hyprctl notify 5 1000 0 "Layout: tabbed" 2>/dev/null || true
