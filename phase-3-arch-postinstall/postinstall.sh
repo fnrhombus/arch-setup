@@ -774,7 +774,9 @@ fi
 # 'sufficient' falls through cleanly to pam_fprintd/pam_unix — first-boot
 # (pre-`pinutil setup`) still works.
 #
-# pam_fprintd options: `max-tries=1` = one finger attempt then fail;
+# pam_fprintd options: `max-tries=5` = up to five swipes per auth
+# attempt (a finger can land funny on the first couple tries and
+# still recover without falling through to password);
 # `timeout=20` at sudo/hyprlock = give up after 20s of no finger and
 # fall through to the password prompt. 20s is comfortable on the
 # Inspiron 7786 (fingerprint reader is in the power button — needs a
@@ -814,7 +816,7 @@ sudo tee /etc/pam.d/sudo >/dev/null <<'SUDOPAMEOF'
 # 20s timeout if open), password fallback. See postinstall.sh §7a.
 auth        sufficient  libpinpam.so
 auth        [success=1 default=ignore] pam_exec.so quiet /usr/local/bin/lid-closed
-auth        sufficient  pam_fprintd.so              max-tries=1 timeout=20
+auth        sufficient  pam_fprintd.so              max-tries=5 timeout=20
 auth        include     system-auth
 account     include     system-auth
 session     include     system-auth
@@ -827,7 +829,7 @@ sudo tee /etc/pam.d/hyprlock >/dev/null <<'HYPRLOCKPAMEOF'
 # 20s timeout if open), password fallback. See postinstall.sh §7a.
 auth        sufficient  libpinpam.so
 auth        [success=1 default=ignore] pam_exec.so quiet /usr/local/bin/lid-closed
-auth        sufficient  pam_fprintd.so              max-tries=1 timeout=20
+auth        sufficient  pam_fprintd.so              max-tries=5 timeout=20
 auth        include     login
 HYPRLOCKPAMEOF
 
@@ -1586,8 +1588,8 @@ check "pinpam in sudo"       "grep -q libpinpam /etc/pam.d/sudo"
 check "pinpam in hyprlock"   "grep -q libpinpam /etc/pam.d/hyprlock"
 check "no pinpam in greetd"  "! grep -q libpinpam /etc/pam.d/greetd"
 check "fprintd in greetd"    "grep -q 'pam_fprintd.*max-tries=1.*timeout=10' /etc/pam.d/greetd"
-check "fprintd in sudo"      "grep -q 'pam_fprintd.*max-tries=1.*timeout=20' /etc/pam.d/sudo"
-check "fprintd in hyprlock"  "grep -q 'pam_fprintd.*max-tries=1.*timeout=20' /etc/pam.d/hyprlock"
+check "fprintd in sudo"      "grep -q 'pam_fprintd.*max-tries=5.*timeout=20' /etc/pam.d/sudo"
+check "fprintd in hyprlock"  "grep -q 'pam_fprintd.*max-tries=5.*timeout=20' /etc/pam.d/hyprlock"
 check "pinpam before fprintd sudo" "awk '/libpinpam/{p=NR} /pam_fprintd/{f=NR} END{exit !(p && f && p<f)}' /etc/pam.d/sudo"
 check "pinpam before fprintd hyprlock" "awk '/libpinpam/{p=NR} /pam_fprintd/{f=NR} END{exit !(p && f && p<f)}' /etc/pam.d/hyprlock"
 check "pam_unix in sys-auth" "grep -q pam_unix /etc/pam.d/system-auth"
