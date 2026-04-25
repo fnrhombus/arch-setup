@@ -1,11 +1,16 @@
 #!/usr/bin/env bash
 # hypr-cheatsheet — searchable GUI cheatsheet of every active Hyprland
-# binding. Reads the live state via `hyprctl binds -j`, formats each
-# entry as "MODS+KEY → action", and feeds the list through fuzzel's
-# dmenu mode. Themed via matugen's fuzzel template, so it looks like
-# the rest of the desktop.
+# binding. Reads the live state via `hyprctl binds -j` and feeds the
+# list through fuzzel's dmenu mode. Themed via matugen's fuzzel
+# template, so it looks like the rest of the desktop.
 #
 # Bound to Super+/ in binds.conf.
+#
+# Format per row:  [Category] Description           MODS+KEY
+# Sorted by category, then description, so related actions cluster
+# (e.g., all "Open ..." quicklaunches together, all "Focus window ..."
+# together) and you can fuzzel-search by what the binding *does*
+# rather than memorizing the chord.
 #
 # Selecting an entry just dismisses; we don't auto-fire the action
 # because dispatchers like `killactive` would do unexpected things to
@@ -38,20 +43,49 @@ mods_to_label() {
     esac
 }
 
+# Derive a category from the dispatcher + arg + key. Used to group
+# related bindings in the cheatsheet output. Categories are short so
+# the bracketed prefix doesn't crowd the description column.
+categorize() {
+    local dispatcher="$1" arg="$2" key="$3"
+    case "$dispatcher" in
+        killactive|togglefloating|togglesplit|togglegroup|fullscreen|pin)
+            echo "Window" ;;
+        movefocus)
+            echo "Focus" ;;
+        movewindow|movewindowpixel|moveactive)
+            echo "Window" ;;
+        resizewindow|resizeactive|resizewindowpixel)
+            echo "Resize" ;;
+        workspace|movetoworkspace|movetoworkspacesilent|togglespecialworkspace)
+            echo "Workspace" ;;
+        submap)
+            echo "Mode" ;;
+        exec)
+            case "$arg" in
+                *swayosd-client*|*playerctl*)        echo "Media" ;;
+                *hyprshot*|*satty*)                  echo "Screenshot" ;;
+                *systemctl*hibernate*|*loginctl*lock*|*wleave*) echo "Power" ;;
+                *theme-toggle*|*wallpaper-rotate*)    echo "Theme" ;;
+                *hyprctl*reload*|*hyprpicker*)        echo "Hyprland" ;;
+                *hypr-cheatsheet*)                    echo "Help" ;;
+                *control-panel*|*pkill*waybar*)       echo "System" ;;
+                *cliphist*|*fuzzel*emoji*)            echo "Pickers" ;;
+                *swaync-client*)                      echo "Notifications" ;;
+                *)                                    echo "Apps" ;;
+            esac ;;
+        *)
+            echo "Misc" ;;
+    esac
+}
+
 format_bind() {
     local modmask="$1" key="$2" description="$3" dispatcher="$4" arg="$5"
-    local label
+    local label combo category rhs
     label=$(mods_to_label "$modmask")
-    local combo
-    if [[ -z "$label" ]]; then
-        combo="$key"
-    else
-        combo="${label}+${key}"
-    fi
-    # Prefer the human-friendly description (set via `bindd` in
-    # binds.conf). Fall back to dispatcher+arg for any binding still
-    # using bare `bind` or pulled in from plugin configs.
-    local rhs
+    if [[ -z "$label" ]]; then combo="$key"
+    else combo="${label}+${key}"; fi
+
     if [[ -n "$description" && "$description" != "null" ]]; then
         rhs="$description"
     elif [[ -z "$arg" || "$arg" == "null" ]]; then
@@ -59,14 +93,19 @@ format_bind() {
     else
         rhs="$dispatcher $arg"
     fi
-    printf '%-28s   %s\n' "$combo" "$rhs"
+    category=$(categorize "$dispatcher" "$arg" "$key")
+
+    # Two-column layout: "[Cat] Description" then "MODS+KEY".
+    # The leading category prefix means a `sort` puts everything in
+    # the same group together, and within a group sorts by description
+    # — which is what the user wants to scan against.
+    printf '[%-13s] %-40s   %s\n' "$category" "$rhs" "$combo"
 }
 
-# Walk the JSON output of `hyprctl binds -j`, sort by mod label then key.
 hyprctl binds -j 2>/dev/null \
   | jq -r '.[] | [.modmask, .key, (.description // ""), .dispatcher, (.arg // "")] | @tsv' \
   | while IFS=$'\t' read -r modmask key description dispatcher arg; do
         format_bind "$modmask" "$key" "$description" "$dispatcher" "$arg"
     done \
   | sort \
-  | fuzzel --dmenu --width 90 --lines 30 --prompt "Hyprland binds: " >/dev/null
+  | fuzzel --dmenu --width 100 --lines 35 --prompt "Hyprland binds: " >/dev/null
