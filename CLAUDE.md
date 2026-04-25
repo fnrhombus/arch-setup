@@ -91,6 +91,16 @@ There is no build, lint, or test target. Work is almost entirely **editing markd
 - `wsl-cli-test.sh` is meant to be run inside an `archlinux` WSL distro: `wsl -d archlinux -u tom bash ./wsl-cli-test.sh`. Assume the user has `mise`, `pacman`, and `yay` available inside.
 - `wsl-setup.sh` runs as root *once*, before `wsl-cli-test.sh`: `wsl -d archlinux -u root bash ./wsl-setup.sh && wsl --terminate archlinux`.
 
+### Pre-commit hook (Hyprland binds validation)
+
+`.githooks/pre-commit` runs `validate-hypr-binds` against any staged changes under `dotfiles/dot_config/hypr/`. Refuses commits with duplicate (MOD, KEY) pairs, unknown dispatchers, or malformed `bindd` descriptions. Activate once per fresh clone with:
+
+```sh
+git config core.hooksPath .githooks
+```
+
+`core.hooksPath` is `.git/config`-local — it doesn't ship with the clone, so each new checkout has to set it once. Any future committer (claude or human) needs this active or they'll push broken bind configs.
+
 ## Context that should influence every edit
 
 - **The target machine cannot use NVIDIA under Wayland.** MX250 requires nvidia-470xx, which lacks GBM. Any suggestion involving Optimus/nvidia on this hardware is wrong — Intel UHD 620 only, external monitor via HDMI (wired to iGPU), NVIDIA modules blacklisted.
