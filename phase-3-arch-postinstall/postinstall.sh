@@ -1300,13 +1300,20 @@ if command -v hyprpm >/dev/null; then
                 && hyprpm enable hyprgrass \
                 || warn "hyprgrass install failed — see hyprpm output above."
         fi
+        # Source plugin-specific config now that plugins are loaded.
+        # See post-plugins.conf for why this is split out.
+        if [[ -f "$HOME/.config/hypr/post-plugins.conf" ]]; then
+            hyprctl keyword source "$HOME/.config/hypr/post-plugins.conf" >/dev/null 2>&1 \
+                || warn "Could not source post-plugins.conf — try 'hyprctl reload' manually."
+        fi
     else
         log "Not in a Hyprland session — planting first-Hyprland-login hyprpm runner."
         mkdir -p "$HOME/.zshrc.d"
         cat > "$HOME/.zshrc.d/arch-hyprpm-bootstrap.zsh" <<'HYPRPMEOF'
-# Self-deletes once hyprexpo + hyprgrass are enabled. Only fires inside
-# a Hyprland session — a TTY login (no HYPRLAND_INSTANCE_SIGNATURE) is
-# silently ignored.
+# Self-deletes once hyprexpo + hyprgrass are enabled AND post-plugins.conf
+# has been sourced into the running Hyprland. Only fires inside a Hyprland
+# session — a TTY login (no HYPRLAND_INSTANCE_SIGNATURE) is silently
+# ignored.
 if [[ -n "${HYPRLAND_INSTANCE_SIGNATURE:-}" ]] && command -v hyprpm >/dev/null; then
     hyprpm update >/dev/null 2>&1 || true
     if ! hyprpm list 2>/dev/null | grep -q hyprexpo; then
@@ -1317,8 +1324,17 @@ if [[ -n "${HYPRLAND_INSTANCE_SIGNATURE:-}" ]] && command -v hyprpm >/dev/null; 
         hyprpm add https://github.com/horriblename/hyprgrass 2>/dev/null \
             && hyprpm enable hyprgrass 2>/dev/null
     fi
+    # Plugin-specific bindings + config blocks (hyprexpo:expo,
+    # plugin{hyprexpo{...}}, plugin{hyprgrass{...}}) live in
+    # post-plugins.conf and are NOT sourced from hyprland.conf, to keep
+    # the initial config parse free of unknown-dispatcher errors that
+    # would raise a sticky red overlay. Source it now that plugins are
+    # loaded.
     if hyprpm list 2>/dev/null | grep -q hyprexpo \
        && hyprpm list 2>/dev/null | grep -q hyprgrass; then
+        if [[ -f "$HOME/.config/hypr/post-plugins.conf" ]]; then
+            hyprctl keyword source "$HOME/.config/hypr/post-plugins.conf" >/dev/null 2>&1 || true
+        fi
         rm -f ~/.zshrc.d/arch-hyprpm-bootstrap.zsh
     fi
 fi
