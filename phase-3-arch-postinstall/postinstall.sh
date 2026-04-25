@@ -772,33 +772,53 @@ fi
 # Inspiron 7786 (fingerprint reader is in the power button — needs a
 # moment to reach for); shorter values felt rushed in real use.
 #
+# Lid-state escape hatch: when the laptop lid is closed (i.e. docked
+# under a desk, fingerprint reader physically unreachable), we want
+# password auth IMMEDIATELY rather than burning 20s waiting for a
+# finger that can't get there. /usr/local/bin/lid-closed exits 0 when
+# closed; with PAM control `[success=1 default=ignore]` PAM jumps one
+# line forward on success (skipping pam_fprintd entirely) and just
+# continues normally on failure (lid open → try fprintd as usual).
+#
 # NEVER remove pam_unix from the stack via `system-auth`/`system-login`/
 # `login` includes — that's the last-resort password path.
 #
 # Fully idempotent: tee overwrites with identical bytes on re-run.
+log "Writing /usr/local/bin/lid-closed (PAM helper for dock-aware fprintd skip)..."
+sudo tee /usr/local/bin/lid-closed >/dev/null <<'LIDEOF'
+#!/bin/sh
+# Exit 0 iff the laptop lid is closed (read /proc/acpi/button/lid/*/state).
+# PAM uses the exit code to decide whether to skip pam_fprintd.
+# No lid sensor on this machine? Assume open → exit 1 → fprintd tried.
+LID_FILE=$(ls /proc/acpi/button/lid/*/state 2>/dev/null | head -1)
+[ -z "$LID_FILE" ] && exit 1
+state=$(awk '{print $NF}' "$LID_FILE")
+[ "$state" = closed ] && exit 0 || exit 1
+LIDEOF
+sudo chmod 755 /usr/local/bin/lid-closed
+
 log "Writing PAM stacks for sudo / hyprlock..."
 
-# sudo: PIN → fingerprint(5s) → password.
+# sudo: PIN → (lid-aware) fingerprint(20s) → password.
 sudo tee /etc/pam.d/sudo >/dev/null <<'SUDOPAMEOF'
 #%PAM-1.0
-# arch-setup: PIN primary, fingerprint optional (20s timeout), password fallback.
-# See postinstall.sh §7a.
+# arch-setup: PIN primary, fingerprint optional (skipped if lid closed,
+# 20s timeout if open), password fallback. See postinstall.sh §7a.
 auth        sufficient  libpinpam.so
+auth        [success=1 default=ignore] pam_exec.so quiet /usr/local/bin/lid-closed
 auth        sufficient  pam_fprintd.so              max-tries=1 timeout=20
 auth        include     system-auth
 account     include     system-auth
 session     include     system-auth
 SUDOPAMEOF
 
-# hyprlock: PIN → fingerprint(20s) → password. Finger is unlikely to
-# be reachable while the laptop is docked, but including it preserves
-# the "any one of three methods" invariant. The 20s timeout is only
-# hit if the user Ctrl+C'd past the PIN prompt.
+# hyprlock: PIN → (lid-aware) fingerprint(20s) → password.
 sudo tee /etc/pam.d/hyprlock >/dev/null <<'HYPRLOCKPAMEOF'
 #%PAM-1.0
-# arch-setup: PIN primary, fingerprint optional (20s timeout), password fallback.
-# See postinstall.sh §7a.
+# arch-setup: PIN primary, fingerprint optional (skipped if lid closed,
+# 20s timeout if open), password fallback. See postinstall.sh §7a.
 auth        sufficient  libpinpam.so
+auth        [success=1 default=ignore] pam_exec.so quiet /usr/local/bin/lid-closed
 auth        sufficient  pam_fprintd.so              max-tries=1 timeout=20
 auth        include     login
 HYPRLOCKPAMEOF
