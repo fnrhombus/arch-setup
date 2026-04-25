@@ -46,17 +46,25 @@ mods_to_label() {
 # Derive a category from the dispatcher + arg + key. Used to group
 # related bindings in the cheatsheet output. Categories are short so
 # the bracketed prefix doesn't crowd the description column.
+#
+# Vim-style hjkl variants of focus / move / resize get their own
+# parenthesized suffix so they cluster separately from the arrow-key
+# versions in the alphabetical sort.
 categorize() {
     local dispatcher="$1" arg="$2" key="$3"
+    local vim_suffix=""
+    case "$key" in
+        h|j|k|l) vim_suffix=" (vim)" ;;
+    esac
     case "$dispatcher" in
         killactive|togglefloating|togglesplit|togglegroup|fullscreen|pin)
             echo "Window" ;;
         movefocus)
-            echo "Focus" ;;
+            echo "Focus${vim_suffix}" ;;
         movewindow|movewindowpixel|moveactive)
-            echo "Window" ;;
+            echo "Move${vim_suffix}" ;;
         resizewindow|resizeactive|resizewindowpixel)
-            echo "Resize" ;;
+            echo "Resize${vim_suffix}" ;;
         workspace|movetoworkspace|movetoworkspacesilent|togglespecialworkspace)
             echo "Workspace" ;;
         submap)
