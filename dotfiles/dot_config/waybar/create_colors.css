@@ -1,0 +1,28 @@
+/* Fallback colors for waybar — used until matugen renders a real one
+ * from the active wallpaper. The `create_` prefix tells chezmoi to write
+ * this file ONLY when it doesn't already exist, so matugen's runtime
+ * overwrites are NOT clobbered by subsequent `chezmoi apply`s.
+ *
+ * Matches the static palette in matugen/templates/waybar.css so the
+ * pre-matugen and post-matugen colors look identical for the static
+ * fills; only the accent colors (primary/secondary/tertiary/error)
+ * pick up the wallpaper tint after matugen's first run. */
+
+/* Static fills (VS Code Default Dark+) */
+@define-color background        #1e1e1e;
+@define-color on-background     #d4d4d4;
+@define-color surface           #252526;
+@define-color surface-container #2d2d30;
+@define-color surface-high      #3c3c3c;
+@define-color on-surface        #d4d4d4;
+@define-color outline           #3c3c3c;
+
+/* Static placeholder accents (replaced by matugen on first wallpaper-rotate) */
+@define-color primary           #b4befe;
+@define-color on-primary        #1e1e2e;
+@define-color primary-container #45475a;
+@define-color on-primary-container #cdd6f4;
+
+@define-color secondary         #cba6f7;
+@define-color tertiary          #94e2d5;
+@define-color error             #f38ba8;

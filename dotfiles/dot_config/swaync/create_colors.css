@@ -1,0 +1,21 @@
+/* Fallback colors for swaync — see ~/.config/waybar/create_colors.css
+ * for the rationale. Same static palette so swaync renders identically
+ * pre- and post-matugen on fills/text; only accents pick up the
+ * wallpaper tint after the first matugen run. */
+
+/* Static fills (VS Code Default Dark+) */
+@define-color background        #1e1e1e;
+@define-color surface           #252526;
+@define-color surface-container #2d2d30;
+@define-color surface-high      #3c3c3c;
+@define-color on-surface        #d4d4d4;
+@define-color outline           #3c3c3c;
+
+/* Static placeholder accents (replaced by matugen) */
+@define-color primary           #b4befe;
+@define-color on-primary        #1e1e2e;
+@define-color primary-container #45475a;
+@define-color on-primary-container #cdd6f4;
+
+@define-color error             #f38ba8;
+@define-color on-error          #1e1e2e;
