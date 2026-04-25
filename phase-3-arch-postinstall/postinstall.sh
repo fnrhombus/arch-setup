@@ -188,7 +188,8 @@ sudo pacman -Syu --noconfirm --needed \
     sbctl \
     mise chezmoi github-cli \
     docker docker-compose docker-buildx \
-    snapper snap-pac
+    snapper snap-pac \
+    cmake cpio
 
 sudo pkgfile -u
 
@@ -1161,12 +1162,14 @@ if [[ ! -d "$DOTFILES_SRC" ]]; then
 elif ! command -v chezmoi >/dev/null; then
     warn "chezmoi not installed — was it dropped from §1 pacman list?"
 else
-    log "Initializing chezmoi from $DOTFILES_SRC..."
-    chezmoi init --source="$DOTFILES_SRC" >/dev/null 2>&1 \
-        || warn "chezmoi init failed (already initialized? — non-fatal, continuing)."
-    log "Applying chezmoi (writes ~/.config, ~/.local/bin, ~/.local/share)..."
-    chezmoi apply --force \
-        || warn "chezmoi apply reported issues — check 'chezmoi status' and 'chezmoi diff'."
+    # Pass --source on apply directly. Skipping `chezmoi init` because with
+    # a local --source it just writes a config file pointing at it, then
+    # apply still has to be told the source separately or it falls back to
+    # ~/.local/share/chezmoi (which we don't populate) and errors with
+    # "stat /home/tom/.local/share/chezmoi: no such file or directory".
+    log "Applying chezmoi from $DOTFILES_SRC (writes ~/.config, ~/.local/bin, ~/.local/share)..."
+    chezmoi apply --source="$DOTFILES_SRC" --force \
+        || warn "chezmoi apply reported issues — check 'chezmoi status --source=$DOTFILES_SRC' and 'chezmoi diff --source=$DOTFILES_SRC'."
 fi
 
 # Initial wallpaper render: chezmoi's run_once script downloads from callisto;
@@ -1189,21 +1192,51 @@ if [[ -f "$HOME/.config/systemd/user/wallpaper-rotate.timer" ]]; then
 fi
 
 # Hyprland plugins via hyprpm. hyprexpo + hyprgrass per desktop-requirements.md.
-# Must run inside a Hyprland session to actually load (hyprpm enable signals
-# the live compositor). On first install, the user runs this section again
-# from inside Hyprland; on re-runs, the `add` is idempotent.
+# hyprpm needs HYPRLAND_INSTANCE_SIGNATURE set (the live compositor's IPC
+# socket) to enable a plugin. Postinstall runs from a TTY where that's
+# never set, so `hyprpm enable` fails with "(3) failed to get the current
+# hyprland version". When we're in a Hyprland session (e.g. user re-runs
+# postinstall from a Hyprland terminal), do it inline; otherwise plant
+# a one-shot script in ~/.zshrc.d/ that fires the first time zsh starts
+# *inside* a Hyprland session and self-deletes when both plugins are
+# enabled.
 if command -v hyprpm >/dev/null; then
-    log "Ensuring Hyprland plugins (hyprexpo + hyprgrass)..."
+    if [[ -n "${HYPRLAND_INSTANCE_SIGNATURE:-}" ]]; then
+        log "Ensuring Hyprland plugins (hyprexpo + hyprgrass)..."
+        hyprpm update >/dev/null 2>&1 || true
+        if ! hyprpm list 2>/dev/null | grep -q hyprexpo; then
+            hyprpm add https://github.com/hyprwm/hyprland-plugins \
+                && hyprpm enable hyprexpo \
+                || warn "hyprexpo install failed — see hyprpm output above."
+        fi
+        if ! hyprpm list 2>/dev/null | grep -q hyprgrass; then
+            hyprpm add https://github.com/horriblename/hyprgrass \
+                && hyprpm enable hyprgrass \
+                || warn "hyprgrass install failed — see hyprpm output above."
+        fi
+    else
+        log "Not in a Hyprland session — planting first-Hyprland-login hyprpm runner."
+        mkdir -p "$HOME/.zshrc.d"
+        cat > "$HOME/.zshrc.d/arch-hyprpm-bootstrap.zsh" <<'HYPRPMEOF'
+# Self-deletes once hyprexpo + hyprgrass are enabled. Only fires inside
+# a Hyprland session — a TTY login (no HYPRLAND_INSTANCE_SIGNATURE) is
+# silently ignored.
+if [[ -n "${HYPRLAND_INSTANCE_SIGNATURE:-}" ]] && command -v hyprpm >/dev/null; then
     hyprpm update >/dev/null 2>&1 || true
     if ! hyprpm list 2>/dev/null | grep -q hyprexpo; then
-        hyprpm add https://github.com/hyprwm/hyprland-plugins \
-            && hyprpm enable hyprexpo \
-            || warn "hyprexpo install failed — re-run inside a Hyprland session."
+        hyprpm add https://github.com/hyprwm/hyprland-plugins 2>/dev/null \
+            && hyprpm enable hyprexpo 2>/dev/null
     fi
     if ! hyprpm list 2>/dev/null | grep -q hyprgrass; then
-        hyprpm add https://github.com/horriblename/hyprgrass \
-            && hyprpm enable hyprgrass \
-            || warn "hyprgrass install failed — re-run inside a Hyprland session."
+        hyprpm add https://github.com/horriblename/hyprgrass 2>/dev/null \
+            && hyprpm enable hyprgrass 2>/dev/null
+    fi
+    if hyprpm list 2>/dev/null | grep -q hyprexpo \
+       && hyprpm list 2>/dev/null | grep -q hyprgrass; then
+        rm -f ~/.zshrc.d/arch-hyprpm-bootstrap.zsh
+    fi
+fi
+HYPRPMEOF
     fi
 fi
 
