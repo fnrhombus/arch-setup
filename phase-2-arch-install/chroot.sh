@@ -132,22 +132,24 @@ log "Writing /etc/crypttab.initramfs (cryptroot + cryptswap) + /etc/crypttab (cr
 # to be opened before pivot so the kernel's resume= codepath (which
 # runs in initramfs) can read the hibernate image.
 #
-# NO tpm2-device=auto on either line at install time — the option
-# blocks waiting for a non-existent TPM2 slot and hangs first boot
-# (systemd/systemd#39049, #36293). Both entries just have the passphrase
-# slot enrolled. sd-encrypt's kernel-keyring cache takes the cryptroot
-# passphrase and automatically tries it against cryptswap — since both
-# share the same LUKS_PW, cryptswap unlocks silently. One passphrase
-# prompt, two volumes opened.
-#
-# Phase-3 postinstall runs \`systemd-cryptenroll --tpm2-device=auto\` on
-# both volumes, then flips tpm2-device=auto on in both lines and
-# regenerates the initramfs — subsequent boots are silent.
+# tpm2-device=auto: present iff install.sh successfully enrolled TPM2
+# at format time (BitLocker-style: the very first boot is silent). If
+# enrollment failed or no TPM was present, omit the option — leaving
+# it in would block boot waiting for a non-existent TPM2 slot
+# (systemd/systemd#39049, #36293). Phase-3 postinstall §7.5 retries
+# enrollment in that case and rewrites these lines on success.
 #
 # cryptvar opens post-pivot via a keyfile on cryptroot (§7a).
+if [[ "${TPM_ENROLLED_AT_INSTALL:-0}" == "1" ]]; then
+    _crypt_opts="luks,discard,tpm2-device=auto"
+    log "  TPM2 already enrolled at install — adding tpm2-device=auto so first boot unlocks silently."
+else
+    _crypt_opts="luks,discard"
+    log "  No TPM2 enrollment yet — first boot will prompt for the passphrase; postinstall §7.5 retries."
+fi
 cat > /etc/crypttab.initramfs <<EOF
-cryptroot UUID=$LUKS_ROOT_UUID none luks,discard
-cryptswap UUID=$LUKS_SWAP_UUID none luks,discard
+cryptroot UUID=$LUKS_ROOT_UUID none $_crypt_opts
+cryptswap UUID=$LUKS_SWAP_UUID none $_crypt_opts
 EOF
 cat > /etc/crypttab <<EOF
 cryptvar  UUID=$LUKS_VAR_UUID  /etc/cryptsetup-keys.d/cryptvar.key  luks,discard

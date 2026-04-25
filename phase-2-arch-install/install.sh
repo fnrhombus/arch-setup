@@ -436,15 +436,54 @@ printf '%s' "$LUKS_PW" | cryptsetup open --key-file=- "$NETAC_VAR" cryptvar
 
 # Hibernate-ready swap: persistent LUKS2 (NOT a per-boot random key) so
 # the resume-from-hibernate image survives a power cycle. Same passphrase
-# as cryptroot — sd-encrypt's keyring cache opens cryptswap silently from
-# the cryptroot passphrase during first boot, so users only type it once
-# even though cryptswap is in crypttab.initramfs (required by resume=).
-# Phase-3 postinstall enrolls TPM2 on both volumes, flipping the boot to
-# fully silent from the second boot onward.
+# as cryptroot — both volumes get TPM2 enrolled in §5b below, so first
+# boot unlocks both silently against PCR 0+7 and the user never types
+# the passphrase under normal operation.
 log "Encrypting Netac swap ($NETAC_SWAP) with LUKS2 (persistent, hibernate-ready)..."
 printf '%s' "$LUKS_PW" | cryptsetup luksFormat --type luks2 --batch-mode \
     --label ArchSwapLUKS --key-file=- "$NETAC_SWAP"
 printf '%s' "$LUKS_PW" | cryptsetup open --key-file=- "$NETAC_SWAP" cryptswap
+
+# ---------- 5b. TPM2 autounlock at install time (BitLocker-style) ----------
+# Enroll TPM2 NOW, while $LUKS_PW is still in memory, so the very first
+# boot of the installed system is silent — no passphrase prompt at all.
+# The 48-digit recovery key becomes pure escrow: typed only if PCR values
+# drift (BIOS / secure-boot changes) or for disaster recovery.
+#
+# PCR choice: 0+7 only.
+#   PCR 0 = platform firmware, PCR 7 = secure-boot policy.
+#   Both are PRE-bootloader measurements that match between this Arch
+#   live ISO and the installed limine boot path. PCRs 4/5/8 measure
+#   bootloader + kernel and would NOT match — never include them here.
+#
+# Failure paths fall through to passphrase boot (no TPM, broken TPM,
+# old systemd-cryptenroll without --unlock-key-file): postinstall §7.5
+# will retry the enrollment from the running system.
+TPM_ENROLLED_AT_INSTALL=0
+if [[ -c /dev/tpm0 || -c /dev/tpmrm0 ]] && command -v systemd-cryptenroll >/dev/null; then
+    log "Enrolling TPM2 (PCR 0+7) on cryptroot + cryptswap so first boot is silent..."
+    _tpm_ok=1
+    for _spec in "$SAMSUNG_ROOT:cryptroot" "$NETAC_SWAP:cryptswap"; do
+        _dev="${_spec%:*}"
+        _name="${_spec#*:}"
+        _kf=$(mktemp /run/luks-pw-XXXXXX)
+        chmod 600 "$_kf"
+        printf '%s' "$LUKS_PW" > "$_kf"
+        if systemd-cryptenroll --unlock-key-file="$_kf" \
+            --tpm2-device=auto --tpm2-pcrs=0+7 "$_dev"; then
+            log "  $_name: TPM2 enrolled."
+        else
+            warn "  $_name: TPM2 enroll failed — postinstall §7.5 will retry."
+            _tpm_ok=0
+        fi
+        shred -u "$_kf" 2>/dev/null || rm -f "$_kf"
+    done
+    [[ $_tpm_ok -eq 1 ]] && TPM_ENROLLED_AT_INSTALL=1
+elif [[ ! -c /dev/tpm0 && ! -c /dev/tpmrm0 ]]; then
+    warn "No TPM2 device (/dev/tpm{,rm}0 missing). First boot will prompt for the LUKS passphrase; postinstall §7.5 will retry."
+else
+    warn "systemd-cryptenroll missing in live ISO. First boot will prompt for the LUKS passphrase; postinstall §7.5 will retry."
+fi
 
 log "Creating filesystems on LUKS mappers..."
 mkfs.btrfs -f -L ArchRoot /dev/mapper/cryptroot
@@ -579,6 +618,7 @@ LUKS_ROOT_UUID=$LUKS_ROOT_UUID
 LUKS_VAR_UUID=$LUKS_VAR_UUID
 LUKS_SWAP_UUID=$LUKS_SWAP_UUID
 SAMSUNG_DISK=$SAMSUNG
+TPM_ENROLLED_AT_INSTALL=$TPM_ENROLLED_AT_INSTALL
 EOF
 )
 
