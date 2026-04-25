@@ -1,15 +1,22 @@
 #%PAM-1.0
-# arch-setup: greetd PAM stack — PASSWORD ONLY at the greeter.
+# arch-setup: greetd PAM stack — fingerprint + password.
 #
-# Originally had pam_fprintd as `sufficient` ahead of system-login so a
-# touch on the reader could log you in. In practice it hogged input —
-# you couldn't type a password while pam_fprintd was waiting (up to
-# max-tries × timeout seconds), and each timeout incremented
-# pam_faillock until the account locked for 10 minutes. Removed.
+# Tricky to get right because pam_fprintd holds input focus during its
+# wait — typing a password during that window is silently dropped.
+# Two design choices keep this from biting:
 #
-# Fingerprint stays available at sudo + hyprlock (where input handling
-# is different and the password prompt remains usable in parallel).
-# At cold boot, just type the password.
+#   1. SHORT TIMEOUT (5s, max-tries=1). pam_fprintd waits at most 5s
+#      for a finger before timing out and releasing the input channel.
+#      A user who knows they want password types and waits 5s; a user
+#      who taps finger gets instant login. Total worst-case delay: 5s.
+#
+#   2. `[success=done default=ignore]` CONTROL. Replaces `sufficient`.
+#      success → auth complete, stop here. Failure / timeout / any
+#      other return → IGNORED (treated as "module had no opinion").
+#      Critically, pam_faillock checks the OVERALL auth result, not
+#      individual module returns — so an ignored fprintd failure
+#      does NOT increment the failure counter that triggers the
+#      10-minute lockout. Only failed PASSWORDS bump faillock.
 #
 # pam_gnome_keyring lines: auth + session + password are all needed.
 #   - auth     optional  → passes the typed password to the keyring
@@ -23,10 +30,6 @@
 #   - password optional → keeps the keyring password in sync if the
 #                          user ever changes their UNIX password.
 #
-# Order constraint: `auth optional pam_gnome_keyring.so` must be AFTER
-# `auth include system-login` so PAM_AUTHTOK is populated by the time
-# pam_gnome_keyring reads it.
-#
 # Module name quirk: pinpam-git ships its module as libpinpam.so (not
 # pam_pinpam.so). We do NOT include libpinpam at the greeter on purpose
 # — PIN is not a greeter-tier auth method on this design.
@@ -34,6 +37,7 @@
 # Installed to /etc/pam.d/greetd by phase-2-arch-install/chroot.sh AND
 # re-stomped on every postinstall run by phase-3 §7a (drift correction).
 
+auth        [success=done default=ignore] pam_fprintd.so max-tries=1 timeout=5
 auth        include     system-login
 auth        optional    pam_gnome_keyring.so
 
