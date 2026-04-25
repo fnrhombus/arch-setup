@@ -45,6 +45,28 @@ log()  { printf '\033[1;32m[+]\033[0m %s\n' "$*"; }
 warn() { printf '\033[1;33m[!]\033[0m %s\n' "$*" >&2; }
 die()  { printf '\033[1;31m[✗]\033[0m %s\n' "$*" >&2; exit 1; }
 
+# retry <cmd> [args...] — 4 attempts, exponential backoff (2/4/8s between).
+# For network ops that flap (AUR, GitHub, PyPI). pacman/yay are already
+# multi-mirror so they don't need this.
+retry() {
+    local delay=2 attempt
+    for attempt in 1 2 3 4; do
+        if "$@"; then return 0; fi
+        if [[ $attempt -lt 4 ]]; then
+            warn "retry ($attempt/4) — sleeping ${delay}s before retrying: $*"
+            sleep "$delay"
+            delay=$((delay * 2))
+        fi
+    done
+    die "retry: gave up after 4 attempts: $*"
+}
+
+# Per docs/wsl-setup-lessons.md: every `git clone` in this repo's setup
+# scripts must run with GIT_TEMPLATE_DIR="" to avoid leaking the user's
+# global init-template into freshly-cloned repos. Exporting once here
+# means the retry helper doesn't have to special-case env prefixes.
+export GIT_TEMPLATE_DIR=""
+
 # CLI flags. Order-independent, no-arg.
 SKIP_VERIFY=0
 for arg in "$@"; do
@@ -219,7 +241,7 @@ fi
 if ! command -v yay >/dev/null; then
     log "Bootstrapping yay from AUR..."
     TMP=$(mktemp -d)
-    GIT_TEMPLATE_DIR="" git clone --depth 1 https://aur.archlinux.org/yay-bin.git "$TMP/yay-bin"
+    retry git clone --depth 1 https://aur.archlinux.org/yay-bin.git "$TMP/yay-bin"
     pushd "$TMP/yay-bin" >/dev/null
     makepkg -si --noconfirm
     popd >/dev/null
@@ -283,11 +305,11 @@ yay -S --noconfirm --needed \
 log "Installing certbot-dns-azure plugin via pipx (not packaged for Arch)..."
 if ! sudo test -x /opt/pipx/bin/certbot; then
     sudo install -d -m 755 /opt/pipx
-    sudo env PIPX_HOME=/opt/pipx PIPX_BIN_DIR=/opt/pipx/bin \
+    retry sudo env PIPX_HOME=/opt/pipx PIPX_BIN_DIR=/opt/pipx/bin \
         pipx install certbot
 fi
 if ! sudo test -d /opt/pipx/venvs/certbot/lib/python*/site-packages/certbot_dns_azure; then
-    sudo env PIPX_HOME=/opt/pipx PIPX_BIN_DIR=/opt/pipx/bin \
+    retry sudo env PIPX_HOME=/opt/pipx PIPX_BIN_DIR=/opt/pipx/bin \
         pipx inject certbot certbot-dns-azure
 fi
 sudo ln -sf /opt/pipx/bin/certbot /usr/local/bin/certbot
@@ -924,7 +946,7 @@ FNEOF
 # ---------- 10. zgenom + zsh config (enriched from fnwsl) ----------
 if [[ ! -d "$HOME/.zgenom" ]]; then
     log "Cloning zgenom..."
-    GIT_TEMPLATE_DIR="" git clone https://github.com/jandamm/zgenom.git "$HOME/.zgenom"
+    retry git clone https://github.com/jandamm/zgenom.git "$HOME/.zgenom"
 fi
 
 log "Writing ~/.zshrc..."
