@@ -793,26 +793,35 @@ sudo chmod 755 /usr/local/bin/lid-closed
 
 log "Writing PAM stacks for sudo / hyprlock..."
 
-# sudo: PIN → (lid-aware) fingerprint(20s) → password.
+# sudo: PIN (3 attempts) → (lid-aware) fingerprint(20s) → password.
+# `[success=done default=1]` on each libpinpam line: success=done returns
+# auth success immediately; default=1 jumps one rule forward on any other
+# return, giving the user a fresh PIN prompt. Three rows = three attempts
+# before falling through to fingerprint/password. The third row uses
+# `default=ignore` so a third failure cleanly continues to the next module.
 sudo tee /etc/pam.d/sudo >/dev/null <<'SUDOPAMEOF'
 #%PAM-1.0
-# arch-setup: PIN primary, fingerprint optional (skipped if lid closed,
-# 20s timeout if open), password fallback. See postinstall.sh §7a.
-auth        sufficient  libpinpam.so
-auth        [success=1 default=ignore] pam_exec.so quiet /usr/local/bin/lid-closed
+# arch-setup: PIN primary (3 tries), fingerprint optional (skipped if lid
+# closed, 20s timeout if open), password fallback. See postinstall.sh §7a.
+auth        [success=done default=1]    libpinpam.so
+auth        [success=done default=1]    libpinpam.so
+auth        [success=done default=ignore] libpinpam.so
+auth        [success=1 default=ignore]  pam_exec.so quiet /usr/local/bin/lid-closed
 auth        sufficient  pam_fprintd.so              max-tries=5 timeout=20
 auth        include     system-auth
 account     include     system-auth
 session     include     system-auth
 SUDOPAMEOF
 
-# hyprlock: PIN → (lid-aware) fingerprint(20s) → password.
+# hyprlock: PIN (3 attempts) → (lid-aware) fingerprint(20s) → password.
 sudo tee /etc/pam.d/hyprlock >/dev/null <<'HYPRLOCKPAMEOF'
 #%PAM-1.0
-# arch-setup: PIN primary, fingerprint optional (skipped if lid closed,
-# 20s timeout if open), password fallback. See postinstall.sh §7a.
-auth        sufficient  libpinpam.so
-auth        [success=1 default=ignore] pam_exec.so quiet /usr/local/bin/lid-closed
+# arch-setup: PIN primary (3 tries), fingerprint optional (skipped if lid
+# closed, 20s timeout if open), password fallback. See postinstall.sh §7a.
+auth        [success=done default=1]    libpinpam.so
+auth        [success=done default=1]    libpinpam.so
+auth        [success=done default=ignore] libpinpam.so
+auth        [success=1 default=ignore]  pam_exec.so quiet /usr/local/bin/lid-closed
 auth        sufficient  pam_fprintd.so              max-tries=5 timeout=20
 auth        include     login
 HYPRLOCKPAMEOF
