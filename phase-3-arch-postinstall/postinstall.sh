@@ -888,6 +888,10 @@ mkdir -p "$HOME/.zshrc.d"
 # Phase B planter — always written; it's idempotent and self-deletes on success.
 cat > "$HOME/.zshrc.d/arch-ssh-signing.zsh" <<'SIGEOF'
 # arch: wait for Bitwarden SSH agent to expose a key, then wire git signing (self-deleting)
+# Skipped during postinstall's own zgenom warmup — see arch-first-login.zsh.
+if [[ -n "${_POSTINSTALL_NONINTERACTIVE:-}" ]]; then
+    return 0
+fi
 # Explicitly set SSH_AUTH_SOCK to the Bitwarden socket here (rather than rely
 # on .zshrc.d load order) so we never wire signing to the wrong agent's key
 # if some future drop-in sets a competing SSH_AUTH_SOCK first.
@@ -948,7 +952,12 @@ if gh auth status &>/dev/null; then
 else
     log "gh not authed yet — planting first-login auth script."
     cat > "$HOME/.zshrc.d/arch-first-login.zsh" <<'AUTHEOF'
-# arch: one-time bw+gh login (self-deleting)
+# arch: one-time bw+gh login (self-deleting). Skipped during postinstall's
+# own zgenom warmup (which sources this file too) so the script doesn't
+# block waiting for a browser-based gh auth flow it can't complete.
+if [[ -n "${_POSTINSTALL_NONINTERACTIVE:-}" ]]; then
+    return 0
+fi
 if [[ -t 0 ]]; then
   if command -v bw &>/dev/null && ! bw login --check &>/dev/null; then
     echo ""
@@ -1122,7 +1131,13 @@ mc() { mkdir -p "$1" && cd "$1"; }
 ALIASEOF
 
 log "Pre-building zgenom plugin cache (so first login is fast)..."
-zsh -i -c 'echo zgenom warmup complete' 2>/dev/null || warn "zgenom warmup had issues; first login will rebuild."
+# _POSTINSTALL_NONINTERACTIVE: signals to any interactive ~/.zshrc.d/*
+# planter (gh auth, bw login, etc.) that this is a warmup subshell —
+# they should no-op rather than blocking postinstall on browser-based
+# auth flows. The planters are designed to fire on real first logins;
+# this just keeps them from firing inside postinstall itself.
+_POSTINSTALL_NONINTERACTIVE=1 zsh -i -c 'echo zgenom warmup complete' 2>/dev/null \
+    || warn "zgenom warmup had issues; first login will rebuild."
 
 # ---------- 11. tmux config — handled by chezmoi (§13) ----------
 # dotfiles/dot_tmux.conf is the source of truth (Ctrl+a prefix, splits open
