@@ -1300,12 +1300,16 @@ if command -v hyprpm >/dev/null; then
                 && hyprpm enable hyprgrass \
                 || warn "hyprgrass install failed — see hyprpm output above."
         fi
-        # Source plugin-specific config now that plugins are loaded.
-        # See post-plugins.conf for why this is split out.
-        if [[ -f "$HOME/.config/hypr/post-plugins.conf" ]]; then
-            hyprctl keyword source "$HOME/.config/hypr/post-plugins.conf" >/dev/null 2>&1 \
-                || warn "Could not source post-plugins.conf — try 'hyprctl reload' manually."
-        fi
+        # Source per-plugin config — only the ones whose plugin actually
+        # loaded. A build failure on hyprgrass shouldn't poison hyprexpo's
+        # config or vice versa. See post-plugins.d/README for rationale.
+        for _plug in hyprexpo hyprgrass; do
+            if hyprpm list 2>/dev/null | grep -q "$_plug" \
+               && [[ -f "$HOME/.config/hypr/post-plugins.d/$_plug.conf" ]]; then
+                hyprctl keyword source "$HOME/.config/hypr/post-plugins.d/$_plug.conf" >/dev/null 2>&1 \
+                    || warn "Could not source post-plugins.d/$_plug.conf — try 'hyprctl reload' manually."
+            fi
+        done
     else
         log "Not in a Hyprland session — planting first-Hyprland-login hyprpm runner."
         mkdir -p "$HOME/.zshrc.d"
@@ -1324,17 +1328,20 @@ if [[ -n "${HYPRLAND_INSTANCE_SIGNATURE:-}" ]] && command -v hyprpm >/dev/null; 
         hyprpm add https://github.com/horriblename/hyprgrass 2>/dev/null \
             && hyprpm enable hyprgrass 2>/dev/null
     fi
-    # Plugin-specific bindings + config blocks (hyprexpo:expo,
-    # plugin{hyprexpo{...}}, plugin{hyprgrass{...}}) live in
-    # post-plugins.conf and are NOT sourced from hyprland.conf, to keep
-    # the initial config parse free of unknown-dispatcher errors that
-    # would raise a sticky red overlay. Source it now that plugins are
-    # loaded.
+    # Source per-plugin config files — only for plugins that loaded.
+    # Self-deletes once any successfully-loaded plugin has its config
+    # sourced; failed-build plugins are skipped (the planter stays in
+    # place to retry on subsequent logins).
+    _any_loaded=0
+    for _plug in hyprexpo hyprgrass; do
+        if hyprpm list 2>/dev/null | grep -q "$_plug" \
+           && [[ -f "$HOME/.config/hypr/post-plugins.d/$_plug.conf" ]]; then
+            hyprctl keyword source "$HOME/.config/hypr/post-plugins.d/$_plug.conf" >/dev/null 2>&1 || true
+            _any_loaded=1
+        fi
+    done
     if hyprpm list 2>/dev/null | grep -q hyprexpo \
        && hyprpm list 2>/dev/null | grep -q hyprgrass; then
-        if [[ -f "$HOME/.config/hypr/post-plugins.conf" ]]; then
-            hyprctl keyword source "$HOME/.config/hypr/post-plugins.conf" >/dev/null 2>&1 || true
-        fi
         rm -f ~/.zshrc.d/arch-hyprpm-bootstrap.zsh
     fi
 fi
