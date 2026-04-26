@@ -547,23 +547,54 @@ rm -f /mnt/boot/intel-ucode.img \
       /mnt/boot/vmlinuz-linux*
 
 # ---------- 9. pacstrap ----------
+# Refresh mirrorlist to a freshly-synced subset before the long download.
+# Mirror desync is the usual cause of pacstrap aborts ("failed retrieving
+# file ...pkg.tar.zst.sig" → "failed to commit transaction (unexpected
+# error)") — a mirror has the new pkg but not yet the new .sig. reflector
+# ships in the live ISO; if it fails (no network yet, GitHub rate limit on
+# the mirror-status API), keep the stock mirrorlist and let the retry loop
+# below paper over transient misses.
+log "Refreshing pacman mirrorlist via reflector..."
+if command -v reflector >/dev/null; then
+    reflector --protocol https --latest 20 --sort rate --age 12 \
+        --save /etc/pacman.d/mirrorlist 2>/dev/null \
+        || warn "reflector failed — keeping live ISO's stock mirrorlist."
+else
+    warn "reflector not present — keeping live ISO's stock mirrorlist."
+fi
+
 log "Running pacstrap (this pulls ~1-2 GB over the network)..."
-pacstrap -K /mnt \
-    base base-devel linux linux-firmware linux-headers linux-lts linux-lts-headers intel-ucode \
-    btrfs-progs e2fsprogs dosfstools \
-    networkmanager iwd wpa_supplicant openssh \
-    sudo git vim helix \
-    zsh tmux \
-    efibootmgr \
-    man-db man-pages texinfo \
-    pipewire pipewire-pulse pipewire-jack wireplumber \
-    hyprland xdg-desktop-portal-hyprland xdg-desktop-portal-gtk \
-    polkit \
-    noto-fonts noto-fonts-emoji ttf-jetbrains-mono-nerd \
-    mesa intel-media-driver vulkan-intel libva-intel-driver \
-    bluez bluez-utils \
-    fprintd \
-    snapper
+# Retry up to 3× — a single transient sig miss kills pacstrap even when the
+# next attempt would succeed (different mirror chosen, or origin caught up).
+# pacstrap is idempotent: a partial /mnt from a failed run is fine to resume.
+pacstrap_attempt() {
+    pacstrap -K /mnt \
+        base base-devel linux linux-firmware linux-headers linux-lts linux-lts-headers intel-ucode \
+        btrfs-progs e2fsprogs dosfstools \
+        networkmanager iwd wpa_supplicant openssh \
+        sudo git vim helix \
+        zsh tmux \
+        efibootmgr \
+        man-db man-pages texinfo \
+        pipewire pipewire-pulse pipewire-jack wireplumber \
+        hyprland xdg-desktop-portal-hyprland xdg-desktop-portal-gtk \
+        polkit \
+        noto-fonts noto-fonts-emoji ttf-jetbrains-mono-nerd \
+        mesa intel-media-driver vulkan-intel libva-intel-driver \
+        bluez bluez-utils \
+        fprintd \
+        snapper
+}
+for attempt in 1 2 3; do
+    if pacstrap_attempt; then
+        break
+    fi
+    if [[ $attempt -eq 3 ]]; then
+        die "pacstrap failed after 3 attempts — check network / mirror status."
+    fi
+    warn "pacstrap attempt $attempt failed — retrying in 10s..."
+    sleep 10
+done
 
 # ---------- 10. fstab ----------
 log "Generating /etc/fstab..."
