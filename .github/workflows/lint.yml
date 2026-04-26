@@ -74,9 +74,18 @@ jobs:
                   missing+=("$pkg")
               fi
           done < <(
+              # Rule order matters: terminate (p=0) BEFORE capture, otherwise the
+              # next non-indented `sudo ...` line gets captured as packages. Also
+              # filter tokens to strict pacman package-name shape (lowercase /
+              # digits / + . _ -) to drop `--overwrite '/boot/memtest86+/*'` flags
+              # and the like.
               awk '/^sudo pacman -S(yu)? .*--needed.*\\$/ {p=1; next}
-                   p && /^\s*[a-zA-Z]/ { gsub(/\\$/, ""); for (i=1; i<=NF; i++) print $i }
-                   p && /^[^[:space:]]/ {p=0}' phase-3-arch-postinstall/postinstall.sh
+                   p && /^[^[:space:]]/ {p=0; next}
+                   p && /^[[:space:]]+[a-z0-9]/ {
+                       gsub(/\\$/, "")
+                       for (i=1; i<=NF; i++)
+                           if ($i ~ /^[a-z0-9][a-z0-9+._-]*$/) print $i
+                   }' phase-3-arch-postinstall/postinstall.sh
           )
           if (( ${#missing[@]} )); then
               printf 'pacman -Si could not find these packages:\n'
