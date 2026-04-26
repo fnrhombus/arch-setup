@@ -22,7 +22,7 @@ What gets touched:
 Three things to know before starting:
 - **Hostnames intentionally match**: Windows = `Metis`, Arch = `metis`. Same name, same machine — your router sees `metis` regardless of which OS is up. (Windows may be renamed to `metis-win` later for unambiguous DHCP leases; not wired yet.)
 - **First Windows boot after Arch install will prompt for the BitLocker recovery key.** Expected — installing **limine** to the shared EFI changes PCR values that BitLocker sealed against. Phase 1 step 7 stashes the recovery key in Bitwarden. See §C below for the one-shot reseal.
-- **First Arch boot after install will prompt for the LUKS passphrase.** Also expected — TPM2 autounlock isn't wired until Phase 3 runs `systemd-cryptenroll`. After that, Arch boots silently (same model as BitLocker). The passphrase stays as a key slot forever so you can always recover.
+- **First Arch boot after install is silent.** TPM2 autounlock against the signed PCR 11 policy is wired at install time (`install.sh` §5b enrolls cryptroot + cryptswap before the first reboot), so cold boot goes straight to the greeter. The 48-digit recovery key only surfaces on the same conditions BitLocker asks for its own: Secure Boot toggled, firmware/BIOS update, TPM cleared, drive transplanted to another machine, evil-maid swap of the UKI. Phase 3 postinstall §7.5 layers PCR 7 onto the policy after the installed-system value is measurable. Full design: `docs/tpm-luks-bitlocker-parity.md`.
 
 ---
 
@@ -196,7 +196,7 @@ It will:
   - Auto-discovered **Windows Boot Manager**
 
   3-sec timeout; Arch Linux (the non-LTS) is default.
-- **LUKS passphrase prompt** appears early in boot: `Please enter passphrase for disk (cryptroot):`. Type the passphrase you set in Phase 2d. The /var volume auto-unlocks from a keyfile — only cryptroot asks you for anything. After Phase 3's `systemd-cryptenroll` runs, this prompt is replaced by silent TPM unlock.
+- **No LUKS passphrase prompt is expected.** TPM2 unseal against the signed PCR 11 policy was enrolled by `install.sh` §5b; cold boot should go silently from limine to the greeter. **If a `Please enter passphrase for disk (cryptroot):` prompt does appear, that's a failure indicator** — the most likely causes are (a) TPM2 enrollment didn't complete during install (check `install.sh` log for §5b), (b) the UKI didn't get a `.pcrsig` PE section (check `objdump -h /boot/EFI/Linux/arch-linux.efi | grep pcrsig` from a recovery shell), or (c) the signing keypair is missing from `/etc/systemd/tpm2-pcr-{private,public}.pem`. Type the recovery key from Bitwarden to get in, then see `docs/tpm-luks-bitlocker-parity.md` "Recovery procedures".
 - It boots to a black screen, then to **greetd + ReGreet** (graphical login).
 
 **If the limine menu doesn't show Windows:** boot into Arch anyway, then as root check `/boot/limine.conf` — the `Windows Boot Manager` chainload entry should be present (chroot.sh writes it). Verify `ls /boot/EFI/Microsoft/Boot/bootmgfw.efi` exists — missing file means Windows install didn't write it (rare). Fix later; don't block on this.
@@ -246,7 +246,7 @@ It will:
 5. **Points Bitwarden at your self-hosted server** `https://hass4150.duckdns.org:7277` — CLI via `bw config server`, desktop via pre-seeded `~/.config/Bitwarden/data.json`.
 6. **Prompt you to enroll your fingerprint** — touch the sensor 5 times. Reader is auto-detected (Goodix 538C via `libfprint-goodix-53xc`).
 7. **Prompt you to set a TPM-PIN** (`pinutil setup`) — 6+ chars. PAM module name is `libpinpam.so` (NOT `pam_pinpam.so` — quirk of the AUR package).
-7.5. **Enroll TPM2 on BOTH ArchRoot AND ArchSwap** (`systemd-cryptenroll --tpm2-pcrs=0+7`). Both volumes get silent unseal at next boot. Hibernate-ready cryptswap requires TPM2 enrollment so `resume=` works without the LUKS passphrase prompt.
+7.5. **Stage-2 PCR 7 binding on ArchRoot AND ArchSwap.** Initial TPM2 enrollment (signed PCR 11 policy) already happened at install time in `install.sh` §5b, so cold boot has been silent since first boot. This step layers `--tpm2-pcrs=7` onto each existing slot — install-time can't predict the installed system's PCR 7, but it's stable here. Result: Secure Boot toggling now triggers a one-shot recovery-key prompt (BitLocker-equivalent), instead of being silent. Drops `/var/lib/tpm-luks-stage2` so the kernel-update reseal hook keeps the PCR 7 binding across `pacman -Syu`. See `docs/tpm-luks-bitlocker-parity.md`.
 8. Wires `~/.ssh/config` for Bitwarden SSH agent.
 9. Plants first-login + ssh-signing scripts in `~/.zshrc.d/`.
 10. Builds zgenom plugins (warms cache so first login is fast).
@@ -757,17 +757,28 @@ grep tpm2-device /etc/crypttab.initramfs
 # Expect: ...luks,discard,tpm2-device=auto
 ```
 
-**Fix (no tpm2 slot):** re-run the enrollment manually:
+**Fix (no tpm2 slot):** re-run the enrollment manually with the signed PCR 11 + PCR 7 policy:
 ```bash
-sudo systemd-cryptenroll --tpm2-device=auto --tpm2-pcrs=0+7 /dev/disk/by-partlabel/ArchRoot
+sudo systemd-cryptenroll --tpm2-device=auto \
+    --tpm2-public-key=/etc/systemd/tpm2-pcr-public.pem \
+    --tpm2-public-key-pcrs=11 --tpm2-pcrs=7 \
+    /dev/disk/by-partlabel/ArchRoot
 # Type the LUKS passphrase when prompted; new slot added.
 sudo reboot
 ```
 
-**Fix (PCR drift):** unenroll the stale slot, re-enroll against current PCRs:
+**Fix (PCR drift / SB toggle / firmware update):** the reseal helper handles this:
+```bash
+sudo /usr/local/sbin/tpm2-reseal-luks
+sudo reboot
+```
+Or do it manually — wipe the stale slot, re-enroll against current PCRs:
 ```bash
 sudo systemd-cryptenroll --wipe-slot=tpm2 /dev/disk/by-partlabel/ArchRoot
-sudo systemd-cryptenroll --tpm2-device=auto --tpm2-pcrs=0+7 /dev/disk/by-partlabel/ArchRoot
+sudo systemd-cryptenroll --tpm2-device=auto \
+    --tpm2-public-key=/etc/systemd/tpm2-pcr-public.pem \
+    --tpm2-public-key-pcrs=11 --tpm2-pcrs=7 \
+    /dev/disk/by-partlabel/ArchRoot
 sudo reboot
 ```
 

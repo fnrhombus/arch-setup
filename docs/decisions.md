@@ -144,6 +144,7 @@
 
 #### A) Bootloader: limine
 - Single config file (`/boot/limine.conf`), modern actively-developed.
+- Linux entries chainload UKIs via `protocol: efi_chainload` (built by mkinitcpio + ukify, signed PCR 11 predictions in `.pcrsig` PE section). Required for the BitLocker-parity LUKS seal — see `docs/tpm-luks-bitlocker-parity.md`.
 - First-class snapper-snapshot rollback in the boot menu via the AUR
   `limine-snapper-sync` package (installed by postinstall §3) — pick yesterday's
   snapshot from the menu when a `pacman -Syu` breaks userspace, no chroot
@@ -320,12 +321,12 @@ present.
 
 ### Q11: Full-Disk Encryption (LUKS2 + TPM2 autounlock)
 
-Parity with Windows BitLocker on the same machine. "Stolen laptop" becomes "brick" — data is readable only with the passphrase or an intact boot chain sealed to TPM2 PCRs 0+7.
+Parity with Windows BitLocker on the same machine. "Stolen laptop" becomes "brick" — data is readable only with the passphrase or an intact boot chain sealed against the **signed PCR 11 policy + stage-2 PCR 7 binding**. See `docs/tpm-luks-bitlocker-parity.md` for the full design.
 
 **Scope of encryption:**
-- **Samsung `ArchRoot`** (btrfs + @ / @home / @snapshots subvolumes) — LUKS2 container named `cryptroot`. Passphrase slot + TPM2 slot (PCRs 0+7).
+- **Samsung `ArchRoot`** (btrfs + @ / @home / @snapshots subvolumes) — LUKS2 container named `cryptroot`. Passphrase slot + TPM2 slot (signed PCR 11 policy + stage-2 PCR 7 binding).
 - **Netac `ArchVar`** (ext4 — /var/log + /var/cache) — LUKS2 container named `cryptvar`. Passphrase slot + keyfile slot reading from `/etc/cryptsetup-keys.d/cryptvar.key` on the (TPM-unlocked) cryptroot.
-- **Netac `ArchSwap`** — **persistent LUKS2** container named `cryptswap` with a passphrase slot + TPM2 slot (PCRs 0+7), enrolled by postinstall §7.5. Random-key swap was rejected: hibernate (S4) needs the swap contents to survive a power-off, and the kernel's `resume=` mechanism needs a stable mapper path. TPM2-sealed gives us silent unseal at boot just like cryptroot.
+- **Netac `ArchSwap`** — **persistent LUKS2** container named `cryptswap` with a passphrase slot + TPM2 slot (signed PCR 11 policy + stage-2 PCR 7 binding). Stage-1 enrolled at install (`install.sh` §5b); PCR 7 layered on by postinstall §7.5. Random-key swap was rejected: hibernate (S4) needs the swap contents to survive a power-off, and the kernel's `resume=` mechanism needs a stable mapper path. TPM2-sealed gives us silent unseal at boot just like cryptroot.
 - **Netac `ArchRecovery`** — **unencrypted by design.** It's a raw Arch ISO meant to be bootable from F12 when the main install is hosed; encrypting it would defeat that purpose and there's nothing sensitive on it.
 - **Samsung EFI** — unencrypted (UEFI spec requires the ESP to be FAT32 and unencrypted). The kernel + initramfs on it are public data, same as any normal install.
 
@@ -333,15 +334,16 @@ Parity with Windows BitLocker on the same machine. "Stolen laptop" becomes "bric
 - **Auto-generated** at install time (Phase 2d `install.sh` `gen_and_show_luks_passphrase`): 24 bytes from `openssl rand -hex` → 48 hex chars → grouped 6-by-6 with hyphens. ~192 bits of entropy. Same shape and UX as the BitLocker recovery key.
 - Displayed once in a yellow-banner panel; install.sh blocks until the user types `I HAVE THE KEY` verbatim. User photographs the screen, transcribes to Bitwarden as **"Metis LUKS recovery"** later (parallel to "Metis BitLocker recovery").
 - Held in an in-memory bash variable for the rest of install.sh — used for `luksFormat` of all three volumes (cryptroot, cryptvar, cryptswap) and `luksAddKey` for the cryptvar keyfile; then `unset` at end of install. Never touches disk.
-- TPM2 enrollment happens in Phase 3 (`systemd-cryptenroll --tpm2-device=auto --tpm2-pcrs=0+7` against cryptroot AND cryptswap, postinstall §7.5). After that, both unseal silently at boot unless the boot chain changes.
+- TPM2 enrollment is two-stage: install-time `install.sh` §5b binds cryptroot + cryptswap to the **signed PCR 11 policy** (a keypair generated at install lives at `/etc/systemd/tpm2-pcr-{private,public}.pem` on the LUKS root — the private key is encrypted at rest by the very volume it gates). Phase 3 postinstall §7.5 measures the installed system's PCR 7 (stable only post-install) and re-enrolls each slot with `--tpm2-pcrs=7` *added* to the existing policy, which restores BitLocker-equivalent semantics around Secure Boot toggling. After §7.5 runs, both volumes unseal silently at boot unless the signed policy is invalidated (post-`leave-initrd`) or PCR 7 changes (SB toggle, firmware update, TPM clear).
 - The recovery key is **the only fallback.** Lose the photo before transcribing to Bitwarden → encrypted disks are unrecoverable. No backdoor. Same destruction-on-loss model as BitLocker.
 - If you'd prefer a memorable passphrase to the random hex string, swap key-slot 0 *after* unlocking once: `sudo cryptsetup luksChangeKey /dev/disk/by-partlabel/ArchRoot` (and same for `ArchVarLUKS`, `ArchSwapLUKS`). Stash the new passphrase in Bitwarden BEFORE rebooting.
 
-**PCR choice — 0+7:**
-- PCR 0 = UEFI firmware code. PCR 7 = Secure Boot policy (on/off + key hashes).
-- Both are stable across reboots with the same bootloader config, but change when firmware updates or Secure Boot state is toggled — exactly the "boot chain was tampered with" signal we want.
-- PCRs 4/5/8/9 (bootloader + kernel measurements) change every kernel upgrade, which would force a passphrase prompt after every `pacman -Syu`. Rejected.
-- This matches BitLocker's default PCR profile on the Windows side, so the security properties mirror each other across dual-boot.
+**PCR policy — signed PCR 11 + stage-2 PCR 7:**
+- **PCR 11** is the systemd boot-phase register. The UKI measures itself into PCR 11 at firmware exit, then `systemd-pcrphase` extends well-known constants at named transitions (`enter-initrd` → `leave-initrd` → `ready`). ukify (called by mkinitcpio at UKI build time) pre-computes and signs the PCR 11 prediction for the `enter-initrd` phase using the keypair at `/etc/systemd/tpm2-pcr-private.pem`. The signed prediction lands in a `.pcrsig` PE section of the UKI. The TPM unseals when the running thing produces a signature against the registered public key matching the current PCR 11 — i.e. when an authentic UKI is mid-`enter-initrd`. After `leave-initrd` extends the next constant, no signature matches → unseal impossible (BitLocker temporal scope).
+- **PCR 7** = Secure Boot policy (on/off + key hashes). Layered on by postinstall §7.5 because install-time can't predict the installed system's PCR 7 reliably. Restores the "boot chain tampered" signal on SB toggling.
+- Why not PCR 0+7 alone (the older approach): PCR drift between live ISO and installed first boot caused spurious passphrase prompts, and there was no signature anchor to re-bind to across firmware updates.
+- This matches BitLocker's properties on the Windows side, so the security model mirrors across dual-boot.
+- Full design rationale + threat model + recovery procedures: `docs/tpm-luks-bitlocker-parity.md`.
 
 **crypttab layout:**
 - `/etc/crypttab.initramfs` — baked into initramfs by mkinitcpio's `sd-encrypt` hook. Contains **both** cryptroot and cryptswap (cryptswap needs to be open before `resume=` runs, which is initramfs-time).
