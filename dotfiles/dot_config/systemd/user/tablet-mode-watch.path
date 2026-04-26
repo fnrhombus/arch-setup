@@ -1,0 +1,15 @@
+[Unit]
+Description=Watch /run/tablet-mode/state and dispatch tablet-mode.service
+
+[Path]
+# PathChanged fires on any write/close-after-write. PathModified would
+# fire on every individual write() syscall — too chatty for a one-byte
+# state file written atomically.
+PathChanged=/run/tablet-mode/state
+# Trigger immediately if the file already exists at unit start (e.g. user
+# logged out and back in while the lid was still folded).
+MakeDirectory=false
+Unit=tablet-mode.service
+
+[Install]
+WantedBy=default.target
