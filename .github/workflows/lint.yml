@@ -1,0 +1,118 @@
+name: lint
+
+# Static checks against the repo. Catches the kind of issue that
+# bit us mid-install (shell typos, AUR/pacman package renames,
+# Hyprland binding conflicts) before they reach a fresh install.
+#
+# Tracking issue: #5
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  shellcheck:
+    name: shellcheck
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run shellcheck
+        uses: ludeeus/action-shellcheck@master
+        env:
+          SHELLCHECK_OPTS: -e SC1091 -e SC2034 -e SC2154
+        with:
+          # Force `sh`-shebanged files to be checked as bash too — most
+          # of our scripts use bash idioms even when invoked via bash X.
+          severity: warning
+          scandir: '.'
+          additional_files: |
+            phase-2-arch-install/install.sh
+            phase-2-arch-install/chroot.sh
+            phase-3-arch-postinstall/postinstall.sh
+            phase-6-grow-windows.sh
+            wsl-cli-test.sh
+            wsl-setup.sh
+            prep-netac-ventoy.sh
+          ignore_paths: >
+            assets
+            staged-azure-ddns
+
+  validate-hypr-binds:
+    name: validate-hypr-binds
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run validator
+        run: |
+          chmod +x dotfiles/dot_local/bin/executable_validate-hypr-binds
+          HYPR_DIR=dotfiles/dot_config/hypr \
+            bash dotfiles/dot_local/bin/executable_validate-hypr-binds
+
+  pacman-package-check:
+    name: pacman packages exist in extra
+    runs-on: ubuntu-latest
+    container: archlinux:latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Sync pacman DB
+        run: pacman -Sy --noconfirm
+      - name: Verify every pacman -S package in postinstall.sh exists
+        shell: bash
+        run: |
+          set -euo pipefail
+          # Extract package names from `sudo pacman -Syu --noconfirm --needed \\` blocks.
+          # Stops at the first standalone `\` line that's not followed by another package
+          # (i.e., the end of the heredoc). Crude but works for the patterns we use.
+          missing=()
+          while IFS= read -r pkg; do
+              [[ -z "$pkg" ]] && continue
+              [[ "$pkg" == "#"* ]] && continue
+              # Sanity-check via pacman -Si (extra repo) first, then pacman -Sg (groups)
+              if ! pacman -Si "$pkg" >/dev/null 2>&1 \
+                && ! pacman -Sg "$pkg" >/dev/null 2>&1; then
+                  missing+=("$pkg")
+              fi
+          done < <(
+              awk '/^sudo pacman -S(yu)? .*--needed.*\\$/ {p=1; next}
+                   p && /^\s*[a-zA-Z]/ { gsub(/\\$/, ""); for (i=1; i<=NF; i++) print $i }
+                   p && /^[^[:space:]]/ {p=0}' phase-3-arch-postinstall/postinstall.sh
+          )
+          if (( ${#missing[@]} )); then
+              printf 'pacman -Si could not find these packages:\n'
+              printf '  - %s\n' "${missing[@]}"
+              exit 1
+          fi
+          echo "All pacman packages in postinstall.sh §1 + §1-print resolve in extra."
+
+  aur-package-check:
+    name: AUR packages exist
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify every AUR package in postinstall.sh resolves on aur.archlinux.org
+        shell: bash
+        run: |
+          set -euo pipefail
+          missing=()
+          while IFS= read -r pkg; do
+              [[ -z "$pkg" ]] && continue
+              [[ "$pkg" == "#"* ]] && continue
+              # AUR RPC API: returns {"resultcount":0} if missing.
+              count=$(curl -fsS "https://aur.archlinux.org/rpc?v=5&type=info&arg[]=$pkg" \
+                  | jq -r '.resultcount // 0')
+              if (( count == 0 )); then
+                  missing+=("$pkg")
+              fi
+          done < <(
+              # AUR_PACKAGES=( ... ) array in postinstall.sh §3
+              awk '/^AUR_PACKAGES=\(/ {p=1; next}
+                   p && /^\s*[a-z0-9].*-(bin|git|native)?$/ { gsub(/[^a-zA-Z0-9_+.-]/, ""); print }
+                   p && /^\)/ {p=0}' phase-3-arch-postinstall/postinstall.sh
+          )
+          if (( ${#missing[@]} )); then
+              printf 'AUR RPC could not find these packages:\n'
+              printf '  - %s\n' "${missing[@]}"
+              exit 1
+          fi
+          echo "All AUR packages in postinstall.sh §3 resolve on aur.archlinux.org."
