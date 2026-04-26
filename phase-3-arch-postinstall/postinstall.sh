@@ -243,6 +243,32 @@ if ! id -nG tom | grep -qw tss; then
     warn "Added tom to tss group — log out and back in for it to take effect (or pinutil setup will be skipped this run)."
 fi
 
+# ---------- 1a-numlock. Enable numlock at boot (covers greeter + TTY) ----------
+# Hyprland's `numlock_by_default = true` only applies INSIDE the Hyprland
+# session. greetd's regreet runs in `cage` before Hyprland and inherits
+# whatever the kernel sets — typically OFF. Add a oneshot systemd service
+# that runs `setleds +num` on each VT before greetd starts, so the greeter
+# (and any TTY login) sees numlock already on. setleds is from the `kbd`
+# package, in base.
+log "Writing /etc/systemd/system/numlock-on.service (numlock at boot)..."
+sudo tee /etc/systemd/system/numlock-on.service >/dev/null <<'NUMLOCKEOF'
+[Unit]
+Description=Enable Numlock on each TTY at boot
+DefaultDependencies=no
+After=systemd-vconsole-setup.service
+Before=greetd.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/bin/sh -c 'for tty in /dev/tty{1..6}; do /usr/bin/setleds -D +num < $tty 2>/dev/null || true; done'
+
+[Install]
+WantedBy=multi-user.target
+NUMLOCKEOF
+sudo systemctl daemon-reload
+sudo systemctl enable numlock-on.service
+
 # ---------- 1b. user services ----------
 # hyprpolkitagent ships a user unit but the preset doesn't auto-activate on
 # a fresh install — apps that need PolicyKit auth (Bitwarden unlock, mount
