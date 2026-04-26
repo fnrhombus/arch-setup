@@ -216,7 +216,7 @@ fi
 # time this runs, see https://github.com/limine-bootloader/limine/blob/trunk/CONFIG.md
 log "Writing /boot/limine.conf..."
 cat > /boot/limine.conf <<EOF
-timeout: 3
+timeout: 5
 default_entry: 1
 
 /Arch Linux
