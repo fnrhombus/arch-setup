@@ -626,7 +626,7 @@ if [[ -z "${SKIP_FPRINT:-}" ]]; then
     # (no graphical session = no active-local seat). Idempotent: skip already-enrolled
     # fingers so re-runs don't force re-touching.
     FINGERS_TO_ENROLL=(right-index-finger left-index-finger right-middle-finger left-middle-finger right-thumb)
-    log "Enrolling ${#FINGERS_TO_ENROLL[@]} fingerprints (~5 taps each)..."
+    log "Enrolling ${#FINGERS_TO_ENROLL[@]} fingerprints (~13 scans each)..."
     fp_any_success=0
     for finger in "${FINGERS_TO_ENROLL[@]}"; do
         if sudo fprintd-list tom 2>/dev/null | grep -q "$finger"; then
@@ -634,7 +634,7 @@ if [[ -z "${SKIP_FPRINT:-}" ]]; then
             fp_any_success=1
             continue
         fi
-        log "  $finger: touch power button ~5 times..."
+        log "  $finger: touch power button ~13 times..."
         if sudo fprintd-enroll -f "$finger" tom 2>&1 | tee /tmp/fprint-enroll.log; then
             fp_any_success=1
         else
