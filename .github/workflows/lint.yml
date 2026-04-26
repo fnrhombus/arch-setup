@@ -6,10 +6,15 @@ name: lint
 #
 # Tracking issue: #5
 
+# Auto-triggers disabled per user directive — workflow can still be invoked
+# manually from the Actions tab via "Run workflow" if you want to re-enable
+# the static checks. Re-enable by restoring:
+#   on:
+#     push:
+#       branches: [main]
+#     pull_request:
 on:
-  push:
-    branches: [main]
-  pull_request:
+  workflow_dispatch:
 
 jobs:
   shellcheck:
