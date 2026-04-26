@@ -1,8 +1,10 @@
 #!/bin/bash
 set -e
 
-# Force correct HOME (WSL may inherit Windows USERPROFILE)
-export HOME="/home/$(whoami)"
+# Force correct HOME (WSL may inherit Windows USERPROFILE).
+# Split declare-and-assign so a `whoami` failure surfaces (SC2155).
+_user=$(whoami)
+export HOME="/home/$_user"
 export XDG_CONFIG_HOME="$HOME/.config"
 export XDG_DATA_HOME="$HOME/.local/share"
 export XDG_CACHE_HOME="$HOME/.cache"
