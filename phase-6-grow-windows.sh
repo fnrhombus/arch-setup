@@ -111,6 +111,9 @@ run()  {
     if (( DRY_RUN )); then
         printf '\033[1;35m[DRY]\033[0m %s\n' "$*"
     else
+        # `eval "$@"` is intentional here: callers pass shell strings with
+        # pipes / redirections / globs that need re-parsing, not argv arrays.
+        # shellcheck disable=SC2294
         eval "$@"
     fi
 }
