@@ -166,8 +166,47 @@ log "Appending swap line to /etc/fstab (pointing at /dev/mapper/cryptswap)..."
 grep -q '^/dev/mapper/cryptswap' /etc/fstab || \
     printf '/dev/mapper/cryptswap\tnone\tswap\tdefaults\t0 0\n' >> /etc/fstab
 
-# ---------- mkinitcpio ----------
-log "Regenerating initramfs..."
+# ---------- mkinitcpio (UKI mode) ----------
+# UKI = Unified Kernel Image. A single PE binary that bundles kernel +
+# initramfs + cmdline + signed PCR predictions. Built by mkinitcpio via
+# ukify. Booted directly by limine via efi_chainload.
+#
+# Why UKI vs separate vmlinuz/initramfs:
+#   - ukify embeds signed PCR 11 predictions in a `.pcrsig` PE section, which
+#     systemd-cryptsetup uses at boot to satisfy the signed-PCR-11 LUKS
+#     seal policy. This is the foundation of BitLocker-style silent boot —
+#     see docs/tpm-luks-bitlocker-parity.md for the full design.
+#   - Single binary = simpler limine config (efi_chainload only), no separate
+#     module_path lines for kernel + ucode + initramfs.
+#
+# /etc/kernel/uki.conf tells ukify what to bundle, what cmdline to use, which
+# PCRs to predict for, and which key to sign with. Created BEFORE the
+# preset edit so mkinitcpio -P picks it up on first run.
+log "Configuring ukify (PCR signing keypair from §5a)..."
+install -d -m 755 /etc/kernel
+cat > /etc/kernel/uki.conf <<EOF
+# Consumed by ukify, invoked by mkinitcpio when a preset has default_uki=.
+# Signs PCR 11 predictions for these phases — covers initrd-side LUKS unlock
+# (after enter-initrd, before leave-initrd). Keys generated in install.sh §5a.
+[UKI]
+PCRBanks=sha256
+
+[PCRSignature:initrd]
+PCRPrivateKey=/etc/systemd/tpm2-pcr-private.pem
+PCRPublicKey=/etc/systemd/tpm2-pcr-public.pem
+Phases=enter-initrd
+EOF
+
+# Kernel cmdline lives in /etc/kernel/cmdline (not limine.conf) — UKIs embed
+# their cmdline. resume= is required for hibernate; rootflags=subvol=@ keeps
+# us on the @ btrfs subvol. quiet keeps boot logs out of the user's face.
+cat > /etc/kernel/cmdline <<'EOF'
+root=/dev/mapper/cryptroot rootflags=subvol=@ resume=/dev/mapper/cryptswap rw quiet
+EOF
+chmod 644 /etc/kernel/cmdline
+
+log "Regenerating initramfs as UKIs at /boot/EFI/Linux/..."
+install -d -m 755 /boot/EFI/Linux
 # Explicit btrfs in MODULES= is belt-and-suspenders: `filesystems` hook usually
 # pulls it via autodetect, but if autodetect misses it you get an unbootable
 # kernel panic ("can't find root fs"). Cheap to force.
@@ -176,6 +215,23 @@ log "Regenerating initramfs..."
 # at boot and opens cryptroot before `filesystems` tries to mount it.
 sed -i 's/^MODULES=.*/MODULES=(btrfs)/' /etc/mkinitcpio.conf
 sed -i 's/^HOOKS=.*/HOOKS=(base systemd autodetect modconf kms keyboard sd-vconsole block sd-encrypt filesystems fsck)/' /etc/mkinitcpio.conf
+
+# Switch presets to UKI mode. Comment out default_image/fallback_image and
+# set default_uki/fallback_uki. Idempotent: multiple sed runs converge.
+for _preset in /etc/mkinitcpio.d/linux.preset /etc/mkinitcpio.d/linux-lts.preset; do
+    [[ -f "$_preset" ]] || continue
+    _kver="${_preset##*/}"; _kver="${_kver%.preset}"   # linux | linux-lts
+    sed -i \
+        -e 's|^default_image=|#default_image=|' \
+        -e 's|^fallback_image=|#fallback_image=|' \
+        "$_preset"
+    grep -q '^default_uki='   "$_preset" || \
+        echo "default_uki=\"/boot/EFI/Linux/arch-${_kver}.efi\""           >> "$_preset"
+    grep -q '^fallback_uki='  "$_preset" || \
+        echo "fallback_uki=\"/boot/EFI/Linux/arch-${_kver}-fallback.efi\"" >> "$_preset"
+done
+unset _preset _kver
+
 mkinitcpio -P
 
 # ---------- limine bootloader (replaces systemd-boot) ----------
@@ -208,37 +264,36 @@ if [[ -d /sys/firmware/efi/efivars ]]; then
         || log "  efibootmgr NVRAM entry skipped (may already exist or efivars unavailable)"
 fi
 
-# Limine config — written to /boot/limine.conf (limine searches the ESP
-# root for this filename). Three entries: linux (default), linux-lts
-# (fallback for kernel regressions), linux fallback initramfs.
+# Limine config — written to /boot/limine.conf. Each Linux entry chainloads
+# a UKI from /boot/EFI/Linux/ via efi_chainload. UKIs embed their own
+# cmdline (/etc/kernel/cmdline, baked in at mkinitcpio -P time), so limine
+# doesn't need to specify it.
+#
+# Why efi_chainload instead of `protocol: linux`: the signed PCR 11
+# predictions live inside the UKI's `.pcrsig` PE section. Booting via
+# protocol: linux would unpack and re-stitch kernel+initrd, breaking the
+# UKI's PE layout and invalidating the signature → TPM refuses to unseal
+# the LUKS slot → recovery key prompt on every boot. efi_chainload runs
+# the UKI as-is (firmware loads it as a PE binary), preserving sig validity.
 #
 # SYNTAX-CHECK: limine 8.x config format. If syntax has drifted by the
 # time this runs, see https://github.com/limine-bootloader/limine/blob/trunk/CONFIG.md
-log "Writing /boot/limine.conf..."
-cat > /boot/limine.conf <<EOF
+log "Writing /boot/limine.conf (efi_chainload UKIs)..."
+cat > /boot/limine.conf <<'EOF'
 timeout: 5
 default_entry: 1
 
 /Arch Linux
-    protocol: linux
-    kernel_path: boot():/vmlinuz-linux
-    module_path: boot():/intel-ucode.img
-    module_path: boot():/initramfs-linux.img
-    cmdline: root=/dev/mapper/cryptroot rootflags=subvol=@ resume=/dev/mapper/cryptswap rw quiet
+    protocol: efi_chainload
+    image_path: boot():/EFI/Linux/arch-linux.efi
 
 /Arch Linux (LTS)
-    protocol: linux
-    kernel_path: boot():/vmlinuz-linux-lts
-    module_path: boot():/intel-ucode.img
-    module_path: boot():/initramfs-linux-lts.img
-    cmdline: root=/dev/mapper/cryptroot rootflags=subvol=@ resume=/dev/mapper/cryptswap rw quiet
+    protocol: efi_chainload
+    image_path: boot():/EFI/Linux/arch-linux-lts.efi
 
 /Arch Linux (Fallback)
-    protocol: linux
-    kernel_path: boot():/vmlinuz-linux
-    module_path: boot():/intel-ucode.img
-    module_path: boot():/initramfs-linux-fallback.img
-    cmdline: root=/dev/mapper/cryptroot rootflags=subvol=@ resume=/dev/mapper/cryptswap rw
+    protocol: efi_chainload
+    image_path: boot():/EFI/Linux/arch-linux-fallback.efi
 
 /Windows Boot Manager
     protocol: efi_chainload
@@ -299,15 +354,17 @@ BASH
 chmod 755 /usr/local/sbin/limine-redeploy
 
 # ---------- Pacman hook: TPM2 PCR re-enrolment after kernel/UKI/limine upgrades ----------
-# Every upgrade to linux / linux-lts / mkinitcpio / limine changes PCR 4
-# (bootloader/kernel measurement). LUKS volumes sealed against a frozen
-# PCR state will refuse to unlock at next boot, falling back to passphrase.
-# This hook re-runs systemd-cryptenroll on every TPM2-enrolled LUKS device
-# after such an upgrade, picking up the fresh PCR values.
+# Kernel / mkinitcpio / systemd / limine upgrades regenerate UKIs (which
+# rewrites the .pcrsig section). The seal still unseals because the policy
+# is "signed by our key", which holds across rebuilds — but if postinstall
+# §7.5 added stage-2 PCR 7 binding, we ALSO need to refresh the PCR 7
+# binding when firmware/SB state changes. This hook re-runs
+# systemd-cryptenroll on every TPM2-enrolled LUKS device using the
+# saved policy (signed PCR 11 + optional PCR 7), no-op'ing safely when
+# nothing actually drifted.
 #
-# Auto-discovers devices by scanning /etc/crypttab for entries with
-# tpm2-device=auto — works even after we add cryptswap to the TPM-sealed
-# set in the hibernate refactor.
+# Auto-discovers devices by scanning /etc/crypttab(.initramfs) for entries
+# with tpm2-device=auto.
 log "Installing pacman post-upgrade TPM2 reseal hook..."
 cat > /etc/pacman.d/hooks/95-tpm2-reseal.hook <<'EOF'
 [Trigger]
@@ -316,7 +373,9 @@ Type = Package
 Target = linux
 Target = linux-lts
 Target = mkinitcpio
+Target = systemd
 Target = limine
+Target = sbctl
 
 [Action]
 Description = Re-enrolling TPM2 PCR slots on TPM-sealed LUKS volumes...
@@ -327,34 +386,58 @@ EOF
 install -d -m 755 /usr/local/sbin
 cat > /usr/local/sbin/tpm2-reseal-luks <<'BASH'
 #!/usr/bin/env bash
-# Re-enrol every TPM2-sealed LUKS device against the current PCR state.
-# Triggered by /etc/pacman.d/hooks/95-tpm2-reseal.hook after kernel/UKI/
-# limine upgrades that shift PCR 4.
+# Re-enrol every TPM2-sealed LUKS device with the signed PCR 11 policy
+# (and stage-2 PCR 7 binding if postinstall §7.5 has run). Triggered by
+# /etc/pacman.d/hooks/95-tpm2-reseal.hook after kernel/UKI/limine/systemd/
+# sbctl upgrades.
+#
+# Stage-2 detection: if /var/lib/tpm-luks-stage2 exists (touched by
+# postinstall §7.5 once PCR 7 binding is added), include --tpm2-pcrs=7
+# in the reseal so PCR 7 stays bound. Otherwise stay on signed PCR 11
+# only (the install-time policy).
 set -euo pipefail
-[[ -f /etc/crypttab ]] || exit 0
 
-# Match crypttab entries whose options field contains tpm2-device=auto.
-# Field 2 is the source UUID=... or PARTUUID=... — feed that to
-# /dev/disk/by-uuid/$ID resolution, then cryptenroll.
-while IFS= read -r line; do
-    [[ "$line" =~ ^[[:space:]]*# ]] && continue
-    [[ -z "${line// }" ]] && continue
-    # Tab-or-space separated: name source key options
-    set -- $line
-    src="${2:-}"
-    opts="${4:-}"
-    [[ "$opts" == *tpm2-device=auto* ]] || continue
-    case "$src" in
-        UUID=*)     dev="/dev/disk/by-uuid/${src#UUID=}" ;;
-        PARTUUID=*) dev="/dev/disk/by-partuuid/${src#PARTUUID=}" ;;
-        /dev/*)     dev="$src" ;;
-        *)          echo "tpm2-reseal: unknown source format: $src" >&2; continue ;;
-    esac
-    [[ -b "$dev" ]] || { echo "tpm2-reseal: $dev not present (yet?); skipping" >&2; continue; }
+PUB=/etc/systemd/tpm2-pcr-public.pem
+[[ -f "$PUB" ]] || { echo "tpm2-reseal: $PUB missing — skipping (was the install half-done?)" >&2; exit 0; }
+
+EXTRA=()
+if [[ -f /var/lib/tpm-luks-stage2 ]]; then
+    EXTRA+=( --tpm2-pcrs=7 )
+fi
+
+reseal_one() {
+    local dev="$1"
+    [[ -b "$dev" ]] || { echo "tpm2-reseal: $dev not present (yet?); skipping" >&2; return; }
     echo "tpm2-reseal: re-enrolling TPM2 slot on $dev..."
     systemd-cryptenroll --wipe-slot=tpm2 "$dev" >/dev/null 2>&1 || true
-    systemd-cryptenroll --tpm2-device=auto --tpm2-pcrs=0+7 "$dev"
-done < /etc/crypttab.initramfs /etc/crypttab 2>/dev/null
+    systemd-cryptenroll --tpm2-device=auto \
+        --tpm2-public-key="$PUB" --tpm2-public-key-pcrs=11 \
+        "${EXTRA[@]}" "$dev"
+}
+
+scan() {
+    local file="$1"
+    [[ -f "$file" ]] || return 0
+    while IFS= read -r line; do
+        [[ "$line" =~ ^[[:space:]]*# ]] && continue
+        [[ -z "${line// }" ]] && continue
+        # Tab-or-space separated: name source key options
+        # shellcheck disable=SC2086
+        set -- $line
+        local src="${2:-}" opts="${4:-}" dev
+        [[ "$opts" == *tpm2-device=auto* ]] || continue
+        case "$src" in
+            UUID=*)     dev="/dev/disk/by-uuid/${src#UUID=}" ;;
+            PARTUUID=*) dev="/dev/disk/by-partuuid/${src#PARTUUID=}" ;;
+            /dev/*)     dev="$src" ;;
+            *)          echo "tpm2-reseal: unknown source format: $src" >&2; continue ;;
+        esac
+        reseal_one "$dev"
+    done < "$file"
+}
+
+scan /etc/crypttab.initramfs
+scan /etc/crypttab
 
 exit 0
 BASH
