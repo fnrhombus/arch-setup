@@ -35,10 +35,11 @@ postinstall.sh §1 + §3 already pacman/yay-installed the relevant packages. The
 
 From `decisions.md` Requirements (checkboxes still `[ ]`):
 
-- [ ] Tablet-mode detection (`SW_TABLET_MODE` on the convertible hinge): disable physical kbd, autostart `wvkbd-mobintl`, reflow waybar
-- [ ] Pen pressure curve / button mapping for the **external Wacom Intuos** (when plugged in)
-- [ ] Built-in active pen calibration (if the 7786's pen is detected as a Wacom-class device — verify with `libinput list-devices` first)
-- [ ] Three-finger swipe / pinch gesture bindings via `hyprgrass`
+- [ ] Tablet-mode detection. The 7786 does NOT have a dedicated `SW_TABLET_MODE` hinge sensor — Dell 2-in-1s of this era use ACPI events from `intel-vbtn` (codes 0xCC enter / 0xCD exit), which the kernel synthesizes into `SW_TABLET_MODE` on a virtual `Intel HID events` input device. Verify with `evtest` on `/dev/input/event*` for that name post-install. Then disable physical kbd, autostart `wvkbd-mobintl`, reflow waybar.
+- [ ] Pen pressure curve / button mapping for the **external Wacom Intuos** (when plugged in).
+- [ ] Three-finger swipe / pinch gesture bindings via `hyprgrass`.
+
+> Active pen note: the 17" 7786 has **capacitive touch only**, no built-in active digitizer. Only the 13"/15" 7000-series 2-in-1s (7386, 7586) shipped the AES pen.
 
 ---
 
@@ -56,11 +57,12 @@ journalctl -b | grep -iE 'wacom|iptsd|iio|accel'
 ```
 
 Expected to find:
-- **Goodix touchscreen** on USB VID 27C6 — bound by the in-kernel `hid-multitouch` driver. **NOT IPTS** — IPTS (Intel Precise Touch Stylus) is Surface-line only; do not install `iptsd` for this hardware.
+- **ELAN touchscreen** on the i2c bus (NOT USB), exposed as `ELAN2097:00 04F3:2666` (or similar — the 04F3 vendor is ELAN). Bound by `i2c-hid-acpi` → `hid-multitouch`. **NOT Goodix** — that's the fingerprint reader (`27c6:538c`); the Goodix-on-the-touchscreen claim in older versions of this doc was wrong. **NOT IPTS** either — IPTS is Surface-line only; do not install `iptsd`.
 - **Accelerometer** as `/sys/bus/iio/devices/iio:deviceN` — `iio-sensor-proxy` already installed; needs `systemctl enable --now iio-sensor-proxy.service` if not yet enabled.
 - **External Wacom Intuos** on USB — appears as a Wacom device node, handled natively by libinput on Wayland.
-- **Built-in active pen** — if the 7786 has one, it'll show up via the same touchscreen HID stack. Check `libinput list-devices` for a stylus-capable device.
-- **Tablet-mode switch** — convertible hinge should expose `SW_TABLET_MODE` as an event input device. `evtest` will confirm.
+- **Tablet-mode signaling** via ACPI `intel-vbtn` (NOT a dedicated `SW_TABLET_MODE` hinge sensor). The driver synthesizes a virtual input device named `Intel HID events`; that's where `SW_TABLET_MODE` events fire when you fold the screen. `evtest` on that device with the screen folding will confirm.
+
+> The 7786 has **capacitive touch only** — no built-in active pen / AES digitizer. Don't waste time looking for a stylus device beyond the second `ELAN2097 ... UNKNOWN` channel (which is unused on this hardware).
 
 If any of those are missing, halt and investigate — don't install downstream packages blindly.
 
@@ -73,7 +75,7 @@ Create `phase-3.5-hardware/` as a sibling to the other phase dirs. Under it:
 ```
 phase-3.5-hardware/
   00-probe.sh                  # runs all the lsusb/libinput/iio probes, dumps to ~/phase-3.5-probe.log
-  10-touchscreen-verify.sh     # confirm hid-multitouch binds the Goodix screen; tune palm rejection
+  10-touchscreen-verify.sh     # confirm i2c-hid-acpi → hid-multitouch binds the ELAN screen; tune palm rejection
   20-auto-rotation.sh          # enable iio-sensor-proxy, wire iio-hyprland for per-output transform
   30-touch-gestures.sh         # hyprgrass gesture bindings (already loaded via hyprpm)
   40-wacom-external.sh         # libinput tuning for the Intuos (pressure curve, button binds)
@@ -105,21 +107,20 @@ phase-3.5-hardware/
 - Add bindings to `dotfiles/dot_config/hypr/binds.conf` using the new `gesture = ...` syntax (Hyprland 0.51+) — three-finger swipe left/right → workspace prev/next, three-finger up → hyprexpo
 - Re-run `chezmoi apply`; the validator will catch dispatcher typos
 
-**40 — External Wacom Intuos**
+**40 — External Wacom Intuos** *(only if user plugs one in)*
 - `libwacom` + kernel `wacom` driver: both already present (no `xf86-input-wacom` needed under Wayland)
-- Probe: `libinput list-devices | grep -A20 -i wacom` once plugged in
+- Probe: `libinput-list-devices | grep -A20 -i wacom` once plugged in (`libinput-list-devices` from the `libinput-tools` package, not `libinput`)
 - Tune via Hyprland's `device:` block in `input.conf` (pressure curve, button mapping)
 - Persist via the chezmoi-managed `input.conf` fragment
 
-**50 — Built-in active pen**
-- If the 7786 ships an active pen, it'll already be visible via the touchscreen HID stack (no separate driver)
-- Calibrate pressure curve in the same way as the external Intuos via Hyprland's `device:` block
+**50 — Built-in active pen** *(removed: 7786 doesn't have one)*
+- The 17" 7786 is **capacitive-only**, no AES digitizer. Skip this script. Only the 13"/15" 7000-series 2-in-1s (7386, 7586) shipped active pens.
 
 **60 — Tablet mode**
-- Listen for `SW_TABLET_MODE` (kernel input switch on the convertible hinge): `evtest` to find the device
+- The 7786 does NOT have a `SW_TABLET_MODE` hinge sensor. Tablet-mode comes from ACPI `intel-vbtn` synthesizing the event on a virtual input device named `Intel HID events`. `evtest /dev/input/event*` against that device, fold the screen — should see `SW_TABLET_MODE` value 1 ↔ 0 transitions.
 - On entering tablet mode: `hyprctl keyword input:kb_file ""` (disable physical kbd), launch `wvkbd-mobintl` (already installed), waybar profile flip
 - On exiting: reverse it
-- Wire as a systemd user service watching the input event node, or as a small daemon spawned by Hyprland `exec-once`
+- Wire as a systemd user service watching the `Intel HID events` node, or as a small daemon spawned by Hyprland `exec-once`
 
 ---
 

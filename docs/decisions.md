@@ -9,7 +9,7 @@
 - **WiFi**: Dell Wireless 1801 (Qualcomm Atheros) + BT 4.0
 - **Display**: Integrated touch + external Vizio via USB DisplayLink dock
 - **Boot**: UEFI, GPT. *Current BIOS state*: Secure Boot ON, SATA in RAID mode. *Before phase 1 runs*: flip SATA → **AHCI** (RAID hides the NVMe from every Linux installer + the Windows setup USB), disable **Secure Boot** (limine UEFI binary isn't signed out of the box; can re-enable later with `sbctl` signing — see `runbook/phase-3-handoff.md` Upgrade Paths).
-- **Peripherals**: Touchscreen, touchpad, fingerprint reader, active pen
+- **Peripherals**: Touchscreen (capacitive only — NO active pen on the 17" 7786, only the 13"/15" 7000-series got AES digitizers), touchpad, fingerprint reader. External Wacom Intuos USB tablet supported when plugged in.
 - **Battery**: NONE *currently* — the internal battery is dead / removed; user plans to replace it. Laptop is always on AC power, lives stashed under a desk. Downstream consequences:
   - Lid-close "hibernate on battery" branch in `logind.conf` is dead code today (no battery state for logind to see). Configured anyway for forward-compat — fires automatically when a battery returns, no reconfig.
   - **Hibernation is enabled** (S4) on Linux. Reverses the prior "disabled" decision; the cited dual-boot/BitLocker risk doesn't apply (Linux swap is on the Netac, Windows can't see LUKS or btrfs). Until the battery is replaced, hibernate is **user-invoked** (`Super+Shift+H`) since AC removal is an instant hard-cut. Swap sized 16 GB to match RAM. Persistent LUKS swap, TPM2-keyfile-sealed (mirrors cryptvar). See `docs/desktop-requirements.md` §Hibernate for the full plan.
@@ -19,13 +19,8 @@
 ## Requirements
 - [x] Fingerprint scanner support (fprintd + libfprint). **Device: Goodix `27c6:538c`** — supported only via the AUR `libfprint-goodix-53xc` package (older Dell OEM blob, pre-v0.0.11) riding on `libfprint-tod-git`. Current upstream AUR `libfprint-2-tod1-goodix` / `-v2` ship a **550A-only** blob that does NOT cover 538C. `libfprint-tod-git` must be built with `!lto` in PKGBUILD options — LTO strips ABI symbol versioning and breaks the link. `postinstall.sh` pre-flights this automatically. Enrollment on a bare TTY needs `sudo fprintd-enroll -f <finger> tom` (polkit denies unprivileged enroll without a graphical session).
 - [x] Lid close: no sleep/shutdown on AC power (logind.conf) — wired by phase-2 `chroot.sh` via `/etc/systemd/logind.conf.d/10-lid.conf` (`HandleLidSwitchExternalPower=ignore`).
-- [ ] Wacom Intuos pen tablet support — built-in Wacom AES digitizer driven by
-  the kernel `wacom` module (in-tree linuxwacom). `libwacom` installed via
-  `postinstall.sh` for tablet metadata. Pressure/tilt expected to work under
-  Wayland; eraser-end may need a udev quirk if not auto-detected. **Verify on
-  hardware**: actual VID/PID and whether it's Wacom-AES vs Goodix on this
-  specific 7786 revision (`dmesg | grep -i -E 'wacom|goodix|hid-multitouch'`
-  after first boot).
+- [ ] **External** Wacom Intuos USB tablet support (only when plugged in — the 17" 7786 has NO built-in active digitizer, capacitive touch only). `libwacom` + the in-tree kernel `wacom` driver are both installed by `postinstall.sh`. Pressure/tilt work under Wayland via libinput; per-tablet pressure curves go in `dotfiles/dot_config/hypr/input.conf` `device:` blocks.
+- [x] **Touchscreen** — ELAN i2c-hid (`ELAN2097:00 04F3:2666`), bound by the in-kernel `i2c-hid-acpi` → `hid-multitouch` chain. NOT Goodix — the `27c6:*` Goodix on this machine is the **fingerprint** reader. NOT IPTS either (Surface-only). Whiskey-Lake quirk: live ISO often doesn't autoload `i2c-hid-acpi` until userspace, so the touchscreen is invisible from the live ISO and visible from the installed system.
 - [ ] Touch gestures (touchpad + tablet mode):
   - Two-finger drag → scroll (libinput default, no config needed)
   - Three-finger tap → middle click (libinput default)
