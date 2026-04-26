@@ -118,9 +118,23 @@ phase-3.5-hardware/
 
 **60 — Tablet mode**
 - The 7786 does NOT have a `SW_TABLET_MODE` hinge sensor. Tablet-mode comes from ACPI `intel-vbtn` synthesizing the event on a virtual input device named `Intel HID events`. `evtest /dev/input/event*` against that device, fold the screen — should see `SW_TABLET_MODE` value 1 ↔ 0 transitions.
-- On entering tablet mode: `hyprctl keyword input:kb_file ""` (disable physical kbd), launch `wvkbd-mobintl` (already installed), waybar profile flip
-- On exiting: reverse it
-- Wire as a systemd user service watching the `Intel HID events` node, or as a small daemon spawned by Hyprland `exec-once`
+- **Wired in postinstall.sh §1d (already installed):**
+  - udev rule `/etc/udev/rules.d/99-tablet-mode.rules` watches `ATTRS{name}=="Intel HID events"` and writes `SW_TABLET_MODE` to `/run/tablet-mode/state` on each `change` event.
+  - User-level `~/.config/systemd/user/tablet-mode-watch.path` notices the write and triggers `tablet-mode.service`, which runs `~/.local/bin/tablet-mode-toggle --detect`.
+  - `tablet-mode-toggle` queries `hyprctl devices -j` to discover the actual kbd (`at-translated-set-2-keyboard`) + touchpad (`dell0896:00-04f3:30b6-touchpad`) names, then `hyprctl keyword device:NAME:enabled false/true` to toggle them. On tablet entry it also `setsid -f wvkbd-mobintl --hidden` (kills it on exit).
+  - Manual override binding: `SUPER+ALT+K` → `tablet-mode-toggle --toggle` (forces a flip if auto-detect misfires).
+- **First test on real hardware** (priority — never validated):
+  1. `lsmod | grep intel_vbtn` — must show the module loaded. If absent, `sudo modprobe intel_vbtn`.
+  2. `sudo evtest` → pick the `Intel HID events` device → fold the screen. Expect `SW_TABLET_MODE` value transitions.
+  3. `sudo udevadm monitor --environment --subsystem-match=input` while folding — expect `ACTION=change` events with `SW_TABLET_MODE=1` (or 0).
+  4. `cat /run/tablet-mode/state` after a fold — expect `1`.
+  5. `systemctl --user status tablet-mode.service` — expect a recent activation; check journalctl for `[tablet-mode]` lines.
+  6. `hyprctl devices` — confirm the actual kbd+touchpad names. If they don't match the discover_devices() heuristic in `tablet-mode-toggle`, tweak the jq filter.
+- **Still TODO** (out of scope for this commit, part of issue #6):
+  - Touchscreen palm rejection while typing in laptop mode (libinput `disable-while-typing` covers the touchpad but not the touchscreen — needs a `quirks` override or a userspace daemon).
+  - Pen pressure curve / button mapping (no built-in pen on the 7786, only external Wacom Intuos when plugged in — handled in §40 of this doc).
+  - hyprgrass-dependent gestures (three-finger swipe, pinch zoom in tablet mode).
+  - waybar profile flip — tablet-mode-toggle does NOT yet swap waybar layouts (small-screen-friendly variant). Add a `pkill -SIGUSR1 waybar` + per-mode waybar config split if needed.
 
 ---
 
