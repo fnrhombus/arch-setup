@@ -170,7 +170,7 @@ sudo pacman -Syu --noconfirm --needed \
     wl-clipboard grim slurp \
     xdg-user-dirs pipewire pipewire-pulse pipewire-jack wireplumber \
     noto-fonts noto-fonts-emoji ttf-jetbrains-mono-nerd ttf-firacode-nerd \
-    terminus-font ttf-terminus-nerd \
+    terminus-font \
     bitwarden bitwarden-cli \
     ghostty fuzzel cliphist satty hyprshot \
     nautilus yazi \
