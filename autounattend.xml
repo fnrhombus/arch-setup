@@ -2,7 +2,7 @@
 <unattend xmlns="urn:schemas-microsoft-com:unattend" xmlns:wcm="http://schemas.microsoft.com/WMIConfig/2002/State">
 	<!-- Originally generated via the Schneegans unattend generator (web tool), then
 	     hand-patched. See autounattend-oobe-patch.md and CLAUDE.md for the patches
-	     applied post-generation (Samsung-by-size detection, 512 MB EFI, 160 GiB
+	     applied post-generation (Samsung-by-size detection, 1 GiB EFI, 160 GiB
 	     Windows, full-silent OOBE, disable hibernation/Fast Startup). -->
 	<settings pass="offlineServicing"></settings>
 	<settings pass="windowsPE">
@@ -43,7 +43,7 @@
 				</RunSynchronousCommand>
 				<RunSynchronousCommand wcm:action="add">
 					<Order>8</Order>
-					<Path>cmd.exe /c &gt;&gt;X:\pe.cmd (echo:echo CLEAN&amp;echo:echo CONVERT GPT&amp;echo:echo CREATE PARTITION EFI SIZE=512&amp;echo:echo FORMAT QUICK FS=FAT32 LABEL=^"System^"&amp;echo:echo ASSIGN LETTER=S&amp;echo:echo CREATE PARTITION MSR SIZE=16&amp;echo:echo CREATE PARTITION PRIMARY SIZE=163840)</Path>
+					<Path>cmd.exe /c &gt;&gt;X:\pe.cmd (echo:echo CLEAN&amp;echo:echo CONVERT GPT&amp;echo:echo CREATE PARTITION EFI SIZE=1024&amp;echo:echo FORMAT QUICK FS=FAT32 LABEL=^"System^"&amp;echo:echo ASSIGN LETTER=S&amp;echo:echo CREATE PARTITION MSR SIZE=16&amp;echo:echo CREATE PARTITION PRIMARY SIZE=163840)</Path>
 				</RunSynchronousCommand>
 				<RunSynchronousCommand wcm:action="add">
 					<Order>9</Order>

@@ -8,7 +8,7 @@ Source of truth for all of this is [decisions.md](decisions.md). The `autounatte
 
 **Patched behavior:**
 - **Order 6** runs an inline PowerShell one-liner: `Get-Disk | ?{$_.Size -gt 500GB -and $_.Size -lt 600GB}`. If exactly one disk matches, its number is written to `X:\target-disk.txt`. Zero or multiple matches → the script exits 1 and the runbook's recovery entry under Phase 1 step 3 handles it.
-- **Order 7** reads the number via `set /p TARGET_DISK=<X:\target-disk.txt` and uses `%TARGET_DISK%` in the generated `X:\diskpart.txt`, which lays out: EFI 512 MB FAT32 → MSR 16 MB → Windows 160 GiB NTFS → trailing ~316 GiB left unallocated for Arch btrfs.
+- **Order 7** reads the number via `set /p TARGET_DISK=<X:\target-disk.txt` and uses `%TARGET_DISK%` in the generated `X:\diskpart.txt`, which lays out: EFI **1 GiB** FAT32 → MSR 16 MB → Windows 160 GiB NTFS → trailing ~315 GiB left unallocated for Arch btrfs. (ESP bumped from 512 MB 2026-04-27: UKIs on this design need ~150-250 MB each, ×2 kernels + sbctl-signed copies + Windows bootloader doesn't fit in 512 MB.)
 - **Orders 8–9** drop the Schneegans recovery partition (decisions.md §Q9: recovery ISO lives on the Netac, not the Samsung).
 
 Everything is embedded inline via the same cmd-echo-chain style Schneegans uses. **Do not re-introduce external files** (`windows-diskpart.txt`, `windows-diskpart-preflight.ps1`) — the earlier plan to use them was replaced because Schneegans's `<Extensions><File path=...>` dropper doesn't reliably land files on `X:\` in WinPE across all boot media.
@@ -66,6 +66,6 @@ Note on "use the Netac for anything that doesn't hurt daily performance": the Ne
 
 After Windows lands on the desktop as `Tom`:
 
-- `Get-Partition` in PowerShell — confirm EFI 512 MB, MSR 16 MB, NTFS 160 GiB, and trailing unallocated ~316 GiB on the Samsung. Netac untouched.
+- `Get-Partition` in PowerShell — confirm EFI 1 GiB, MSR 16 MB, NTFS 160 GiB, and trailing unallocated ~315 GiB on the Samsung. Netac untouched.
 - `powercfg /a` — "Hibernation has not been enabled" in output.
 - `fsutil behavior query disableLastAccess` — value 1 (already set by the stock Schneegans script).

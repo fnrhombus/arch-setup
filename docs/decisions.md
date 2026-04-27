@@ -122,7 +122,7 @@
 
 **Samsung 512GB SSD (main):**
 ```
-[EFI 512MB FAT32] [MSR 16MB] [Windows 160GB NTFS] [Linux ~316GB btrfs]
+[EFI 1GiB FAT32] [MSR 16MB] [Windows 160GB NTFS] [Linux ~316GB btrfs]
 ```
 
 **Netac 128GB SSD (secondary — non-speed-critical):**
