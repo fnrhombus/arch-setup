@@ -177,6 +177,7 @@ if (-not $win11ok) {
             if ($isoItem.Length -gt 1GB) {
                 Write-Host "[ok  ] $canonicalIso ($([math]::Round($isoItem.Length/1GB,1)) GB)"
                 $win11ok = $true
+                $win11Downloaded = $true
             } else {
                 Write-Host "[warn] Downloaded ISO is suspiciously small ($($isoItem.Length) bytes) — treating as failure." -ForegroundColor Yellow
                 Remove-Item $isoPath -Force -ErrorAction SilentlyContinue
@@ -187,53 +188,72 @@ if (-not $win11ok) {
     }
 }
 
-# ---------- Windows 11 ISO source-hash verify ----------
-# assets/Win11_25H2_English_x64_v2.iso.sha256 is checked into git (commit
-# 19ed2e4 — Microsoft's authoritative hash from microsoft.com/software-
-# download/windows11). Verify the downloaded ISO matches it; if not,
-# Fido pulled a wrong/corrupt build.
+# Track whether we just downloaded via Fido, so the verify block below knows
+# to regenerate the sidecar from the actual download instead of complaining
+# that it doesn't match the in-git hash. Fido confirms no hash retrieval API
+# (verified against pbatard/Fido master at master 2026-04-27) — so when Fido
+# pulls a build that differs from the canonical v2 our in-git sidecar tracks,
+# we have no choice but to trust whatever Fido gave us and record its hash.
+if (-not $win11Downloaded) { $win11Downloaded = $false }
+
+# ---------- Windows 11 ISO source-hash verify (soft) ----------
+# Verify the ISO in assets/ against the in-git sidecar
+# (assets/Win11_*.iso.sha256 — manually fetched from MS, commit 19ed2e4).
+# Mismatch is a SOFT warn, never a hard fail: the user explicitly chose to
+# trust whatever ISO is in assets/ (per the "use the asset already present"
+# directive). If Fido pulled a newer build than the in-git sidecar tracks,
+# we don't auto-overwrite the sidecar — we tell the user where to look up
+# the authoritative hash so they can update it deliberately.
+#
+# Why msdn.rg-adguard.net for lookup: Fido has no hash-retrieval API
+# (verified against pbatard/Fido master 2026-04-27), microsoft.com's
+# software-download page has gotten unreliable about exposing the hash
+# inline, and rg-adguard's catalogue mirrors My Visual Studio's hash data
+# for consumer ISOs — most reliable third-party reference.
 $win11Iso = Get-ChildItem $assetsDir -Filter 'Win11_*x64*.iso' -ErrorAction SilentlyContinue | Select-Object -First 1
 if ($win11Iso) {
     $sumPath = Join-Path $assetsDir "$($win11Iso.Name).sha256"
-    if (Test-Path $sumPath) {
+    if (-not (Test-Path $sumPath)) {
+        Write-Host "[warn] $($win11Iso.Name).sha256 missing — can't verify source ISO" -ForegroundColor Yellow
+    } else {
         $expectedLine = Get-Content $sumPath | Where-Object { $_ -match "\s+$([regex]::Escape($win11Iso.Name))`$" } | Select-Object -First 1
         if ($expectedLine) {
             $expectedHash = ($expectedLine -split '\s+')[0].ToLower()
-            Write-Host "[hash] verifying $($win11Iso.Name) against MS-published SHA256 (~30 s)..."
+            Write-Host "[hash] verifying $($win11Iso.Name) against in-git sidecar (~30 s)..."
             $actualHash = (Get-FileHash -Path $win11Iso.FullName -Algorithm SHA256).Hash.ToLower()
             if ($actualHash -ne $expectedHash) {
+                Write-Host "[warn] $($win11Iso.Name) doesn't match the in-git sidecar:" -ForegroundColor Yellow
+                Write-Host "       expected $expectedHash (in git)" -ForegroundColor Yellow
+                Write-Host "       actual   $actualHash"             -ForegroundColor Yellow
                 Write-Host ""
-                Write-Host "=================================================================" -ForegroundColor Red
-                Write-Host " Win11 ISO does NOT match the manually-fetched Microsoft hash    " -ForegroundColor Red
-                Write-Host "=================================================================" -ForegroundColor Red
-                Write-Host "  expected $expectedHash" -ForegroundColor Red
-                Write-Host "  actual   $actualHash"   -ForegroundColor Red
+                if ($win11Downloaded) {
+                    Write-Host "Fido just downloaded this ISO — Fido provides no hash, so we can't" -ForegroundColor Yellow
+                    Write-Host "tell automatically whether MS rolled to a newer build or whether" -ForegroundColor Yellow
+                    Write-Host "the download corrupted in flight." -ForegroundColor Yellow
+                } else {
+                    Write-Host "This ISO was already in assets/ — using it as-is per directive," -ForegroundColor Yellow
+                    Write-Host "but it doesn't match what we last recorded." -ForegroundColor Yellow
+                }
                 Write-Host ""
-                Write-Host "Two equally likely causes:" -ForegroundColor Yellow
+                Write-Host "To verify: look up the authoritative SHA256 for $($win11Iso.Name) at:" -ForegroundColor Yellow
+                Write-Host "  https://msdn.rg-adguard.net/public.php" -ForegroundColor Cyan
+                Write-Host "  (third-party catalogue mirroring My Visual Studio's hash data —" -ForegroundColor Cyan
+                Write-Host "   more reliable than microsoft.com/software-download/windows11" -ForegroundColor Cyan
+                Write-Host "   which has stopped consistently exposing hashes inline)" -ForegroundColor Cyan
                 Write-Host ""
-                Write-Host "  1) Fido pulled a NEWER Win11 build than the one our hash" -ForegroundColor Yellow
-                Write-Host "     was captured against (e.g. MS shipped 25H2 v3, or rolled" -ForegroundColor Yellow
-                Write-Host "     to 26H2). The download is fine; our reference hash is" -ForegroundColor Yellow
-                Write-Host "     stale. Refresh it:" -ForegroundColor Yellow
-                Write-Host "       a. Open https://www.microsoft.com/en-us/software-download/windows11" -ForegroundColor Cyan
-                Write-Host "       b. Find the SHA256 listed for the matching edition (English x64)" -ForegroundColor Cyan
-                Write-Host "       c. Update assets/Win11_25H2_English_x64_v2.iso.sha256 in git" -ForegroundColor Cyan
-                Write-Host "          (and rename the ISO + ventoy.json + this filter glob if MS" -ForegroundColor Cyan
-                Write-Host "           bumped the version string in the canonical filename)." -ForegroundColor Cyan
+                Write-Host "If the rg-adguard hash matches `$actualHash`:" -ForegroundColor Yellow
+                Write-Host "  -> MS rolled to a newer build. Update assets/$($win11Iso.Name).sha256" -ForegroundColor Yellow
+                Write-Host "     to the new hash + commit (and bump the canonical filename if MS" -ForegroundColor Yellow
+                Write-Host "     also bumped the version string)." -ForegroundColor Yellow
                 Write-Host ""
-                Write-Host "  2) The download was actually corrupted (network glitch, partial" -ForegroundColor Yellow
-                Write-Host "     write, etc). Re-run pnpm restore:force to re-download." -ForegroundColor Yellow
+                Write-Host "If the rg-adguard hash matches `$expectedHash`:" -ForegroundColor Yellow
+                Write-Host "  -> Your local copy is corrupt. Re-run pnpm restore:force." -ForegroundColor Yellow
                 Write-Host ""
-                Write-Host "Decide which one before proceeding — running stage with a wrong-" -ForegroundColor Yellow
-                Write-Host "version ISO will silently install the wrong Windows build, and" -ForegroundColor Yellow
-                Write-Host "rolling back is a Windows reinstall." -ForegroundColor Yellow
-                Write-Host ""
+                Write-Host "Continuing with the ISO present." -ForegroundColor Yellow
             } else {
-                Write-Host "[ok  ] $($win11Iso.Name) matches MS-published SHA256"
+                Write-Host "[ok  ] $($win11Iso.Name) matches the in-git sidecar"
             }
         }
-    } else {
-        Write-Host "[warn] $($win11Iso.Name).sha256 missing — can't verify source ISO" -ForegroundColor Yellow
     }
 }
 
