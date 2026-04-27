@@ -43,29 +43,66 @@ function Write-Header([string]$text, [string]$color = 'Green') {
 }
 
 # ---------- locate the Ventoy data partition ----------
-$vol = Get-Volume -ErrorAction SilentlyContinue |
-    Where-Object { $_.FileSystemLabel -eq 'Ventoy' -and $_.DriveLetter } |
-    Select-Object -First 1
+# Phase 0-alt may have planted Ventoy onto the internal Netac (so the
+# Inspiron can boot Windows install without external storage). Once the
+# user is running this script ON the Inspiron in Windows, BOTH may be
+# present: external USB stick (Ventoy) AND internal Netac-Ventoy. The
+# internal path has empirically failed to install Windows successfully
+# on this hardware, so the USB path is the tested route.
+#
+# Selection rule: among all volumes labeled "Ventoy", PREFER the one on
+# a USB-bus disk. Fall back to whatever's available only if no USB
+# candidate exists. Print rejected candidates explicitly so it's never
+# unclear which drive is being staged.
+$vols = @(Get-Volume -ErrorAction SilentlyContinue |
+    Where-Object { $_.FileSystemLabel -eq 'Ventoy' -and $_.DriveLetter })
 
-if (-not $vol) {
-    Write-Header "No Ventoy USB detected" 'Yellow'
+if ($vols.Count -eq 0) {
+    Write-Header "No Ventoy medium detected" 'Yellow'
     Write-Host @"
 
 No volume labeled 'Ventoy' was found. Either:
-  - The USB isn't plugged in → plug it in and re-run `pnpm stage`.
+  - The USB stick isn't plugged in → plug it in and re-run `pnpm stage`.
   - Ventoy2Disk.exe hasn't been run on the stick yet → run it first.
   - You renamed the data partition → rename it back to 'Ventoy', or edit
     this script to match.
 
-This is a soft exit (code 2) so postinstall hooks don't fail when the USB
-is absent.
+This is a soft exit (code 2) so postinstall hooks don't fail when no
+medium is plugged in.
 
 "@ -ForegroundColor Yellow
     exit 2
 }
 
-$usb = "$($vol.DriveLetter):\"
-Write-Host "[ok  ] Ventoy data partition: $usb ($([math]::Round($vol.Size/1GB,1)) GB)"
+# Annotate each Ventoy volume with its disk's bus type so we can prefer USB.
+$candidates = foreach ($v in $vols) {
+    $part = Get-Partition -DriveLetter $v.DriveLetter -ErrorAction SilentlyContinue
+    $disk = if ($part) { Get-Disk -Number $part.DiskNumber -ErrorAction SilentlyContinue } else { $null }
+    [PSCustomObject]@{
+        Volume     = $v
+        Drive      = "$($v.DriveLetter):\"
+        DiskNumber = if ($part) { $part.DiskNumber } else { $null }
+        BusType    = if ($disk) { [string]$disk.BusType } else { 'Unknown' }
+    }
+}
+
+$chosen = $candidates | Where-Object { $_.BusType -eq 'USB' } | Select-Object -First 1
+if (-not $chosen) {
+    $chosen = $candidates | Select-Object -First 1
+    if ($candidates.Count -gt 1) {
+        Write-Host "[warn] $($candidates.Count) Ventoy volumes found but none are USB — falling back to $($chosen.Drive) ($($chosen.BusType))." -ForegroundColor Yellow
+    }
+} elseif ($candidates.Count -gt 1) {
+    foreach ($c in $candidates) {
+        if ($c.Drive -ne $chosen.Drive) {
+            Write-Host "[skip] Ventoy on $($c.Drive) (disk $($c.DiskNumber), $($c.BusType)) — preferring USB"
+        }
+    }
+}
+
+$vol = $chosen.Volume
+$usb = $chosen.Drive
+Write-Host "[ok  ] Ventoy data partition: $usb ($([math]::Round($vol.Size/1GB,1)) GB, $($chosen.BusType) on disk $($chosen.DiskNumber))"
 
 # Sanity: the Ventoy install writes a tiny (~32 MB) FAT "VTOYEFI" partition
 # on the same disk. If it's missing, the stick is mislabeled, not a Ventoy
