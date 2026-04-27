@@ -13,7 +13,8 @@
     "prune:usb": "pwsh -NoProfile -ExecutionPolicy Bypass -File scripts/prune-usb.ps1",
     "pdf": "node scripts/runbook-pdf.mjs",
     "hash:win11": "node scripts/fetch-win11-hash.mjs",
-    "hash:win11:update": "node scripts/fetch-win11-hash.mjs --update"
+    "hash:win11:update": "node scripts/fetch-win11-hash.mjs --update",
+    "fetch:win11": "node scripts/fetch-win11-hash.mjs --download --update"
   },
   "repository": {
     "type": "git",
