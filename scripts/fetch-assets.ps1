@@ -121,7 +121,36 @@ if ($win11 -and -not $Force) {
     # Symlink? Resolve and size-check the target so broken links get caught.
     $actual = if ($win11.LinkType) { Get-Item $win11.Target -ErrorAction SilentlyContinue } else { $win11 }
     if ($actual -and $actual.Length -gt 1GB) {
-        Write-Host "[ok  ] Windows 11 ISO present: $($win11.Name) ($([math]::Round($actual.Length/1GB,1)) GB)"
+        # If there's a sidecar (e.g. user dropped in their own ISO and
+        # recorded its hash, or a previous run wrote one), verify against
+        # it. Match means "use this, it's exactly what we expect" — strongest
+        # possible reason to skip Fido. Mismatch is logged loudly but does
+        # NOT trigger a redownload (`-Force` is the explicit "wipe what's
+        # there and start over" knob); the user may have intentionally
+        # swapped in a different build.
+        $sidecarPath = "$($actual.FullName).sha256"
+        if (Test-Path $sidecarPath) {
+            $expectedLine = Get-Content $sidecarPath |
+                Where-Object { $_ -match "\s+$([regex]::Escape($win11.Name))`$" } |
+                Select-Object -First 1
+            if ($expectedLine) {
+                $expectedHash = ($expectedLine -split '\s+')[0].ToLower()
+                Write-Host "[hash] verifying $($win11.Name) against sidecar (~30 s)..."
+                $actualHash = (Get-FileHash -Path $actual.FullName -Algorithm SHA256).Hash.ToLower()
+                if ($actualHash -eq $expectedHash) {
+                    Write-Host "[ok  ] Windows 11 ISO present + sidecar hash matches: $($win11.Name) ($([math]::Round($actual.Length/1GB,1)) GB)"
+                } else {
+                    Write-Host "[warn] $($win11.Name) hash differs from sidecar:" -ForegroundColor Yellow
+                    Write-Host "       expected $expectedHash" -ForegroundColor Yellow
+                    Write-Host "       actual   $actualHash"   -ForegroundColor Yellow
+                    Write-Host "       Using the ISO present (not overwriting). -Force to redownload." -ForegroundColor Yellow
+                }
+            } else {
+                Write-Host "[ok  ] Windows 11 ISO present (sidecar exists but no entry for $($win11.Name)): $($win11.Name) ($([math]::Round($actual.Length/1GB,1)) GB)"
+            }
+        } else {
+            Write-Host "[ok  ] Windows 11 ISO present (no sidecar): $($win11.Name) ($([math]::Round($actual.Length/1GB,1)) GB)"
+        }
         $win11ok = $true
     }
 }
