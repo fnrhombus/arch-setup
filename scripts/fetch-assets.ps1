@@ -202,10 +202,32 @@ if ($win11Iso) {
             Write-Host "[hash] verifying $($win11Iso.Name) against MS-published SHA256 (~30 s)..."
             $actualHash = (Get-FileHash -Path $win11Iso.FullName -Algorithm SHA256).Hash.ToLower()
             if ($actualHash -ne $expectedHash) {
-                Write-Host "[fail] $($win11Iso.Name) SHA256 mismatch:" -ForegroundColor Red
-                Write-Host "       expected $expectedHash" -ForegroundColor Red
-                Write-Host "       actual   $actualHash"   -ForegroundColor Red
-                Write-Host "       ISO does not match the official Microsoft hash. Re-run pnpm restore:force." -ForegroundColor Red
+                Write-Host ""
+                Write-Host "=================================================================" -ForegroundColor Red
+                Write-Host " Win11 ISO does NOT match the manually-fetched Microsoft hash    " -ForegroundColor Red
+                Write-Host "=================================================================" -ForegroundColor Red
+                Write-Host "  expected $expectedHash" -ForegroundColor Red
+                Write-Host "  actual   $actualHash"   -ForegroundColor Red
+                Write-Host ""
+                Write-Host "Two equally likely causes:" -ForegroundColor Yellow
+                Write-Host ""
+                Write-Host "  1) Fido pulled a NEWER Win11 build than the one our hash" -ForegroundColor Yellow
+                Write-Host "     was captured against (e.g. MS shipped 25H2 v3, or rolled" -ForegroundColor Yellow
+                Write-Host "     to 26H2). The download is fine; our reference hash is" -ForegroundColor Yellow
+                Write-Host "     stale. Refresh it:" -ForegroundColor Yellow
+                Write-Host "       a. Open https://www.microsoft.com/en-us/software-download/windows11" -ForegroundColor Cyan
+                Write-Host "       b. Find the SHA256 listed for the matching edition (English x64)" -ForegroundColor Cyan
+                Write-Host "       c. Update assets/Win11_25H2_English_x64_v2.iso.sha256 in git" -ForegroundColor Cyan
+                Write-Host "          (and rename the ISO + ventoy.json + this filter glob if MS" -ForegroundColor Cyan
+                Write-Host "           bumped the version string in the canonical filename)." -ForegroundColor Cyan
+                Write-Host ""
+                Write-Host "  2) The download was actually corrupted (network glitch, partial" -ForegroundColor Yellow
+                Write-Host "     write, etc). Re-run pnpm restore:force to re-download." -ForegroundColor Yellow
+                Write-Host ""
+                Write-Host "Decide which one before proceeding — running stage with a wrong-" -ForegroundColor Yellow
+                Write-Host "version ISO will silently install the wrong Windows build, and" -ForegroundColor Yellow
+                Write-Host "rolling back is a Windows reinstall." -ForegroundColor Yellow
+                Write-Host ""
             } else {
                 Write-Host "[ok  ] $($win11Iso.Name) matches MS-published SHA256"
             }
