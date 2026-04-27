@@ -216,19 +216,34 @@ install -d -m 755 /boot/EFI/Linux
 sed -i 's/^MODULES=.*/MODULES=(btrfs)/' /etc/mkinitcpio.conf
 sed -i 's/^HOOKS=.*/HOOKS=(base systemd autodetect modconf kms keyboard sd-vconsole block sd-encrypt filesystems fsck)/' /etc/mkinitcpio.conf
 
-# Switch presets to UKI mode. Comment out default_image/fallback_image and
-# set default_uki/fallback_uki. Idempotent: multiple sed runs converge.
+# Switch presets to UKI mode + drop fallback build to fit the 512 MiB ESP.
+#
+# UKI sizes: ~80 MB default, ~160 MB fallback (autodetect strips modules
+# from the default initramfs; fallback bundles all of them). Two kernels
+# × two variants = ~480 MB just for UKIs, blowing past the 512 MiB ESP
+# (which also has to fit limine + Windows bootmgr + a future sbctl-signed
+# copy). Dropping the fallback variant brings us to ~160 MB total UKIs +
+# ~10 MB headroom for limine/Windows = comfortable fit.
+#
+# Trade-off: no fallback initramfs means a broken autodetect leaves you
+# with no boot path. Mitigation: linux-lts default UKI IS the fallback —
+# kernel regressions are the main reason fallback exists, and LTS covers
+# that. Bad-autodetect is rare on this stable hardware.
+#
+# Idempotent: multiple sed runs converge.
 for _preset in /etc/mkinitcpio.d/linux.preset /etc/mkinitcpio.d/linux-lts.preset; do
     [[ -f "$_preset" ]] || continue
     _kver="${_preset##*/}"; _kver="${_kver%.preset}"   # linux | linux-lts
     sed -i \
         -e 's|^default_image=|#default_image=|' \
         -e 's|^fallback_image=|#fallback_image=|' \
+        -e "s|^PRESETS=.*|PRESETS=('default')|" \
         "$_preset"
     grep -q '^default_uki='   "$_preset" || \
         echo "default_uki=\"/boot/EFI/Linux/arch-${_kver}.efi\""           >> "$_preset"
-    grep -q '^fallback_uki='  "$_preset" || \
-        echo "fallback_uki=\"/boot/EFI/Linux/arch-${_kver}-fallback.efi\"" >> "$_preset"
+    # Strip any pre-existing fallback_uki line so mkinitcpio doesn't try
+    # to build the second image even if PRESETS was edited correctly.
+    sed -i '/^fallback_uki=/d' "$_preset"
 done
 unset _preset _kver
 
@@ -290,10 +305,6 @@ default_entry: 1
 /Arch Linux (LTS)
     protocol: efi_chainload
     image_path: boot():/EFI/Linux/arch-linux-lts.efi
-
-/Arch Linux (Fallback)
-    protocol: efi_chainload
-    image_path: boot():/EFI/Linux/arch-linux-fallback.efi
 
 /Windows Boot Manager
     protocol: efi_chainload
