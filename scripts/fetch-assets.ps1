@@ -7,19 +7,15 @@
 # Scope:
 #   - Arch Linux ISO (latest) + .sig + sha256sums
 #   - Ventoy latest release: windows zip + extracted tree
-#   - Windows 11 Pro 25H2 consumer multi-edition ISO via Fido
-#     (https://github.com/pbatard/Fido). Pinned to release 25H2 so we
-#     don't silently roll to whatever MS ships next. The multi-edition
-#     ISO contains Home/Pro/Pro-N/Edu/Workstations; autounattend.xml
-#     picks "Windows 11 Pro" from install.wim at install time. On Fido
-#     failure (MS API drift, etc.) falls back to manual-download
-#     instructions.
+#   - Windows 11 consumer multi-edition ISO via Fido
+#     (https://github.com/pbatard/Fido). The multi-edition ISO contains
+#     Home/Pro/Pro-N/Edu/Workstations; autounattend.xml picks "Windows
+#     11 Pro" from install.wim at install time. -Rel Latest tracks the
+#     current MS release (25H2 today; will roll forward as MS ships).
+#     On Fido failure falls back to manual-download instructions.
 #
-#     We do NOT verify a hash on the Win11 ISO. Microsoft doesn't ship
-#     one in any auto-fetchable feed, Fido doesn't return one, and the
-#     Playwright-based scraper that briefly lived here got the user's IP
-#     soft-banned from the MS download site (2026-04-27). Trusting Fido
-#     is the pragmatic call.
+#     We do NOT verify a hash on the Win11 ISO — MS doesn't ship one in
+#     any auto-fetchable feed and Fido doesn't return one. Trust Fido.
 
 [CmdletBinding()]
 param(
@@ -102,20 +98,21 @@ if ($Force -or -not (Test-Path (Join-Path $extractedDir 'Ventoy2Disk.exe') -Path
     Write-Host "[skip] $extractedName already extracted"
 }
 
-# ---------- Windows 11 ISO (via Fido, pinned to 25H2) ----------
-# Pinned to -Rel '25H2' so we don't silently roll to whatever MS ships
-# next. -Ed 'Windows 11' selects the multi-edition consumer ISO that
-# contains Home/Pro/Pro-N/Edu/Workstations; autounattend.xml picks
-# "Windows 11 Pro" from install.wim at install time.
+# ---------- Windows 11 ISO (via Fido) ----------
+# -Win 11 + -Rel Latest + -Ed 'Windows 11' = current Win 11 multi-edition
+# consumer ISO (Home/Pro/Pro-N/Edu/Workstations). autounattend.xml picks
+# "Windows 11 Pro" from install.wim at install time. -Rel literal version
+# strings ('25H2', '24H2', etc.) aren't reliably accepted across Fido
+# versions — Latest is the safe value, MS rolling forward is what we want
+# anyway.
 #
 # Canonical on-disk name: Win11_25H2_English_x64_v2.iso. ventoy.json's
-# auto_install plugin matches this exact path, so Fido's output is
-# renamed to it regardless of the actual filename Fido downloaded with.
-# Bump this + ventoy.json + the -Rel pin together when MS ships 26H2.
+# auto_install plugin matches this exact path, so Fido's output is renamed
+# to it regardless of the actual filename Fido downloaded with. Bump this
+# + ventoy.json together when MS ships 26H2.
 #
-# No hash verification — Fido provides no hash, MS doesn't ship one in
-# any auto-fetchable feed, and the Playwright workaround we tried got
-# the user's IP soft-banned from the MS download site. Trust Fido.
+# No hash verification — Fido provides no hash, MS doesn't ship one in any
+# auto-fetchable feed. Trust Fido.
 $canonicalIso = 'Win11_25H2_English_x64_v2.iso'
 $win11ok = $false
 
@@ -130,7 +127,7 @@ if ($win11 -and -not $Force) {
 }
 
 if (-not $win11ok) {
-    Write-Host "[info] fetching Windows 11 25H2 consumer ISO via Fido (contains Pro — autounattend picks it at install)..."
+    Write-Host "[info] fetching Windows 11 consumer ISO via Fido (contains Pro — autounattend picks it at install)..."
 
     $vendorDir = Join-Path $PSScriptRoot 'vendor'
     New-Item -ItemType Directory -Force -Path $vendorDir | Out-Null
@@ -163,7 +160,7 @@ if (-not $win11ok) {
     $isoUrl = $null
     if (Test-Path $fidoPath) {
         try {
-            $fidoOutput = & $fidoPath -Win 11 -Rel '25H2' -Arch x64 -Lang English -Ed 'Windows 11' -GetUrl 2>&1
+            $fidoOutput = & $fidoPath -Win 11 -Rel Latest -Arch x64 -Lang English -Ed 'Windows 11' -GetUrl 2>&1
             $isoUrl = $fidoOutput |
                 ForEach-Object { [string]$_ } |
                 Where-Object { $_ -match '^https?://.*\.iso' } |
