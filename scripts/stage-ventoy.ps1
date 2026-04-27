@@ -181,10 +181,11 @@ function Test-IsoOnMedium {
     $actualHash   = (Get-FileHash -Path $isoPath -Algorithm SHA256).Hash.ToLower()
     if ($actualHash -ne $expectedHash) {
         # Soft fail: don't delete the ISO, don't throw. The source ISO may
-        # legitimately not match the in-git sidecar (Fido pulled a newer
-        # build, user swapped in their own copy, etc.) — fetch-assets.ps1
-        # already explained the situation. Echo a brief warning here and
-        # let staging finish so the user can boot what they have.
+        # legitimately not match the in-git sidecar (user swapped in their
+        # own copy, MS rolled to a newer build between our last sidecar
+        # update and now, etc.) — fetch-assets.ps1 already explained the
+        # situation. Echo a brief warning here and let staging finish so
+        # the user can boot what they have.
         Write-Host "[warn] $Iso hash mismatch on medium:" -ForegroundColor Yellow
         Write-Host "       expected $expectedHash" -ForegroundColor Yellow
         Write-Host "       actual   $actualHash"   -ForegroundColor Yellow

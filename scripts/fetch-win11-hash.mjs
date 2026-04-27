@@ -7,10 +7,11 @@
 // the download URL is a one-shot session-bound URL — so static HTML
 // scraping (curl + regex) doesn't see either, we run a real browser.
 //
-// Used when the in-git sidecar (assets/Win11_*.iso.sha256) drifts: Fido
-// pulled a newer build than what we recorded, or the local copy got
-// corrupted. fetch-assets.ps1's soft-warn message tells the user to
-// run this script.
+// fetch-assets.ps1 calls this with `--download --update` (via `pnpm fetch:
+// win11`) when the canonical Win11 ISO is missing from assets/ — replaces
+// the previous Fido-based path which couldn't reconcile its downloads
+// against our pinned hash. Also runnable standalone when the in-git
+// sidecar drifts and you want to refresh it from the live MS page.
 //
 // Run:
 //   pnpm hash:win11                           # print the hash

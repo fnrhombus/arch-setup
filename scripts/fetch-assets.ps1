@@ -7,11 +7,19 @@
 # Scope:
 #   - Arch Linux ISO (latest) + .sig + sha256sums
 #   - Ventoy latest release: windows zip + extracted tree
-#   - Windows 11 consumer ISO via Fido (https://github.com/pbatard/Fido):
-#     the multi-edition ISO contains Home/Pro/Pro-N/Edu/Workstations;
-#     autounattend.xml picks "Windows 11 Pro" from install.wim at install
-#     time. On any Fido failure we fall back to manual-download instructions
-#     so the pipeline degrades gracefully.
+#   - Windows 11 consumer multi-edition ISO via Playwright (delegates to
+#     scripts/fetch-win11-hash.mjs --download --update). The .mjs drives the
+#     official MS download page and grabs both the SHA-256 and the per-
+#     session ISO URL from the same browser context. The multi-edition ISO
+#     contains Home/Pro/Pro-N/Edu/Workstations; autounattend.xml picks
+#     "Windows 11 Pro" from install.wim at install time. On failure we fall
+#     back to manual-download instructions so the pipeline degrades
+#     gracefully.
+#
+#     (Fido — https://github.com/pbatard/Fido — was the previous Win11
+#     fetcher until 2026-04-27. Removed because Fido provides no hash
+#     retrieval, so a fresh download couldn't be reconciled against our
+#     pinned in-git sidecar.)
 
 [CmdletBinding()]
 param(
@@ -94,17 +102,17 @@ if ($Force -or -not (Test-Path (Join-Path $extractedDir 'Ventoy2Disk.exe') -Path
     Write-Host "[skip] $extractedName already extracted"
 }
 
-# ---------- Windows 11 ISO (via Fido) ----------
-# Fido is Pete Batard's (Rufus author) PowerShell scraper for Microsoft's
-# session-gated ISO API. We pull -GetUrl out of it, then Invoke-WebRequest
-# ourselves so we get the same progress/caching semantics as every other
-# asset. On any failure we fall through to manual instructions — Fido does
-# occasionally break when MS changes the API, so the path can't be the only
-# option.
+# ---------- Windows 11 ISO (via Playwright-driven MS download) ----------
+# Fido was here until 2026-04-27 — replaced by scripts/fetch-win11-hash.mjs
+# because Fido provides no hash retrieval API, leaving us unable to tell
+# whether a fresh download matched the version our in-git sidecar tracked.
+# The Playwright script drives the official MS download page directly,
+# scraping the authoritative SHA-256 AND grabbing the per-session ISO URL
+# from the same browser context — guarantees the download matches what MS
+# is currently shipping.
 #
 # Canonical on-disk name: Win11_25H2_English_x64_v2.iso. ventoy.json's
-# auto_install plugin matches this exact path, so Fido's output is renamed
-# to it regardless of the actual release Fido pulled. Bump this + ventoy.json
+# auto_install plugin matches this exact path. Bump this + ventoy.json
 # together when Microsoft ships 26H2.
 $canonicalIso = 'Win11_25H2_English_x64_v2.iso'
 $win11ok = $false
@@ -120,96 +128,30 @@ if ($win11 -and -not $Force) {
 }
 
 if (-not $win11ok) {
-    Write-Host "[info] fetching Windows 11 consumer ISO via Fido (contains Pro — autounattend picks it at install)..."
-
-    $vendorDir = Join-Path $PSScriptRoot 'vendor'
-    New-Item -ItemType Directory -Force -Path $vendorDir | Out-Null
-    $fidoPath = Join-Path $vendorDir 'Fido.ps1'
-
-    # Cache Fido.ps1 pinned to its latest release tag. Master's HEAD can
-    # transiently break when MS flips a header; a tagged release has been
-    # tested against current MS endpoints.
-    if ($Force -or -not (Test-Path $fidoPath)) {
-        try {
-            $fidoRel = Invoke-RestMethod 'https://api.github.com/repos/pbatard/Fido/releases/latest' -UseBasicParsing
-            $fidoAsset = $fidoRel.assets | Where-Object { $_.name -eq 'Fido.ps1' } | Select-Object -First 1
-            if ($fidoAsset) {
-                Write-Host "[get ] Fido.ps1 $($fidoRel.tag_name)"
-                Invoke-WebRequest -Uri $fidoAsset.browser_download_url -OutFile $fidoPath -UseBasicParsing
-            } else {
-                # Most Fido releases don't upload Fido.ps1 as an asset; pull
-                # from the raw tree at the release tag instead.
-                $rawUrl = "https://raw.githubusercontent.com/pbatard/Fido/$($fidoRel.tag_name)/Fido.ps1"
-                Write-Host "[get ] Fido.ps1 (raw @ $($fidoRel.tag_name))"
-                Invoke-WebRequest -Uri $rawUrl -OutFile $fidoPath -UseBasicParsing
-            }
-        } catch {
-            Write-Host "[warn] Could not fetch Fido.ps1: $_" -ForegroundColor Yellow
-        }
-    }
-
-    # Ask Fido for just the URL, then pull the ISO ourselves so Invoke-
-    # WebRequest's caching + progress apply. -Ed 'Windows 11' is the
-    # consumer multi-edition ISO (Home/Pro/Pro N/Edu/Workstations).
-    $isoUrl = $null
-    if (Test-Path $fidoPath) {
-        try {
-            $fidoOutput = & $fidoPath -Win 11 -Rel Latest -Arch x64 -Lang English -Ed 'Windows 11' -GetUrl 2>&1
-            $isoUrl = $fidoOutput |
-                ForEach-Object { [string]$_ } |
-                Where-Object { $_ -match '^https?://.*\.iso' } |
-                Select-Object -First 1
-            if (-not $isoUrl) {
-                Write-Host "[warn] Fido returned no URL. Output:" -ForegroundColor Yellow
-                $fidoOutput | ForEach-Object { Write-Host "       $_" }
-            }
-        } catch {
-            Write-Host "[warn] Fido threw: $_" -ForegroundColor Yellow
-        }
-    }
-
-    if ($isoUrl) {
-        $isoPath = Join-Path $assetsDir $canonicalIso
-        try {
-            Write-Host "[get ] $canonicalIso (~5 GB — this is the slow part)"
-            Invoke-WebRequest -Uri $isoUrl -OutFile $isoPath -UseBasicParsing
-            $isoItem = Get-Item $isoPath
-            if ($isoItem.Length -gt 1GB) {
-                Write-Host "[ok  ] $canonicalIso ($([math]::Round($isoItem.Length/1GB,1)) GB)"
-                $win11ok = $true
-                $win11Downloaded = $true
-            } else {
-                Write-Host "[warn] Downloaded ISO is suspiciously small ($($isoItem.Length) bytes) — treating as failure." -ForegroundColor Yellow
-                Remove-Item $isoPath -Force -ErrorAction SilentlyContinue
-            }
-        } catch {
-            Write-Host "[warn] ISO download failed: $_" -ForegroundColor Yellow
+    Write-Host "[info] fetching Windows 11 consumer ISO via fetch-win11-hash.mjs (~5 GB, ~10-30 min)..."
+    $fetchScript = Join-Path $PSScriptRoot 'fetch-win11-hash.mjs'
+    if (-not (Test-Path $fetchScript)) {
+        Write-Host "[fail] $fetchScript missing — repo state is wrong, aborting Win11 fetch." -ForegroundColor Red
+    } else {
+        # The .mjs script downloads + verifies + updates the sidecar in one
+        # pass. Inherits stdout/stderr so the user sees its progress display.
+        & node $fetchScript --download --update
+        if ($LASTEXITCODE -eq 0) {
+            $win11ok = $true
+        } else {
+            Write-Host "[warn] fetch-win11-hash.mjs exited $LASTEXITCODE — see above for details." -ForegroundColor Yellow
         }
     }
 }
 
-# Track whether we just downloaded via Fido, so the verify block below knows
-# to regenerate the sidecar from the actual download instead of complaining
-# that it doesn't match the in-git hash. Fido confirms no hash retrieval API
-# (verified against pbatard/Fido master at master 2026-04-27) — so when Fido
-# pulls a build that differs from the canonical v2 our in-git sidecar tracks,
-# we have no choice but to trust whatever Fido gave us and record its hash.
-if (-not $win11Downloaded) { $win11Downloaded = $false }
-
 # ---------- Windows 11 ISO source-hash verify (soft) ----------
 # Verify the ISO in assets/ against the in-git sidecar
-# (assets/Win11_*.iso.sha256 — manually fetched from MS, commit 19ed2e4).
-# Mismatch is a SOFT warn, never a hard fail: the user explicitly chose to
-# trust whatever ISO is in assets/ (per the "use the asset already present"
-# directive). If Fido pulled a newer build than the in-git sidecar tracks,
-# we don't auto-overwrite the sidecar — we tell the user where to look up
-# the authoritative hash so they can update it deliberately.
-#
-# Why msdn.rg-adguard.net for lookup: Fido has no hash-retrieval API
-# (verified against pbatard/Fido master 2026-04-27), microsoft.com's
-# software-download page has gotten unreliable about exposing the hash
-# inline, and rg-adguard's catalogue mirrors My Visual Studio's hash data
-# for consumer ISOs — most reliable third-party reference.
+# (assets/Win11_*.iso.sha256). When fetch-win11-hash.mjs ran above, this
+# is tautologically true — the script wrote the sidecar from the same
+# download it just verified. When the ISO was already present (the
+# pre-existing-asset path), this catches "is the file on disk what we
+# last recorded". Soft warn on mismatch — the user explicitly chose to
+# trust whatever ISO is in assets/.
 $win11Iso = Get-ChildItem $assetsDir -Filter 'Win11_*x64*.iso' -ErrorAction SilentlyContinue | Select-Object -First 1
 if ($win11Iso) {
     $sumPath = Join-Path $assetsDir "$($win11Iso.Name).sha256"
@@ -226,24 +168,12 @@ if ($win11Iso) {
                 Write-Host "       expected $expectedHash (in git)" -ForegroundColor Yellow
                 Write-Host "       actual   $actualHash"             -ForegroundColor Yellow
                 Write-Host ""
-                if ($win11Downloaded) {
-                    Write-Host "Fido just downloaded this ISO — Fido provides no hash, so we can't" -ForegroundColor Yellow
-                    Write-Host "tell automatically whether MS rolled to a newer build or whether" -ForegroundColor Yellow
-                    Write-Host "the download corrupted in flight." -ForegroundColor Yellow
-                } else {
-                    Write-Host "This ISO was already in assets/ — using it as-is per directive," -ForegroundColor Yellow
-                    Write-Host "but it doesn't match what we last recorded." -ForegroundColor Yellow
-                }
-                Write-Host ""
-                Write-Host "To pull the authoritative MS hash for cross-check:" -ForegroundColor Yellow
+                Write-Host "Cross-check against the live MS hash:" -ForegroundColor Yellow
                 Write-Host "  pnpm hash:win11" -ForegroundColor Cyan
-                Write-Host "  (drives the official Microsoft download page via Playwright —" -ForegroundColor Cyan
-                Write-Host "   selects multi-edition x64 + English, clicks 'Verify your" -ForegroundColor Cyan
-                Write-Host "   download', extracts the SHA-256.)" -ForegroundColor Cyan
                 Write-Host ""
                 Write-Host "If the MS hash matches `$actualHash`:" -ForegroundColor Yellow
                 Write-Host "  -> MS rolled to a newer build. Update the sidecar:" -ForegroundColor Yellow
-                Write-Host "       pnpm hash:win11:update    # writes assets/$($win11Iso.Name).sha256" -ForegroundColor Cyan
+                Write-Host "       pnpm hash:win11:update" -ForegroundColor Cyan
                 Write-Host "     git commit it (bump the canonical filename + ventoy.json too" -ForegroundColor Yellow
                 Write-Host "     if MS also bumped the version string)." -ForegroundColor Yellow
                 Write-Host ""
@@ -265,25 +195,26 @@ if (-not $win11ok) {
     Write-Host "=================================================================" -ForegroundColor Red
     Write-Host @"
 
-Fido either failed to download or returned no URL. Microsoft has likely
-changed their ISO API — Pete usually ships a Fido fix within a few days.
-In the meantime, download the ISO manually and drop it in assets/.
+The Playwright path (fetch-win11-hash.mjs) failed — most likely because
+``pnpm i`` hasn't run yet (Playwright + Chromium aren't installed) or
+Microsoft restructured the download page selectors.
 
-  1. Get the ISO (any of):
-       Fido.ps1            -> https://github.com/pbatard/Fido   (may be fixed by now — re-run pnpm restore to retry)
+Fixes, in order of likelihood:
+
+  1. ``pnpm i`` + retry: pulls Playwright + Chromium (~150 MB), then
+     ``pnpm fetch:win11`` does the download + verify + sidecar in one pass.
+
+  2. ``pnpm hash:win11 -- --debug`` to open a visible Chromium and watch
+     which selector failed; report back so we can update the script.
+
+  3. Manual download as a last resort:
        Microsoft UI        -> https://www.microsoft.com/software-download/windows11
        Media Creation Tool -> same page, "Create Windows 11 Installation Media"
        UUP dump            -> https://uupdump.net/  (assembles from Windows Update)
 
-  2. Put it in assets/ as $canonicalIso (one of):
-       a) copy: copy the .iso into V:\arch-setup@fnrhombus\assets\
-       b) symlink (saves ~5 GB of duplication):
-            New-Item -ItemType SymbolicLink ``
-              -Path   'V:\arch-setup@fnrhombus\assets\$canonicalIso' ``
-              -Target 'D:\Users\Tom\Downloads\<whatever-MS-called-it>.iso'
-         (symlinks need an admin shell on Windows, or Dev Mode)
-
-  3. Re-run ``pnpm restore`` to re-verify + re-stage the USB.
+     Drop the ISO in assets/ as $canonicalIso (copy or symlink), then
+     re-run ``pnpm restore`` to verify + stage. Click "Verify your download"
+     on the MS page and update assets/$canonicalIso.sha256 if it differs.
 
 "@
 }
