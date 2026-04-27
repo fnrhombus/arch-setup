@@ -91,6 +91,7 @@ $rootFiles = @(
     (Join-Path $assets 'archlinux-x86_64.iso.sig'),
     (Join-Path $assets 'archlinux-sha256sums.txt'),
     (Join-Path $assets 'Win11_25H2_English_x64_v2.iso'),
+    (Join-Path $assets 'Win11_25H2_English_x64_v2.iso.sha256'),
     (Join-Path $repoRoot 'autounattend.xml'),
     (Join-Path $repoRoot 'CLAUDE.md'),
     (Join-Path $repoRoot 'phase-6-grow-windows.sh')
@@ -194,9 +195,8 @@ function Test-IsoOnMedium {
     }
 }
 
-Test-IsoOnMedium -Iso 'archlinux-x86_64.iso' -SumFile 'archlinux-sha256sums.txt' -MediumRoot $usb
-# (No Win11 hash check — MS doesn't ship a hash, Fido doesn't return one,
-#  and the Playwright workaround got the user soft-banned. We trust Fido.)
+Test-IsoOnMedium -Iso 'archlinux-x86_64.iso'           -SumFile 'archlinux-sha256sums.txt'             -MediumRoot $usb
+Test-IsoOnMedium -Iso 'Win11_25H2_English_x64_v2.iso'  -SumFile 'Win11_25H2_English_x64_v2.iso.sha256' -MediumRoot $usb
 
 Write-Header "Ventoy USB staged at $usb"
 Write-Host "Boot this stick on the Dell 7786 to start phase 1 (Windows install)." -ForegroundColor Green
