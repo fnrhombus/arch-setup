@@ -100,7 +100,7 @@ The inline PowerShell safety check in `autounattend.xml` aborted because either 
 
 1. **Ventoy ISO-virtualization hiccup** (tried first because it's a 30-second retry). Reboot, Ventoy menu, arrow onto `archlinux-x86_64.iso`, press **`d`** to toggle Memdisk mode (status indicator appears next to the filename), then Enter. Memdisk loads the whole ISO into RAM before boot, bypassing Ventoy's loopback layer. The 7786's 16 GB RAM easily absorbs the 1.3 GB ISO.
 
-2. **Corrupt ISO on the USB.** If Memdisk mode fails with the same error, the ISO file itself is bad (download or robocopy corrupted it — `fetch-assets.ps1` and `stage-usb.ps1` both SHA256-verify post-op now, but older sticks may predate that). Go back to the dev machine:
+2. **Corrupt ISO on the USB.** If Memdisk mode fails with the same error, the ISO file itself is bad (download or robocopy corrupted it — `fetch-assets.ps1` and `stage-ventoy.ps1` both SHA256-verify post-op now for both Arch and Win11, but older sticks may predate that). Go back to the dev machine:
 
    ```powershell
    # Replace V: with the Ventoy data drive letter

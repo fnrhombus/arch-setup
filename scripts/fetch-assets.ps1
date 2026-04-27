@@ -187,6 +187,34 @@ if (-not $win11ok) {
     }
 }
 
+# ---------- Windows 11 ISO source-hash verify ----------
+# assets/Win11_25H2_English_x64_v2.iso.sha256 is checked into git (commit
+# 19ed2e4 — Microsoft's authoritative hash from microsoft.com/software-
+# download/windows11). Verify the downloaded ISO matches it; if not,
+# Fido pulled a wrong/corrupt build.
+$win11Iso = Get-ChildItem $assetsDir -Filter 'Win11_*x64*.iso' -ErrorAction SilentlyContinue | Select-Object -First 1
+if ($win11Iso) {
+    $sumPath = Join-Path $assetsDir "$($win11Iso.Name).sha256"
+    if (Test-Path $sumPath) {
+        $expectedLine = Get-Content $sumPath | Where-Object { $_ -match "\s+$([regex]::Escape($win11Iso.Name))`$" } | Select-Object -First 1
+        if ($expectedLine) {
+            $expectedHash = ($expectedLine -split '\s+')[0].ToLower()
+            Write-Host "[hash] verifying $($win11Iso.Name) against MS-published SHA256 (~30 s)..."
+            $actualHash = (Get-FileHash -Path $win11Iso.FullName -Algorithm SHA256).Hash.ToLower()
+            if ($actualHash -ne $expectedHash) {
+                Write-Host "[fail] $($win11Iso.Name) SHA256 mismatch:" -ForegroundColor Red
+                Write-Host "       expected $expectedHash" -ForegroundColor Red
+                Write-Host "       actual   $actualHash"   -ForegroundColor Red
+                Write-Host "       ISO does not match the official Microsoft hash. Re-run pnpm restore:force." -ForegroundColor Red
+            } else {
+                Write-Host "[ok  ] $($win11Iso.Name) matches MS-published SHA256"
+            }
+        }
+    } else {
+        Write-Host "[warn] $($win11Iso.Name).sha256 missing — can't verify source ISO" -ForegroundColor Yellow
+    }
+}
+
 if (-not $win11ok) {
     Write-Host ""
     Write-Host "=================================================================" -ForegroundColor Red
@@ -219,19 +247,19 @@ In the meantime, download the ISO manually and drop it in assets/.
 
 Write-Host "[ok] asset sync complete."
 
-# ---------- Stage onto Ventoy USB (if plugged in) ----------
-# Chain into stage-usb.ps1: copy all ISOs + scripts + docs to the Ventoy
-# data partition. The stage script soft-exits (code 2) when no Ventoy USB
-# is found, so `pnpm i` never fails just because the stick isn't plugged in.
-$stageScript = Join-Path $PSScriptRoot 'stage-usb.ps1'
+# ---------- Stage onto Ventoy boot medium (USB or internal Netac-Ventoy) ----------
+# Chain into stage-ventoy.ps1: copy all ISOs + scripts + docs to the Ventoy
+# data partition. The stage script soft-exits (code 2) when no Ventoy medium
+# is found, so `pnpm i` never fails just because nothing's plugged in.
+$stageScript = Join-Path $PSScriptRoot 'stage-ventoy.ps1'
 if (Test-Path $stageScript) {
     Write-Host ""
-    Write-Host "[info] running stage-usb.ps1 (copies artifacts to Ventoy USB if present)..."
+    Write-Host "[info] running stage-ventoy.ps1 (copies artifacts to Ventoy medium if present)..."
     & pwsh -NoProfile -ExecutionPolicy Bypass -File $stageScript
     $stageExit = $LASTEXITCODE
     if ($stageExit -eq 2) {
-        Write-Host "[info] no Ventoy USB detected — skipped USB staging. Run `pnpm stage` later." -ForegroundColor Cyan
+        Write-Host "[info] no Ventoy medium detected — skipped staging. Run `pnpm stage` later." -ForegroundColor Cyan
     } elseif ($stageExit -ne 0) {
-        throw "stage-usb.ps1 failed with exit $stageExit"
+        throw "stage-ventoy.ps1 failed with exit $stageExit"
     }
 }

@@ -1,6 +1,7 @@
-# scripts/stage-usb.ps1
+# scripts/stage-ventoy.ps1 (renamed from stage-usb.ps1 2026-04-27 — Phase 0-alt
+# Netac-Ventoy bootstrap means the target isn't always a USB stick).
 #
-# Mirrors every artifact the Ventoy USB needs into its data partition:
+# Mirrors every artifact the Ventoy boot medium needs into its data partition:
 #   - Arch + Windows 11 ISOs
 #   - autounattend.xml
 #   - ventoy/ventoy.json (auto-install plugin config)
@@ -90,6 +91,7 @@ $rootFiles = @(
     (Join-Path $assets 'archlinux-x86_64.iso.sig'),
     (Join-Path $assets 'archlinux-sha256sums.txt'),
     (Join-Path $assets 'Win11_25H2_English_x64_v2.iso'),
+    (Join-Path $assets 'Win11_25H2_English_x64_v2.iso.sha256'),
     (Join-Path $repoRoot 'autounattend.xml'),
     (Join-Path $repoRoot 'CLAUDE.md'),
     (Join-Path $repoRoot 'phase-6-grow-windows.sh')
@@ -139,33 +141,57 @@ foreach ($d in $dirs) {
 }
 
 # ---------- post-copy SHA256 verification ----------
-# robocopy has been observed to silently corrupt large files when the USB
-# is flaky or the cable glitches mid-copy. A bad archlinux ISO on the stick
-# causes the laptop to boot archiso far enough to copy airootfs to RAM
-# before failing with "Can't find ext4 filesystem" on loop0 — wasting
-# ~10 min before the user suspects the ISO. Verify the on-USB copy against
-# the sha256sums.txt we just staged alongside it.
-$usbIso = Join-Path $usb 'archlinux-x86_64.iso'
-$usbSum = Join-Path $usb 'archlinux-sha256sums.txt'
-if ((Test-Path $usbIso) -and (Test-Path $usbSum)) {
-    Write-Host "[hash] verifying archlinux-x86_64.iso on USB (~30 s)..."
-    $expectedLine = Get-Content $usbSum | Where-Object { $_ -match '\s+archlinux-x86_64\.iso$' } | Select-Object -First 1
-    if ($expectedLine) {
-        $expectedHash = ($expectedLine -split '\s+')[0].ToLower()
-        $actualHash   = (Get-FileHash -Path $usbIso -Algorithm SHA256).Hash.ToLower()
-        if ($actualHash -ne $expectedHash) {
-            Write-Header "archlinux-x86_64.iso on USB is CORRUPT" 'Red'
-            Write-Host "expected $expectedHash" -ForegroundColor Red
-            Write-Host "actual   $actualHash"   -ForegroundColor Red
-            Write-Host "Deleting the bad copy — re-run `pnpm stage:force` to re-copy." -ForegroundColor Red
-            Remove-Item $usbIso -Force -ErrorAction SilentlyContinue
-            throw "archlinux-x86_64.iso on USB failed SHA256 verification."
-        }
-        Write-Host "[ok  ] archlinux-x86_64.iso on USB verified"
-    } else {
-        Write-Host "[warn] sha256sums.txt on USB has no archlinux-x86_64.iso entry — skipping verify" -ForegroundColor Yellow
+# robocopy has been observed to silently corrupt large files when the boot
+# medium is flaky or the cable glitches mid-copy. A bad archlinux ISO on the
+# medium causes the laptop to boot archiso far enough to copy airootfs to
+# RAM before failing with "Can't find ext4 filesystem" on loop0 — wasting
+# ~10 min before the user suspects the ISO. Verify each on-medium ISO copy
+# against the sha256 sumfile we just staged alongside it.
+#
+# Both sumfiles use the same single-or-multi-line "<hash>  <filename>"
+# format, so the same parser handles them. Arch's sumfile lists multiple
+# entries (the script greps for the matching filename); the Win11 sumfile
+# has just one line.
+function Test-IsoOnMedium {
+    param(
+        [Parameter(Mandatory)] [string]$Iso,        # ISO filename (no path)
+        [Parameter(Mandatory)] [string]$SumFile,    # sumfile filename (no path)
+        [Parameter(Mandatory)] [string]$MediumRoot  # mounted Ventoy partition root, e.g. "E:\"
+    )
+    $isoPath = Join-Path $MediumRoot $Iso
+    $sumPath = Join-Path $MediumRoot $SumFile
+    if (-not (Test-Path $isoPath)) {
+        Write-Host "[skip] $Iso not on medium — nothing to verify"
+        return
     }
+    if (-not (Test-Path $sumPath)) {
+        Write-Host "[warn] $Iso staged without sumfile ($SumFile) — skipping verify" -ForegroundColor Yellow
+        return
+    }
+    Write-Host "[hash] verifying $Iso on medium (~30 s)..."
+    $escaped = [regex]::Escape($Iso)
+    $expectedLine = Get-Content $sumPath |
+        Where-Object { $_ -match "\s+$escaped`$" } |
+        Select-Object -First 1
+    if (-not $expectedLine) {
+        Write-Host "[warn] $SumFile has no entry for $Iso — skipping verify" -ForegroundColor Yellow
+        return
+    }
+    $expectedHash = ($expectedLine -split '\s+')[0].ToLower()
+    $actualHash   = (Get-FileHash -Path $isoPath -Algorithm SHA256).Hash.ToLower()
+    if ($actualHash -ne $expectedHash) {
+        Write-Header "$Iso on medium is CORRUPT" 'Red'
+        Write-Host "expected $expectedHash" -ForegroundColor Red
+        Write-Host "actual   $actualHash"   -ForegroundColor Red
+        Write-Host "Deleting the bad copy — re-run `pnpm stage:force` to re-copy." -ForegroundColor Red
+        Remove-Item $isoPath -Force -ErrorAction SilentlyContinue
+        throw "$Iso on medium failed SHA256 verification."
+    }
+    Write-Host "[ok  ] $Iso on medium verified"
 }
+
+Test-IsoOnMedium -Iso 'archlinux-x86_64.iso'              -SumFile 'archlinux-sha256sums.txt'              -MediumRoot $usb
+Test-IsoOnMedium -Iso 'Win11_25H2_English_x64_v2.iso'     -SumFile 'Win11_25H2_English_x64_v2.iso.sha256'   -MediumRoot $usb
 
 Write-Header "Ventoy USB staged at $usb"
 Write-Host "Boot this stick on the Dell 7786 to start phase 1 (Windows install)." -ForegroundColor Green

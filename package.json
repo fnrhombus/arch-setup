@@ -8,8 +8,8 @@
     "postinstall": "pwsh -NoProfile -ExecutionPolicy Bypass -File scripts/fetch-assets.ps1",
     "restore": "pwsh -NoProfile -ExecutionPolicy Bypass -File scripts/fetch-assets.ps1",
     "restore:force": "pwsh -NoProfile -ExecutionPolicy Bypass -File scripts/fetch-assets.ps1 -Force",
-    "stage": "pwsh -NoProfile -ExecutionPolicy Bypass -File scripts/stage-usb.ps1 && pnpm prune:usb",
-    "stage:force": "pwsh -NoProfile -ExecutionPolicy Bypass -File scripts/stage-usb.ps1 -Force && pnpm prune:usb",
+    "stage": "pwsh -NoProfile -ExecutionPolicy Bypass -File scripts/stage-ventoy.ps1 && pnpm prune:usb",
+    "stage:force": "pwsh -NoProfile -ExecutionPolicy Bypass -File scripts/stage-ventoy.ps1 -Force && pnpm prune:usb",
     "prune:usb": "pwsh -NoProfile -ExecutionPolicy Bypass -File scripts/prune-usb.ps1",
     "pdf": "node scripts/runbook-pdf.mjs"
   },

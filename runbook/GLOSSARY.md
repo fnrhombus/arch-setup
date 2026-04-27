@@ -156,7 +156,7 @@ Organized by category so you can skim. Nothing here is install instructions — 
 - **OOBE** (Out-of-Box Experience) — The purple first-run wizard Windows 11 walks you through. We skip all of it.
 - **Specialize** — Pass of Windows Setup that runs right after install, before OOBE. Good place for registry tweaks.
 - **diskpart** — Windows partition tool. Scripted via `/s file.txt`. WinPE uses it.
-- **robocopy** — Windows bulk file copy with resume/retry. `stage-usb.ps1` uses it.
+- **robocopy** — Windows bulk file copy with resume/retry. `stage-ventoy.ps1` uses it.
 - **BitLocker** — Full-disk encryption for Windows. TPM-backed. Disabled during install to avoid PCR recovery-key drama.
 - **Fast Startup** — Windows hybrid hibernation/shutdown. Breaks dual-boot (NTFS stays "dirty" so Linux mounts read-only). We disable it in `Specialize.ps1`.
 

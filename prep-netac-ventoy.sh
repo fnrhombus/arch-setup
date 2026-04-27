@@ -11,7 +11,7 @@
 #   2. Wipes the Netac's GPT (`sgdisk --zap-all /dev/sdb`).
 #   3. Installs Ventoy to the whole Netac disk (creates the data partition +
 #      the ~32 MB VTOYEFI companion). `pacman -S ventoy` if not present.
-#   4. Mirrors the same payload that scripts/stage-usb.ps1 puts on a USB stick:
+#   4. Mirrors the same payload that scripts/stage-ventoy.ps1 puts on a USB stick:
 #      ISOs (Arch + Win11), autounattend.xml, ventoy/ventoy.json, repo dirs.
 #
 # AFTER IT FINISHES

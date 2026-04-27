@@ -16,12 +16,12 @@
 #     recognise). Those are reported and left alone.
 #
 # The allowlist ($rootFiles / $dirs) must stay in sync with the matching
-# arrays in scripts/stage-usb.ps1 — if you add a new file to staging,
+# arrays in scripts/stage-ventoy.ps1 — if you add a new file to staging,
 # add it here too or the next prune will delete it.
 #
 # Called by:
 #   - `pnpm prune:usb`  (manual, standalone)
-#   - `pnpm stage`      (chained after stage-usb.ps1)
+#   - `pnpm stage`      (chained after stage-ventoy.ps1)
 
 [CmdletBinding()]
 param()
@@ -62,7 +62,7 @@ if (-not $vtoyEfi) {
 }
 Write-Host "[ok  ] Ventoy data partition: $usb (VTOYEFI companion confirmed)"
 
-# ---------- allowlist (must match stage-usb.ps1) ----------
+# ---------- allowlist (must match stage-ventoy.ps1) ----------
 $rootFiles = @(
     'archlinux-x86_64.iso',
     'archlinux-x86_64.iso.sig',

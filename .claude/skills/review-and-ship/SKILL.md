@@ -50,8 +50,8 @@ Only once the loop has converged:
 ## What to watch for (non-exhaustive)
 
 - **Parity drift** between `docs/decisions.md` and downstream scripts/docs. E.g., package lists in `postinstall.sh` vs. the Software Inventory in `runbook/phase-3-handoff.md`; tools in `postinstall.sh` vs. definitions in `runbook/GLOSSARY.md`.
-- **Ventoy staging gaps** — files referenced by the runbook that aren't in `stage-usb.ps1`'s `$rootFiles`.
-- **Diskpart/autounattend**: EFI 512 MB, MSR 16 MB, Windows 160 GiB, trailing unallocated on the Samsung. Netac untouched in phase 1. Disk selected by 500-600 GB size window, not by disk number.
+- **Ventoy staging gaps** — files referenced by the runbook that aren't in `stage-ventoy.ps1`'s `$rootFiles`.
+- **Diskpart/autounattend**: EFI 1 GiB, MSR 16 MB, Windows 160 GiB, trailing unallocated on the Samsung. Netac untouched in phase 1. Disk selected by 500-600 GB size window, not by disk number.
 - **NVIDIA**: MX250 is blacklisted. Any mention of nvidia/Optimus/nouveau being *used* is wrong.
 - **Tool inventory**: `postinstall.sh` is authoritative for what's actually installed. If a doc claims a tool is installed and it's not in postinstall, one of them is wrong.
 
