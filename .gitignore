@@ -9,7 +9,14 @@
 
 # Manually-obtained Windows ISO, stored as a symlink → D:\Users\Tom\Downloads
 # to keep V: free. Machine-specific, never commit.
+#
+# The .iso pattern only matches files ending in .iso, so the .sha256
+# sidecar at /assets/Win11_*.iso.sha256 is NOT swept up by it — that
+# sidecar is a tracked source-of-truth file (Microsoft's published hash,
+# fetch-assets.ps1's in-git verify reference). The explicit !-rule below
+# survives any future broadening of the .iso glob.
 /assets/Win11_*.iso
+!/assets/Win11_*.iso.sha256
 
 # Custom live ISOs built by `pnpm iso` (scripts/build-custom-iso.sh).
 # These are large (~1.5 GB) and build-reproducible — regenerate instead
