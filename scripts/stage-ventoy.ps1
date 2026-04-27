@@ -91,7 +91,6 @@ $rootFiles = @(
     (Join-Path $assets 'archlinux-x86_64.iso.sig'),
     (Join-Path $assets 'archlinux-sha256sums.txt'),
     (Join-Path $assets 'Win11_25H2_English_x64_v2.iso'),
-    (Join-Path $assets 'Win11_25H2_English_x64_v2.iso.sha256'),
     (Join-Path $repoRoot 'autounattend.xml'),
     (Join-Path $repoRoot 'CLAUDE.md'),
     (Join-Path $repoRoot 'phase-6-grow-windows.sh')
@@ -189,15 +188,15 @@ function Test-IsoOnMedium {
         Write-Host "[warn] $Iso hash mismatch on medium:" -ForegroundColor Yellow
         Write-Host "       expected $expectedHash" -ForegroundColor Yellow
         Write-Host "       actual   $actualHash"   -ForegroundColor Yellow
-        Write-Host "       Continuing — see fetch-assets.ps1's earlier message;"     -ForegroundColor Yellow
-        Write-Host "       run 'pnpm hash:win11' to cross-check against MS."           -ForegroundColor Cyan
+        Write-Host "       Continuing — verify isn't a hard gate." -ForegroundColor Yellow
     } else {
         Write-Host "[ok  ] $Iso on medium verified"
     }
 }
 
-Test-IsoOnMedium -Iso 'archlinux-x86_64.iso'              -SumFile 'archlinux-sha256sums.txt'              -MediumRoot $usb
-Test-IsoOnMedium -Iso 'Win11_25H2_English_x64_v2.iso'     -SumFile 'Win11_25H2_English_x64_v2.iso.sha256'   -MediumRoot $usb
+Test-IsoOnMedium -Iso 'archlinux-x86_64.iso' -SumFile 'archlinux-sha256sums.txt' -MediumRoot $usb
+# (No Win11 hash check — MS doesn't ship a hash, Fido doesn't return one,
+#  and the Playwright workaround got the user soft-banned. We trust Fido.)
 
 Write-Header "Ventoy USB staged at $usb"
 Write-Host "Boot this stick on the Dell 7786 to start phase 1 (Windows install)." -ForegroundColor Green
