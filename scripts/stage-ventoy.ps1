@@ -188,8 +188,8 @@ function Test-IsoOnMedium {
         Write-Host "[warn] $Iso hash mismatch on medium:" -ForegroundColor Yellow
         Write-Host "       expected $expectedHash" -ForegroundColor Yellow
         Write-Host "       actual   $actualHash"   -ForegroundColor Yellow
-        Write-Host "       Continuing — see fetch-assets.ps1's earlier message and"   -ForegroundColor Yellow
-        Write-Host "       https://msdn.rg-adguard.net/public.php for hash lookup."   -ForegroundColor Cyan
+        Write-Host "       Continuing — see fetch-assets.ps1's earlier message;"     -ForegroundColor Yellow
+        Write-Host "       run 'pnpm hash:win11' to cross-check against MS."           -ForegroundColor Cyan
     } else {
         Write-Host "[ok  ] $Iso on medium verified"
     }

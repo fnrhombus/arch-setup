@@ -235,18 +235,19 @@ if ($win11Iso) {
                     Write-Host "but it doesn't match what we last recorded." -ForegroundColor Yellow
                 }
                 Write-Host ""
-                Write-Host "To verify: look up the authoritative SHA256 for $($win11Iso.Name) at:" -ForegroundColor Yellow
-                Write-Host "  https://msdn.rg-adguard.net/public.php" -ForegroundColor Cyan
-                Write-Host "  (third-party catalogue mirroring My Visual Studio's hash data —" -ForegroundColor Cyan
-                Write-Host "   more reliable than microsoft.com/software-download/windows11" -ForegroundColor Cyan
-                Write-Host "   which has stopped consistently exposing hashes inline)" -ForegroundColor Cyan
+                Write-Host "To pull the authoritative MS hash for cross-check:" -ForegroundColor Yellow
+                Write-Host "  pnpm hash:win11" -ForegroundColor Cyan
+                Write-Host "  (drives the official Microsoft download page via Playwright —" -ForegroundColor Cyan
+                Write-Host "   selects multi-edition x64 + English, clicks 'Verify your" -ForegroundColor Cyan
+                Write-Host "   download', extracts the SHA-256.)" -ForegroundColor Cyan
                 Write-Host ""
-                Write-Host "If the rg-adguard hash matches `$actualHash`:" -ForegroundColor Yellow
-                Write-Host "  -> MS rolled to a newer build. Update assets/$($win11Iso.Name).sha256" -ForegroundColor Yellow
-                Write-Host "     to the new hash + commit (and bump the canonical filename if MS" -ForegroundColor Yellow
-                Write-Host "     also bumped the version string)." -ForegroundColor Yellow
+                Write-Host "If the MS hash matches `$actualHash`:" -ForegroundColor Yellow
+                Write-Host "  -> MS rolled to a newer build. Update the sidecar:" -ForegroundColor Yellow
+                Write-Host "       pnpm hash:win11:update    # writes assets/$($win11Iso.Name).sha256" -ForegroundColor Cyan
+                Write-Host "     git commit it (bump the canonical filename + ventoy.json too" -ForegroundColor Yellow
+                Write-Host "     if MS also bumped the version string)." -ForegroundColor Yellow
                 Write-Host ""
-                Write-Host "If the rg-adguard hash matches `$expectedHash`:" -ForegroundColor Yellow
+                Write-Host "If the MS hash matches `$expectedHash`:" -ForegroundColor Yellow
                 Write-Host "  -> Your local copy is corrupt. Re-run pnpm restore:force." -ForegroundColor Yellow
                 Write-Host ""
                 Write-Host "Continuing with the ISO present." -ForegroundColor Yellow

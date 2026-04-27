@@ -11,7 +11,9 @@
     "stage": "pwsh -NoProfile -ExecutionPolicy Bypass -File scripts/stage-ventoy.ps1 && pnpm prune:usb",
     "stage:force": "pwsh -NoProfile -ExecutionPolicy Bypass -File scripts/stage-ventoy.ps1 -Force && pnpm prune:usb",
     "prune:usb": "pwsh -NoProfile -ExecutionPolicy Bypass -File scripts/prune-usb.ps1",
-    "pdf": "node scripts/runbook-pdf.mjs"
+    "pdf": "node scripts/runbook-pdf.mjs",
+    "hash:win11": "node scripts/fetch-win11-hash.mjs",
+    "hash:win11:update": "node scripts/fetch-win11-hash.mjs --update"
   },
   "repository": {
     "type": "git",
@@ -20,6 +22,7 @@
   "author": "fnrhombus",
   "license": "MIT",
   "devDependencies": {
-    "marked": "^18.0.1"
+    "marked": "^18.0.1",
+    "playwright": "^1.48.0"
   }
 }
