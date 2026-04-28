@@ -116,14 +116,9 @@ cleanup_on_fail() {
     sync 2>/dev/null || true
     swapoff -a 2>/dev/null || true
     # Shred the pre-hashed-password file before unmount so nothing lingers
-    # even on abort. rm -f instead of shred keeps this cheap (it's already
-    # on a tmpfs-ish mount about to be torn down).
+    # even on abort.
     rm -f /mnt/root/.pw /mnt/root/.luks 2>/dev/null || true
     umount -R /mnt 2>/dev/null || true
-    # Close LUKS mappers in reverse order (cryptvar may depend on nothing,
-    # but cryptroot's btrfs holds the cryptvar keyfile via /mnt mount).
-    cryptsetup close cryptswap 2>/dev/null || true
-    cryptsetup close cryptvar  2>/dev/null || true
     cryptsetup close cryptroot 2>/dev/null || true
 }
 trap cleanup_on_fail EXIT
@@ -148,13 +143,10 @@ command -v cryptsetup >/dev/null        || die "cryptsetup missing — not in Ar
 # because the common case is nothing to close.
 swapoff -a 2>/dev/null || true
 umount -R /mnt 2>/dev/null || true
-for _map in cryptswap cryptvar cryptroot; do
-    [[ -e "/dev/mapper/$_map" ]] && {
-        log "Closing stale mapper /dev/mapper/$_map from a previous run..."
-        cryptsetup close "$_map" 2>/dev/null || warn "  couldn't close $_map — continuing anyway"
-    }
-done
-unset _map
+[[ -e /dev/mapper/cryptroot ]] && {
+    log "Closing stale mapper /dev/mapper/cryptroot from a previous run..."
+    cryptsetup close cryptroot 2>/dev/null || warn "  couldn't close cryptroot — continuing anyway"
+}
 
 # ---------- 0.5 source dir (repo clone, resolved from the script's own path) ----------
 # Canonical install: boot vanilla Arch ISO (from Ventoy — USB or Netac),
