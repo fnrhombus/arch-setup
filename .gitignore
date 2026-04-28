@@ -1,28 +1,9 @@
-# Files auto-populated by `pnpm restore` (scripts/fetch-assets.ps1).
-# Anything else that lands in assets/ shows up as untracked — decide
-# deliberately whether to commit, ignore, or delete.
+# Arch ISO + sigs + sumfile — manually downloaded into assets/ for staging
+# onto the install USB (Rufus or `dd`). Not committed because they roll
+# monthly and are large.
 /assets/archlinux-x86_64.iso
 /assets/archlinux-x86_64.iso.sig
 /assets/archlinux-sha256sums.txt
-/assets/ventoy-*-windows.zip
-/assets/ventoy-*/
-
-# Manually-obtained Windows ISO, stored as a symlink → D:\Users\Tom\Downloads
-# to keep V: free. Machine-specific, never commit.
-#
-# The .iso pattern only matches files ending in .iso, so the .sha256
-# sidecar at /assets/Win11_*.iso.sha256 is NOT swept up by it — that
-# sidecar is a tracked source-of-truth file (Microsoft's published hash,
-# fetch-assets.ps1's in-git verify reference). The explicit !-rule below
-# survives any future broadening of the .iso glob.
-/assets/Win11_*.iso
-!/assets/Win11_*.iso.sha256
-
-# Custom live ISOs built by `pnpm iso` (scripts/build-custom-iso.sh).
-# These are large (~1.5 GB) and build-reproducible — regenerate instead
-# of committing.
-/assets/arch-setup-*.iso
-/assets/arch-setup-*.iso.sha256
 
 # npm/pnpm
 /node_modules/
@@ -38,6 +19,3 @@
 
 # Generated PDFs — `pnpm pdf` re-renders from runbook/*.md.
 /runbook/*.pdf
-
-# Vendored Fido.ps1 — fetched on demand by scripts/fetch-assets.ps1.
-/scripts/vendor/
