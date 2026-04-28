@@ -445,26 +445,17 @@ log "Installing TPM2 userspace..."
 pacman -Sy --noconfirm
 pacman -S --noconfirm --needed tpm2-tss tpm2-tools libsecret gnome-keyring
 
-# ---------- TPM2 PCR bank: ensure SHA-256 active before any cryptenroll ----------
-# Intel PTT firmware on Whiskey Lake (this Dell) ships with only the
-# pcr-sha1 bank allocated. systemd-cryptenroll silently falls back to SHA-1
-# when SHA-256 isn't available. We allocate both banks here so all sealings
-# (root in phase-3, var in phase-3, swap in phase-3 if hibernate is wired,
-# pinpam) land in SHA-256 — trending standard, future-proof.
+# ---------- TPM2 PCR bank: report current state ----------
+# Bank allocation now happens in install.sh §5-prep (BEFORE the install-
+# time TPM enrollment in §5b). Reallocating here would be a TPM-firmware-
+# level reset that WIPES the install-time seal — we explicitly DON'T want
+# that anymore.
 #
-# Reallocation is a TPM-firmware-level reset: it WIPES all currently-sealed
-# objects. Doing this BEFORE any cryptenroll means there's nothing to wipe.
-# Failure mode: some Intel PTT firmwares only allow one bank active at a
-# time. If sha256:all+sha1:all is rejected, the script falls back to
-# sha256-only (drops sha1 entirely) which is still correct.
-log "Allocating TPM2 PCR banks (sha256 + sha1, fallback sha256-only)..."
-if command -v tpm2_pcrallocate >/dev/null 2>&1; then
-    if ! tpm2_pcrallocate sha256:all+sha1:all 2>/dev/null; then
-        log "  sha256+sha1 rejected; trying sha256-only..."
-        tpm2_pcrallocate sha256:all 2>/dev/null \
-            || log "  WARN: pcrallocate failed entirely; seals will land in whatever bank is active (probably sha1)."
-    fi
-    # Verify what's active so first-boot logs show ground truth.
+# Just report what's active so the chroot log shows ground truth for
+# debugging. Postinstall §7.5 will reseal as needed using whatever banks
+# are active now.
+log "TPM2 PCR banks (allocated at install time, not re-allocating here)..."
+if command -v tpm2_getcap >/dev/null 2>&1; then
     tpm2_getcap pcrs 2>/dev/null | grep -iE 'sha[0-9]+:' | head -4 || true
 fi
 
