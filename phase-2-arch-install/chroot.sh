@@ -181,10 +181,16 @@ Phases=enter-initrd
 EOF
 
 # Kernel cmdline lives in /etc/kernel/cmdline (not limine.conf) — UKIs embed
-# their cmdline. resume= is required for hibernate; rootflags=subvol=@ keeps
-# us on the @ btrfs subvol. quiet keeps boot logs out of the user's face.
-cat > /etc/kernel/cmdline <<'EOF'
-root=/dev/mapper/cryptroot rootflags=subvol=@ resume=/dev/mapper/cryptswap rw quiet
+# their cmdline.
+#   resume=/dev/mapper/cryptroot      — the LUKS-mapper backing the btrfs
+#                                       that holds the swapfile.
+#   resume_offset=$SWAP_RESUME_OFFSET  — physical extent offset of the
+#                                       swapfile within the btrfs volume,
+#                                       captured by install.sh §8.5.
+#   rootflags=subvol=@                 — keep root on the @ subvolume.
+#   quiet                              — keep boot logs out of the user's face.
+cat > /etc/kernel/cmdline <<EOF
+root=/dev/mapper/cryptroot rootflags=subvol=@ resume=/dev/mapper/cryptroot resume_offset=$SWAP_RESUME_OFFSET rw quiet
 EOF
 chmod 644 /etc/kernel/cmdline
 
@@ -288,10 +294,6 @@ default_entry: 1
 /Arch Linux (LTS)
     protocol: efi_chainload
     image_path: boot():/EFI/Linux/arch-linux-lts.efi
-
-/Windows Boot Manager
-    protocol: efi_chainload
-    image_path: boot():/EFI/Microsoft/Boot/bootmgfw.efi
 EOF
 
 # Pacman hook: re-deploy limine BIOS/UEFI binaries when the limine package
