@@ -8,11 +8,11 @@
 - **Target Drive**: Samsung SSD 840 PRO 512GB (currently D: + V:)
 - **WiFi**: Dell Wireless 1801 (Qualcomm Atheros) + BT 4.0
 - **Display**: Integrated touch + external Vizio via USB DisplayLink dock
-- **Boot**: UEFI, GPT. *Current BIOS state*: Secure Boot ON, SATA in RAID mode. *Before phase 1 runs*: flip SATA → **AHCI** (RAID hides the NVMe from every Linux installer + the Windows setup USB), disable **Secure Boot** (limine UEFI binary isn't signed out of the box; can re-enable later with `sbctl` signing — see `runbook/phase-3-handoff.md` Upgrade Paths).
+- **Boot**: UEFI, GPT. *Before install*: BIOS → SATA Operation = **AHCI** (RAID/Intel-RST hides the SATA controller from the Arch installer); disable **Secure Boot** for the install (limine UEFI binary isn't signed out of the box; re-enable later with `sbctl` signing — see `runbook/phase-3-handoff.md` Upgrade Paths).
 - **Peripherals**: Touchscreen (capacitive only — NO active pen on the 17" 7786, only the 13"/15" 7000-series got AES digitizers), touchpad, fingerprint reader. External Wacom Intuos USB tablet supported when plugged in.
 - **Battery**: NONE *currently* — the internal battery is dead / removed; user plans to replace it. Laptop is always on AC power, lives stashed under a desk. Downstream consequences:
   - Lid-close "hibernate on battery" branch in `logind.conf` is dead code today (no battery state for logind to see). Configured anyway for forward-compat — fires automatically when a battery returns, no reconfig.
-  - **Hibernation is enabled** (S4) on Linux. Reverses the prior "disabled" decision; the cited dual-boot/BitLocker risk doesn't apply (Linux swap is on the Netac, Windows can't see LUKS or btrfs). Until the battery is replaced, hibernate is **user-invoked** (`Super+Shift+H`) since AC removal is an instant hard-cut. Swap sized 16 GB to match RAM. Persistent LUKS swap, TPM2-keyfile-sealed (mirrors cryptvar). See `docs/desktop-requirements.md` §Hibernate for the full plan.
+  - **Hibernation is enabled** (S4). Until the battery is replaced, hibernate is **user-invoked** (`Super+Shift+H`) since AC removal is an instant hard-cut. Swap sized 16 GiB to match RAM, lives as a NoCOW swapfile inside the LUKS-encrypted btrfs root (subvolume `@swap`) — see §Q9 + §Q11. See `docs/desktop-requirements.md` §Hibernate for the full plan.
   - Abrupt shutdowns (power cable kick) are the norm. btrfs COW handles this well — no `fsync` required for metadata integrity. Good argument for btrfs over ext4 on root.
   - The greeter is the primary moment of the day where the user authenticates (no suspend/resume cycles → no lock screens) — fingerprint at the greeter is therefore load-bearing, not cosmetic.
 
@@ -57,7 +57,7 @@
 - **Embedded**: ESP32, Raspberry Pi Pico (C++, CircuitPython, ESPHome)
 - **Tools**: VSCode, Docker. No vim experience.
 - **AI/ML**: Not now, but wants the option in the future
-- **General productivity**: Yes — this will be primary machine. Windows dual-boot is a safety net; goal is eventually Linux-only.
+- **General productivity**: Yes — this will be primary machine. Single-OS Linux install (Windows dual-boot was originally planned but dropped 2026-04-27 — see commit log).
 - **Audio creation**: Former big hobby (Ableton, Bitwig, Traktor). Dormant but wants it available.
 - **Tinkering philosophy**: Does NOT enjoy endless config tweaking. Loves having an awesome system. Doing Arch now because Claude can get it configured correctly with minimal effort.
 
@@ -146,17 +146,14 @@
   `limine-snapper-sync` package (installed by postinstall §3) — pick yesterday's
   snapshot from the menu when a `pacman -Syu` breaks userspace, no chroot
   recovery dance.
-- Bootable-ISO-from-disk via efi_chainload: the Netac's recovery-ISO partition
-  shows up in the F12 firmware menu directly (limine doesn't have to know
-  about it). `phase-6-grow-windows.sh` and any other "needs an unmounted root"
-  rescue can boot from there without a USB stick.
 - UEFI binary deployed to the ESP fallback path (`/boot/EFI/BOOT/BOOTX64.EFI`)
-  so Windows NVRAM resets don't kill the entry — firmware always finds it.
+  so a NVRAM reset (BIOS update, CMOS clear) doesn't kill the boot path —
+  firmware always falls back to that path.
 - Pacman post-upgrade hook (`/etc/pacman.d/hooks/95-limine-redeploy.hook`)
   re-copies the binary on every limine package update, so the deployed copy
-  never goes stale.
-- Windows Boot Manager is registered explicitly in `/boot/limine.conf` as an
-  `efi_chainload` stanza pointing at `/EFI/Microsoft/Boot/bootmgfw.efi`.
+  never goes stale. SB-aware: re-signs via `sbctl` if Secure Boot is enrolled.
+- Recovery story: keep the Arch live USB around. limine doesn't need an
+  on-disk recovery slot — boot the USB from F12 if the main install is hosed.
 - **Switched from systemd-boot 2026-04-22**: snapshot-rollback wasn't
   available without a chroot dance, and `limine-snapper-sync` is the cleanest
   way in. systemd-boot is the boring-but-fine fallback if limine ever proves
@@ -350,8 +347,7 @@ present.
 
 **Secure Boot readiness:**
 - Secure Boot stays **off** at install time. The reinstall pre-installs `sbctl` (postinstall §1) and the `95-limine-redeploy.hook` is SB-aware — `/usr/local/sbin/limine-redeploy` calls `sbctl sign -s` after copy if SB is enrolled, no-op otherwise. Same for sbctl's own pacman hook (ships with the package), which auto-resigns kernels on every linux/linux-lts upgrade.
-- Enabling SB later: BIOS → Setup Mode → from Arch run `sbctl create-keys && sbctl enroll-keys --microsoft && sbctl sign -s {/boot/EFI/BOOT/BOOTX64.EFI,/usr/share/limine/BOOTX64.EFI,/boot/vmlinuz-linux,/boot/vmlinuz-linux-lts}` → reboot, BIOS → User Mode (SB on) → at the LUKS prompt enter the recovery key (PCR 7 changed → TPM seal invalid) → `sudo /usr/local/sbin/tpm2-reseal-luks` → reboot, silent unlock again. Full sequence in `runbook/phase-3-handoff.md` "Upgrade Paths". Same one-time recovery-key prompt cycle on the Windows side (BitLocker also seals to PCR 7).
+- Enabling SB later: BIOS → Setup Mode → from Arch run `sbctl create-keys && sbctl enroll-keys --microsoft && sbctl sign -s {/boot/EFI/BOOT/BOOTX64.EFI,/usr/share/limine/BOOTX64.EFI,/boot/EFI/Linux/arch-linux.efi,/boot/EFI/Linux/arch-linux-lts.efi}` → reboot, BIOS → User Mode (SB on) → at the LUKS prompt enter the recovery key (PCR 7 changed → TPM seal invalid) → `sudo /usr/local/sbin/tpm2-reseal-luks` → reboot, silent unlock again. Full sequence in `runbook/phase-3-handoff.md` "Upgrade Paths".
 
 **Known limitations:**
-- Recovery partition on Netac is unencrypted. A motivated attacker with physical access could swap the raw ISO for a malicious one. Mitigated by physical security of the laptop (no battery, stashed under a desk, no shared network access).
-- If the TPM is reset (firmware reset, motherboard replacement), every sealed slot is dead and the recovery key is the only way in. Hence the "transcribe to Bitwarden" step is mandatory, not optional.
+- If the TPM is reset (firmware reset, motherboard replacement), the sealed slot is dead and the recovery key is the only way in. Hence the "transcribe to Bitwarden" step is mandatory, not optional.
