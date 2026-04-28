@@ -426,7 +426,7 @@ sync   # flush keypair to disk before TPM enrollment reads it back
 # enrollment from the running system.
 TPM_ENROLLED_AT_INSTALL=0
 if [[ -c /dev/tpm0 || -c /dev/tpmrm0 ]] && command -v systemd-cryptenroll >/dev/null; then
-    log "Enrolling TPM2 (signed PCR 11 policy) on cryptroot so first boot is silent..."
+    log "Enrolling TPM2 (signed PCR 11 policy + PCR 7 binding) on cryptroot so first boot is silent + SB toggle is detected..."
     _kf=$(mktemp /run/luks-pw-XXXXXX)
     chmod 600 "$_kf"
     printf '%s' "$LUKS_PW" > "$_kf"
@@ -434,17 +434,18 @@ if [[ -c /dev/tpm0 || -c /dev/tpmrm0 ]] && command -v systemd-cryptenroll >/dev/
         --tpm2-device=auto \
         --tpm2-public-key=/mnt/etc/systemd/tpm2-pcr-public.pem \
         --tpm2-public-key-pcrs=11 \
+        --tpm2-pcrs=7 \
         "$SAMSUNG_ROOT"; then
-        log "  cryptroot: TPM2 enrolled (signed PCR 11)."
+        log "  cryptroot: TPM2 enrolled (signed PCR 11 + PCR 7)."
         TPM_ENROLLED_AT_INSTALL=1
     else
-        warn "  cryptroot: TPM2 enroll failed — postinstall §7.5 will retry."
+        warn "  cryptroot: TPM2 enroll failed — first boot will prompt for recovery key; postinstall verify-only §7.5 will report state."
     fi
     shred -u "$_kf" 2>/dev/null || rm -f "$_kf"
 elif [[ ! -c /dev/tpm0 && ! -c /dev/tpmrm0 ]]; then
-    warn "No TPM2 device (/dev/tpm{,rm}0 missing). First boot will prompt for the LUKS passphrase; postinstall §7.5 will retry."
+    warn "No TPM2 device (/dev/tpm{,rm}0 missing). First boot will prompt for the LUKS passphrase forever (re-enroll manually post-boot if a TPM appears)."
 else
-    warn "systemd-cryptenroll missing in live ISO. First boot will prompt for the LUKS passphrase; postinstall §7.5 will retry."
+    warn "systemd-cryptenroll missing in live ISO. First boot will prompt for the LUKS passphrase."
 fi
 
 # ---------- 9. pacstrap ----------
