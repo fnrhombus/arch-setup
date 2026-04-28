@@ -460,18 +460,14 @@ cp -r "$SOURCE_DIR"/. /mnt/root/arch-setup/
 # abort mid-chroot doesn't leave hashes behind on the freshly-installed fs.
 (umask 077 && printf '%s\n%s\n' "$ROOT_PW_HASH" "$TOM_PW_HASH" > /mnt/root/.pw)
 
-# Hand partition LUKS UUIDs to chroot.sh for crypttab + cmdline wiring.
-# All three now have persistent LUKS2 headers.
+# Hand the cryptroot LUKS UUID + the swapfile resume_offset to chroot.sh
+# for crypttab + cmdline wiring.
 LUKS_ROOT_UUID=$(blkid -s UUID -o value "$SAMSUNG_ROOT")
-LUKS_VAR_UUID=$(blkid -s UUID -o value "$NETAC_VAR")
-LUKS_SWAP_UUID=$(blkid -s UUID -o value "$NETAC_SWAP")
-[[ -n "$LUKS_ROOT_UUID" && -n "$LUKS_VAR_UUID" && -n "$LUKS_SWAP_UUID" ]] \
-    || die "Failed to resolve LUKS UUIDs (blkid returned empty)."
+[[ -n "$LUKS_ROOT_UUID" ]] || die "Failed to resolve cryptroot LUKS UUID (blkid returned empty)."
 (umask 077 && cat > /mnt/root/.luks <<EOF
 LUKS_ROOT_UUID=$LUKS_ROOT_UUID
-LUKS_VAR_UUID=$LUKS_VAR_UUID
-LUKS_SWAP_UUID=$LUKS_SWAP_UUID
 SAMSUNG_DISK=$SAMSUNG
+SWAP_RESUME_OFFSET=$SWAP_RESUME_OFFSET
 TPM_ENROLLED_AT_INSTALL=$TPM_ENROLLED_AT_INSTALL
 EOF
 )
