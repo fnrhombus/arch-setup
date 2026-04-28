@@ -457,6 +457,7 @@ pacstrap -K /mnt \
     zsh tmux \
     efibootmgr \
     man-db man-pages texinfo \
+    systemd-ukify python-pefile sbsigntools tpm2-tss tpm2-tools \
     pipewire pipewire-pulse pipewire-jack wireplumber \
     hyprland xdg-desktop-portal-hyprland xdg-desktop-portal-gtk \
     polkit \
