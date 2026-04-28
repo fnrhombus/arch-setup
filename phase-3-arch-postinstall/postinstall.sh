@@ -1639,7 +1639,8 @@ check "pinpam before fprintd hyprlock" "awk '/libpinpam/{p=NR} /pam_fprintd/{f=N
 check "pam_unix in sys-auth" "grep -q pam_unix /etc/pam.d/system-auth"
 check "LUKS root TPM2"      "sudo systemd-cryptenroll /dev/disk/by-partlabel/ArchRoot 2>/dev/null | awk 'NR>1 && \$2==\"tpm2\"{f=1} END{exit !f}'"
 check "PCR signing keypair exists" "[[ -f /etc/systemd/tpm2-pcr-public.pem && -f /etc/systemd/tpm2-pcr-private.pem ]]"
-check "cryptvar keyfile"    "sudo test -f /etc/cryptsetup-keys.d/cryptvar.key"
+check "btrfs swapfile present"     "test -f /swap/swapfile"
+check "swap active"                "swapon --show=NAME --noheadings | grep -q /swap/swapfile"
 check "ssh agent wired"     "grep -q bitwarden-ssh-agent.sock $HOME/.ssh/config"
 
 echo "-- inbound network --"
