@@ -341,6 +341,83 @@ SWAP_RESUME_OFFSET=$(btrfs inspect-internal map-swapfile -r /mnt/swap/swapfile)
 [[ -n "$SWAP_RESUME_OFFSET" ]] || die "Couldn't get resume_offset for swapfile."
 log "swapfile resume_offset: $SWAP_RESUME_OFFSET"
 
+# ---------- 5a. PCR signing keypair (UKI + signed-policy seal) ----------
+# Generate an RSA-2048 keypair used to sign UKI PCR predictions. ukify
+# (called by mkinitcpio in chroot.sh) embeds the signed predictions in the
+# UKI's `.pcrsig` PE section; systemd-cryptsetup at boot presents that
+# signature to the TPM, the TPM verifies it with the matching public key,
+# unseals the LUKS master key. See docs/tpm-luks-bitlocker-parity.md.
+#
+# This MUST run AFTER §8 mount, otherwise /mnt is the live-ISO mountpoint
+# and the keypair lands on tmpfs (and is then shadowed by the btrfs mount,
+# never persisting to the installed system). With /mnt now the @ subvol
+# of the btrfs root, the keypair lands at /etc/systemd/tpm2-pcr-{private,
+# public}.pem on the actual installed filesystem, where ukify will find
+# it at every future mkinitcpio -P.
+#
+# Chicken-and-egg-safe — the TPM unseals LUKS without needing the private
+# key; the private key only matters at UKI-build time, which only happens
+# on a booted system where the TPM has already unsealed the disk. So an
+# attacker who can read the private key already had root.
+log "Generating PCR signing keypair (RSA-2048) at /etc/systemd/tpm2-pcr-{private,public}.pem on the installed btrfs..."
+install -d -m 755 /mnt/etc/systemd
+openssl genpkey -algorithm RSA -pkeyopt rsa_keygen_bits:2048 \
+    -out /mnt/etc/systemd/tpm2-pcr-private.pem 2>/dev/null
+openssl rsa -in /mnt/etc/systemd/tpm2-pcr-private.pem \
+    -pubout -out /mnt/etc/systemd/tpm2-pcr-public.pem 2>/dev/null
+chmod 600 /mnt/etc/systemd/tpm2-pcr-private.pem
+chmod 644 /mnt/etc/systemd/tpm2-pcr-public.pem
+chown root:root /mnt/etc/systemd/tpm2-pcr-{private,public}.pem
+sync   # flush keypair to disk before TPM enrollment reads it back
+
+# ---------- 5b. TPM2 autounlock at install time (BitLocker-style) ----------
+# Enroll TPM2 NOW, while $LUKS_PW is still in memory, so the very first
+# boot of the installed system is silent — no passphrase prompt at all.
+# The 48-digit recovery key becomes pure escrow: typed only if PCR values
+# drift (BIOS / secure-boot changes) or for disaster recovery.
+#
+# Policy: signed PCR 11 (UKI self-measurement + phase markers).
+#   --tpm2-public-key + --tpm2-public-key-pcrs=11 seals to a POLICY, not a
+#   value: "unseal if you see a UKI signed by our keypair." That policy
+#   matches across boots even though PCR 11 itself changes — what matters
+#   is that the UKI's embedded signature covers the current PCR 11 value.
+#   Earlier --tpm2-pcrs=0+7 attempts failed because PCR 0+7 measured by the
+#   live ISO did NOT match PCR 0+7 measured by the installed system on
+#   first boot (firmware code paths differ when the bootloader differs).
+#   Signed-policy is invariant to that drift by design.
+#
+# PCR 7 binding gets ADDED in postinstall §7.5 as "stage 2" — once the
+# installed system has booted and PCR 7 is stable + measurable, postinstall
+# re-seals adding --tpm2-pcrs=7 alongside the signed PCR 11. That makes
+# Secure Boot toggle a meaningful event (PCR 7 changes → recovery key
+# prompt → user reseals), matching BitLocker's behavior.
+#
+# Failure paths fall through to passphrase boot (no TPM, broken TPM, missing
+# ukify/openssl, old systemd-cryptenroll): postinstall §7.5 will retry the
+# enrollment from the running system.
+TPM_ENROLLED_AT_INSTALL=0
+if [[ -c /dev/tpm0 || -c /dev/tpmrm0 ]] && command -v systemd-cryptenroll >/dev/null; then
+    log "Enrolling TPM2 (signed PCR 11 policy) on cryptroot so first boot is silent..."
+    _kf=$(mktemp /run/luks-pw-XXXXXX)
+    chmod 600 "$_kf"
+    printf '%s' "$LUKS_PW" > "$_kf"
+    if systemd-cryptenroll --unlock-key-file="$_kf" \
+        --tpm2-device=auto \
+        --tpm2-public-key=/mnt/etc/systemd/tpm2-pcr-public.pem \
+        --tpm2-public-key-pcrs=11 \
+        "$SAMSUNG_ROOT"; then
+        log "  cryptroot: TPM2 enrolled (signed PCR 11)."
+        TPM_ENROLLED_AT_INSTALL=1
+    else
+        warn "  cryptroot: TPM2 enroll failed — postinstall §7.5 will retry."
+    fi
+    shred -u "$_kf" 2>/dev/null || rm -f "$_kf"
+elif [[ ! -c /dev/tpm0 && ! -c /dev/tpmrm0 ]]; then
+    warn "No TPM2 device (/dev/tpm{,rm}0 missing). First boot will prompt for the LUKS passphrase; postinstall §7.5 will retry."
+else
+    warn "systemd-cryptenroll missing in live ISO. First boot will prompt for the LUKS passphrase; postinstall §7.5 will retry."
+fi
+
 # ---------- 9. pacstrap ----------
 log "Running pacstrap (this pulls ~1-2 GB over the network)..."
 pacstrap -K /mnt \
