@@ -227,8 +227,8 @@ timedatectl set-ntp true
 # survives this script. Requires openssl, which is in the Arch live ISO.
 #
 # LUKS passphrase stays in an in-memory variable for the duration of this
-# script — used to luksFormat both volumes and to luksAddKey the cryptvar
-# keyfile — then unset before exit. Never touches disk.
+# script — used to luksFormat the single root volume — then unset before
+# exit. Never touches disk.
 command -v openssl >/dev/null || die "openssl not found in live env — needed for password hashing + LUKS key generation."
 log "Collecting passwords now (you won't be prompted again during install)."
 log "After the two account passwords, a 48-char LUKS recovery key will be generated and displayed for you to photograph."
@@ -240,24 +240,14 @@ LUKS_PW=$(gen_and_show_luks_passphrase)
 cat <<EOF
 
 About to:
-  - Leave Samsung partitions 1, 2, 3 (EFI, MSR, Windows) UNTOUCHED
-  - Create one new LUKS2 + btrfs partition in the trailing unallocated space of $SAMSUNG
-EOF
-if (( VENTOY_ON_NETAC )); then
-    cat <<EOF
-  - Leave Netac partitions 1, 2 (Ventoy data + VTOYEFI) UNTOUCHED — they stay as recovery
-  - Create 2 new LUKS2 partitions in $NETAC's reserved region:
-      - LUKS2 swap w/ random key (16 GB)
-      - LUKS2 ext4 for /var/log + /var/cache (rest of reserved region)
-EOF
-else
-    cat <<EOF
-  - WIPE $NETAC entirely (GPT label, 3 new partitions: recovery ISO,
-    LUKS2 swap w/ random key, LUKS2 ext4 for /var/log + /var/cache)
-EOF
-fi
-cat <<EOF
+  - WIPE $SAMSUNG entirely (GPT label, all existing partitions destroyed)
+  - Lay out 2 partitions on it:
+      - EFI System partition, 1 GiB FAT32 (mounted at /boot — UKIs land here)
+      - LUKS2 + btrfs (rest, ~475 GiB) with subvolumes @, @home, @snapshots, @swap
+  - Inside the btrfs, create a 16 GiB NoCOW swapfile (hibernate-ready)
   - pacstrap a full Arch system and configure per decisions.md
+
+If you have a Netac SSD or other disks plugged in, they will be left UNTOUCHED.
 
 EOF
 confirm "Proceed?"
