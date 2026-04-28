@@ -252,41 +252,29 @@ If you have a Netac SSD or other disks plugged in, they will be left UNTOUCHED.
 EOF
 confirm "Proceed?"
 
-# ---------- 4. Samsung: add btrfs partition in trailing free space ----------
-log "Adding btrfs partition in trailing free space on $SAMSUNG..."
-# A previous aborted install.sh run may have left an "ArchRoot" partition
-# (or several) consuming the trailing free space. Delete any partition with
-# number > 3 before re-creating, so --largest-new finds room. Windows
-# partitions 1-3 (EFI, MSR, Windows) stay untouched.
-for n in $(sgdisk --print "$SAMSUNG" | awk '$1 ~ /^[0-9]+$/ && $1 > 3 {print $1}' | sort -rn); do
-    log "  removing stale partition ${SAMSUNG}${n}"
-    sgdisk --delete="$n" "$SAMSUNG"
-done
+# ---------- 4. Samsung: full disk wipe + new GPT layout ----------
+log "Wiping $SAMSUNG and creating fresh GPT layout..."
+sgdisk --zap-all "$SAMSUNG"
+sgdisk \
+    --new=1:0:+1G  --typecode=1:ef00 --change-name=1:EFI       \
+    --new=2:0:0    --typecode=2:8309 --change-name=2:ArchRoot  \
+    "$SAMSUNG"
+# typecode ef00 = EFI System; typecode 8309 = "Linux LUKS" (more specific
+# than 8300 / Linux filesystem; helps tools like blkid + GPT-aware loaders
+# identify the partition unambiguously).
 partprobe "$SAMSUNG"
 udevadm settle
 
-# `sgdisk --largest-new` creates the largest possible new partition from free space.
-sgdisk --largest-new=0 --typecode=0:8300 --change-name=0:ArchRoot "$SAMSUNG"
-partprobe "$SAMSUNG"
-udevadm settle
-
-# Find the new partition by its PARTLABEL rather than "highest partition number"
-# — if Windows ever adds a Recovery partition between MSR and Windows (which
-# some install paths do), `tail -1` would pick the wrong one and we'd mkfs over
-# Windows. PARTLABEL="ArchRoot" is set by --change-name above and is unique.
-# -l (list, no tree) is CRITICAL: without it lsblk prefixes NAME with tree
-# glyphs like "└─sda4", which we'd then treat as "sda4 with line-drawing
-# characters" and happily mkfs the wrong (nonexistent) device path.
+# Resolve the partitions by PARTLABEL — robust against sda1 vs nvme0n1p1
+# device-naming differences and against any future GPT table reshuffles.
+SAMSUNG_EFI=$(lsblk -ln -o NAME,PARTLABEL "$SAMSUNG" | awk '$2 == "EFI"      {print $1; exit}')
 SAMSUNG_ROOT=$(lsblk -ln -o NAME,PARTLABEL "$SAMSUNG" | awk '$2 == "ArchRoot" {print $1; exit}')
+[[ -n "$SAMSUNG_EFI"  ]] || die "Could not find EFI partition after sgdisk — check lsblk output."
 [[ -n "$SAMSUNG_ROOT" ]] || die "Could not find ArchRoot partition after sgdisk — check lsblk output."
-SAMSUNG_ROOT="/dev/$SAMSUNG_ROOT"
-log "New Linux root partition: $SAMSUNG_ROOT"
-
-# Samsung EFI partition (first partition, created by Windows install).
-SAMSUNG_EFI=$(lsblk -ln -o NAME,PARTTYPE "$SAMSUNG" | awk '$2 ~ /c12a7328-f81f-11d2-ba4b-00a0c93ec93b/ {print $1; exit}')
-[[ -n "$SAMSUNG_EFI" ]] || die "Could not find EFI System partition on Samsung."
 SAMSUNG_EFI="/dev/$SAMSUNG_EFI"
+SAMSUNG_ROOT="/dev/$SAMSUNG_ROOT"
 log "EFI System partition: $SAMSUNG_EFI"
+log "Linux root partition: $SAMSUNG_ROOT"
 
 # ---------- 5. Netac: partition ----------
 # Two layouts, chosen by VENTOY_ON_NETAC (§1.5):
