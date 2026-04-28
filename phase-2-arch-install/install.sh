@@ -173,49 +173,20 @@ SOURCE_DIR="$SCRIPT_PARENT"
 unset SCRIPT_PARENT
 log "Using repo clone at $SOURCE_DIR."
 
-# ---------- 1. locate disks by size ----------
-# decisions.md §Q9: Samsung 512 GB nominal (~476 GiB actual), Netac 128 GB nominal (~119 GiB actual).
-# Sizes here are GiB (binary), not GB (decimal). Windows are widened to tolerate vendor capacity drift.
+# ---------- 1. locate disk by size ----------
+# decisions.md §Q9: Samsung 512 GB nominal (~476 GiB actual). The Netac
+# (if present) is intentionally left untouched — slated for replacement
+# with a new SSD, and the design is now single-disk-on-Samsung so the
+# new drive can be migrated to via a one-line dd of the LUKS partition.
 SAMSUNG=""
-NETAC=""
 while read -r dev size; do
     gib=$(( size / 1024 / 1024 / 1024 ))
-    if (( gib >= 450 && gib <= 520 )); then SAMSUNG="/dev/$dev"
-    elif (( gib >= 100 && gib <= 150 )); then NETAC="/dev/$dev"
-    fi
+    if (( gib >= 450 && gib <= 520 )); then SAMSUNG="/dev/$dev"; fi
 done < <(lsblk -b -d -n -o NAME,SIZE -e 7,11)  # exclude loop + rom
 
 [[ -n "$SAMSUNG" ]] || die "No 450-520 GiB disk detected (expected Samsung SSD 840 PRO 512GB ~ 476 GiB)."
-[[ -n "$NETAC"   ]] || die "No 100-150 GiB disk detected (expected Netac 128GB ~ 119 GiB)."
 
-log "Samsung (install target): $SAMSUNG"
-log "Netac  (recovery+swap+/var): $NETAC"
-
-# Sanity: Samsung must already have GPT with at least 3 partitions (EFI, MSR, Windows).
-# If not, phase-1 Windows install didn't run.
-part_count=$(lsblk -n -o NAME "$SAMSUNG" | tail -n +2 | wc -l)
-(( part_count >= 3 )) || die "Samsung has <3 partitions. Run Windows install (phase 1) first."
-
-# ---------- 1.5 Ventoy-on-Netac detection ----------
-# If the Netac was bootstrapped as a Ventoy boot medium (no-USB install
-# path — Ventoy2Disk installed onto the Netac with reserved space at the
-# tail), we want to PRESERVE Ventoy as the recovery rather than wiping it.
-# In that mode, only the reserved region (partitions 3 + 4) gets carved
-# into swap + var; the Ventoy data partition (sdb1, NTFS) and VTOYEFI
-# companion (sdb2, FAT) stay untouched — they ARE the recovery.
-#
-# Detection: the "Ventoy" filesystem label sits on Ventoy's data partition.
-# If its parent disk is $NETAC, Ventoy-on-Netac mode is active.
-VENTOY_ON_NETAC=0
-_ventoy_part=$(blkid -L Ventoy 2>/dev/null || true)
-if [[ -n "$_ventoy_part" ]]; then
-    _ventoy_disk=$(lsblk -ndo PKNAME "$_ventoy_part" 2>/dev/null || true)
-    if [[ -n "$_ventoy_disk" && "/dev/$_ventoy_disk" == "$NETAC" ]]; then
-        VENTOY_ON_NETAC=1
-        log "Ventoy detected on $NETAC — reserved-region layout (Ventoy preserved as recovery)."
-    fi
-fi
-unset _ventoy_part _ventoy_disk
+log "Samsung (install target — full disk wipe): $SAMSUNG"
 
 # ---------- 2. network ----------
 # Embedded Wi-Fi profiles. Mirror these in chroot.sh WIFI_PROFILES and in
