@@ -35,8 +35,10 @@ trap 'shred -u /root/.pw /root/.luks 2>/dev/null || rm -f /root/.pw /root/.luks'
 [[ -s /root/.luks ]] || die "/root/.luks missing — install.sh should have written LUKS UUIDs + SAMSUNG_DISK."
 # shellcheck disable=SC1091
 . /root/.luks
-[[ -n "${LUKS_ROOT_UUID:-}" && -n "${LUKS_VAR_UUID:-}" && -n "${LUKS_SWAP_UUID:-}" ]] \
-    || die "/root/.luks is missing one or more UUIDs (LUKS_ROOT_UUID / LUKS_VAR_UUID / LUKS_SWAP_UUID)."
+[[ -n "${LUKS_ROOT_UUID:-}" ]] \
+    || die "/root/.luks is missing LUKS_ROOT_UUID."
+[[ -n "${SWAP_RESUME_OFFSET:-}" ]] \
+    || die "/root/.luks is missing SWAP_RESUME_OFFSET (needed for hibernate resume= in kernel cmdline)."
 [[ -n "${SAMSUNG_DISK:-}" && -b "$SAMSUNG_DISK" ]] \
     || die "/root/.luks is missing SAMSUNG_DISK or it isn't a block device."
 
@@ -115,31 +117,26 @@ HandleLidSwitchDocked=ignore
 EOF
 
 # ---------- crypttab (FDE per decisions.md §Q11) ----------
-# Two crypttab files:
+# Single LUKS volume → single crypttab.initramfs entry.
+#
 #   /etc/crypttab.initramfs  — baked into initramfs by mkinitcpio's sd-encrypt
 #                               hook. Opens cryptroot before the root fs is
-#                               mounted. Entry uses `none` so systemd prompts
-#                               the user for the passphrase at boot (phase-3
-#                               systemd-cryptenroll replaces this prompt with
-#                               silent TPM2 unlock; the passphrase stays as
-#                               a key slot fallback).
-#   /etc/crypttab            — read post-init by systemd-cryptsetup@.service.
-#                               Opens cryptvar from the on-root keyfile, then
-#                               cryptswap with a fresh /dev/urandom key per
-#                               boot.
-log "Writing /etc/crypttab.initramfs (cryptroot + cryptswap) + /etc/crypttab (cryptvar)..."
-# Both cryptroot and cryptswap go in crypttab.initramfs. cryptswap has
-# to be opened before pivot so the kernel's resume= codepath (which
-# runs in initramfs) can read the hibernate image.
+#                               mounted. Entry uses `none` for the keyfile so
+#                               systemd prompts the user for the passphrase
+#                               at boot (TPM2 unlock takes over once enrolled
+#                               — see tpm2-device=auto below).
 #
-# tpm2-device=auto: present iff install.sh successfully enrolled TPM2
-# at format time (BitLocker-style: the very first boot is silent). If
-# enrollment failed or no TPM was present, omit the option — leaving
-# it in would block boot waiting for a non-existent TPM2 slot
+# tpm2-device=auto: present iff install.sh successfully enrolled TPM2 at
+# format time (BitLocker-style: the very first boot is silent). If
+# enrollment failed or no TPM was present, omit the option — leaving it
+# in would block boot waiting for a non-existent TPM2 slot
 # (systemd/systemd#39049, #36293). Phase-3 postinstall §7.5 retries
-# enrollment in that case and rewrites these lines on success.
+# enrollment in that case and rewrites this line on success.
 #
-# cryptvar opens post-pivot via a keyfile on cryptroot (§7a).
+# Hibernate uses a swapfile inside the (already-unlocked) btrfs root
+# subvolume @swap — see /etc/kernel/cmdline below for resume= +
+# resume_offset=. No separate cryptswap volume needed.
+log "Writing /etc/crypttab.initramfs (cryptroot only — swap is a btrfs swapfile)..."
 if [[ "${TPM_ENROLLED_AT_INSTALL:-0}" == "1" ]]; then
     _crypt_opts="luks,discard,tpm2-device=auto"
     log "  TPM2 already enrolled at install — adding tpm2-device=auto so first boot unlocks silently."
@@ -149,22 +146,8 @@ else
 fi
 cat > /etc/crypttab.initramfs <<EOF
 cryptroot UUID=$LUKS_ROOT_UUID none $_crypt_opts
-cryptswap UUID=$LUKS_SWAP_UUID none $_crypt_opts
 EOF
-cat > /etc/crypttab <<EOF
-cryptvar  UUID=$LUKS_VAR_UUID  /etc/cryptsetup-keys.d/cryptvar.key  luks,discard
-EOF
-chmod 600 /etc/crypttab /etc/crypttab.initramfs
-
-# ---------- fstab fixups for encrypted devices ----------
-# genfstab (run in install.sh) emitted entries keyed off the currently-mounted
-# /dev/mapper/cryptroot + /dev/mapper/cryptvar, which is correct — those
-# mapper names are deterministic across boots. Swap, however, is never mounted
-# during install (see install.sh §6), so no swap line exists. Add it now,
-# pointing at /dev/mapper/cryptswap so the random-key pipeline lines up.
-log "Appending swap line to /etc/fstab (pointing at /dev/mapper/cryptswap)..."
-grep -q '^/dev/mapper/cryptswap' /etc/fstab || \
-    printf '/dev/mapper/cryptswap\tnone\tswap\tdefaults\t0 0\n' >> /etc/fstab
+chmod 600 /etc/crypttab.initramfs
 
 # ---------- mkinitcpio (UKI mode) ----------
 # UKI = Unified Kernel Image. A single PE binary that bundles kernel +
