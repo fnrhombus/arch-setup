@@ -4,9 +4,11 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What this repo is
 
-A **planning and prep repository** for a future Arch Linux dual-boot install on a Dell Inspiron 7786 (2-in-1 laptop). It contains no application code — only decision records, a handoff guide for post-install Claude sessions, and WSL-based test scripts that shake out the CLI stack (zsh/tmux/helix/zgenom) before the Arch install happens.
+A **planning and install-automation repository** for a single-OS Arch Linux install on a Dell Inspiron 7786 (2-in-1 laptop). It contains no application code — only decision records, install scripts (Phase 2 + Phase 3), a handoff guide for post-install Claude sessions, and a shakedown WSL test for the CLI stack (zsh/tmux/helix/zgenom).
 
 Git remote: `git@github.com:fnrhombus/arch-setup.git`. Owner: `fnrhombus`.
+
+**Single-OS, single-disk:** Arch only on the Samsung 512 GB SSD. Windows dual-boot was originally planned and dropped 2026-04-27 (the saga lives in the commit log). The Netac 128 GB SSD (slated for replacement) is left untouched; the design puts everything on a single LUKS partition so SSD migration is a one-line `dd`.
 
 **Repo scope (locked-in 2026-04-27):** this repo is **OS setup automation only**. ISO fetch, Ventoy staging, autounattend.xml, Phase 2 install scripts, Phase 3 postinstall, hardware/decisions docs, runbook. **Anything user-config-shaped goes in [rhombu5/dots](https://github.com/rhombu5/dots)** — the chezmoi source tree (Hyprland configs, matugen templates, helper scripts under `~/.local/bin/`, shell rc files, validate-hypr-binds CI). Postinstall.sh §13 fetches and applies it via `chezmoi init --apply rhombu5/dots`.
 
@@ -18,24 +20,19 @@ This repo's deliverables map to these phases. [docs/decisions.md](docs/decisions
 
 | # | Phase | Environment | Entry point(s) |
 |---|---|---|---|
-| 0 | USB prep (on dev machine) | Windows + PowerShell | `pnpm i` → [scripts/fetch-assets.ps1](scripts/fetch-assets.ps1) + [scripts/stage-ventoy.ps1](scripts/stage-ventoy.ps1) |
-| 0-alt | **Netac-Ventoy bootstrap** (Metis-only — when USB ports won't boot Ventoy) | Current Arch on Metis | [prep-netac-ventoy.sh](prep-netac-ventoy.sh) — wipes the Netac, installs Ventoy, populates with both ISOs + the repo. One-way door. |
+| 0 | Boot-medium prep (on any machine) | Windows + Rufus, or Linux + `dd` | Download the latest Arch ISO, write to a USB stick. No staging script — single ISO, no repo mirror needed (we `git clone` from the live ISO). |
 | 0.5 | CLI-stack shakedown (optional) | `archlinux` WSL distro on the user's current machine | [wsl-setup.sh](wsl-setup.sh) → [wsl-cli-test.sh](wsl-cli-test.sh) |
-| 1 | Windows install | Ventoy boot medium → Windows Setup | [autounattend.xml](autounattend.xml) + [ventoy/ventoy.json](ventoy/ventoy.json) |
-| 2 | Arch bare-metal install | Ventoy boot medium → Arch live ISO | [phase-2-arch-install/install.sh](phase-2-arch-install/install.sh) → [phase-2-arch-install/chroot.sh](phase-2-arch-install/chroot.sh) |
+| 2 | Arch install | Booted from Arch live USB | [phase-2-arch-install/install.sh](phase-2-arch-install/install.sh) → [phase-2-arch-install/chroot.sh](phase-2-arch-install/chroot.sh) |
 | 3 | Arch post-install / teaching | Booted Arch, logged in as `tom` | [phase-3-arch-postinstall/postinstall.sh](phase-3-arch-postinstall/postinstall.sh). [runbook/phase-3-handoff.md](runbook/phase-3-handoff.md) briefs the next Claude session. |
 | 3.5 | 2-in-1 hardware wiring (deferred) | Booted Arch | [runbook/phase-3.5-hardware-handoff.md](runbook/phase-3.5-hardware-handoff.md) |
-| 6 | Reclaim space for Windows (future) | Arch live USB or recovery partition | [phase-6-grow-windows.sh](phase-6-grow-windows.sh) |
 
-Phase 1 only touches the Samsung SSD 840 PRO 512GB. The Netac 128GB is reserved entirely for Linux (recovery ISO + swap + `/var/log`+`/var/cache`, per [docs/decisions.md](docs/decisions.md) §Q9) once Phase 2 finishes — but during the **Phase 0-alt no-USB bootstrap**, the Netac transiently hosts Ventoy as a USB stand-in. Phase 2's `install.sh` re-wipes the Netac and rebuilds the §Q9 layout from scratch, so the Ventoy install is sacrificial.
+Phase 2 only touches the Samsung SSD 840 PRO 512GB; everything else (Netac etc.) is left untouched.
 
-For phone-coaching the user through the install (BIOS prep, secret-photographing, troubleshooting), paste [runbook/phase-0-handoff.md](runbook/phase-0-handoff.md) into a fresh Claude conversation on the user's phone before they reboot.
-
-The whole end-to-end flow from a bare dev machine is:
-1. Clone this repo, `pnpm i` — fetches ISOs, detects the Ventoy USB, mirrors everything onto it.
-2. Plug the stick into the laptop, boot it, pick the Win11 entry from the Ventoy menu. Windows installs fully unattended (autounattend.xml: inline PS picks the Samsung by size → writes `X:\target-disk.txt` → diskpart reads that, silent OOBE).
-3. Reboot, pick the Arch entry from any Ventoy loader (SanDisk USB or the internal Netac-Ventoy if the no-USB workflow is in play), clone the repo and run the installer: `git clone https://github.com/fnrhombus/arch-setup /tmp/arch-setup && bash /tmp/arch-setup/phase-2-arch-install/install.sh`. Root + tom passwords prompted up front; the LUKS recovery key is auto-generated BitLocker-style (48 digits, displayed with loud banner, strict type-back required). pacstrap + chroot run unattended.
-4. First boot into Arch, log in as `tom`, run `~/postinstall.sh`.
+End-to-end flow from a bare laptop:
+1. Download the Arch ISO from archlinux.org, write to a USB stick (Rufus on Windows, `dd if=archlinux-x86_64.iso of=/dev/sdX bs=4M status=progress conv=fsync` on Linux). Verify against the upstream `sha256sums.txt`.
+2. F2 BIOS → SATA = AHCI, Secure Boot = OFF (re-enable later via sbctl). F12 → boot the USB.
+3. From the Arch live shell: `iwctl` to connect Wi-Fi, then `git clone https://github.com/fnrhombus/arch-setup /tmp/arch-setup && bash /tmp/arch-setup/phase-2-arch-install/install.sh`. Root + tom passwords prompted up front; the LUKS recovery key is auto-generated BitLocker-style (48 digits, displayed with loud banner, strict type-back required). pacstrap + chroot run unattended.
+4. First boot into Arch — silent if TPM2 enrollment succeeded at install time. Log in as `tom`, run `~/postinstall.sh`.
 
 ## Repo layout
 
