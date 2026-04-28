@@ -854,131 +854,44 @@ auth        sufficient  pam_fprintd.so              max-tries=5 timeout=20
 auth        include     login
 HYPRLOCKPAMEOF
 
-# ---------- 7.5 LUKS TPM2 autounlock — STAGE 2 (FDE per decisions.md §Q11) ----------
-# install.sh §5b enrolled cryptroot with the signed-PCR-11 policy
-# (--tpm2-public-key + --tpm2-public-key-pcrs=11). That gives us silent
-# unseal across kernel updates (mkinitcpio rebuilds the UKI and ukify
-# re-signs the PCR 11 prediction), but it has NO PCR 7 binding —
-# install-time can't predict the installed system's PCR 7. Without
-# PCR 7, flipping Secure Boot is silent, which is a security regression
-# vs BitLocker.
+# ---------- 7.5 LUKS TPM2 autounlock — VERIFY-ONLY (FDE per decisions.md §Q11) ----------
+# install.sh §5b is now the single source of truth for TPM2 enrollment:
+# it binds cryptroot to signed-PCR-11 + PCR 7 in one shot, while $LUKS_PW
+# is still in memory. That eliminates the LUKS passphrase prompt that this
+# stage used to require for re-enrollment.
 #
-# This stage measures PCR 7 from the installed system (where it's
-# stable) and re-enrolls the cryptroot TPM2 slot with PCR 7 added to
-# the policy. After this runs, the unseal predicate is "valid signed
-# PCR 11 prediction AND PCR 7 matches" — restoring BitLocker-equivalent
-# semantics around SB toggling. See docs/tpm-luks-bitlocker-parity.md
-# for the full design.
-#
-# A sentinel at /var/lib/tpm-luks-stage2 tells the chroot reseal hook
-# to include --tpm2-pcrs=7 on every future kernel-update reseal so
-# stage-2 binding is preserved across `pacman -Syu` cycles.
-#
-# Idempotent: detects existing TPM2 tokens and skips healthy ones, wipes
-# zombie slots (TPM was cleared since enrollment) and re-enrolls cleanly.
-# Hibernate uses a btrfs swapfile inside the (TPM-unlocked) cryptroot,
-# so there's no separate cryptswap volume to enroll.
+# This stage just verifies the install-time enrollment is still in place.
+# It does NOT attempt to unseal — signed-PCR-11 policy is phase-locked
+# past `leave-initrd`, so any unseal probe from user session would fail
+# (by design — that's the BitLocker temporal scope property). The probe-
+# based "is the seal healthy?" check would have to either:
+#   (a) re-implement the TPM authPolicyAuthorize verification dance, or
+#   (b) reboot to test
+# Both impractical from postinstall. We trust the install-time enrollment
+# was sound (visible in install.sh log) and just sanity-check the LUKS
+# header still has a tpm2 token.
+log "Verifying TPM2 enrollment from install.sh §5b is still in place..."
 if [[ -c /dev/tpm0 || -c /dev/tpmrm0 ]] && [[ -z "${SKIP_TPM_LUKS:-}" ]]; then
-    NEED_TPM_ENROLL=()
-    partlabel=ArchRoot
-    dev="/dev/disk/by-partlabel/$partlabel"
-    if [[ ! -b "$dev" ]]; then
-        warn "$dev not found — skipping TPM enroll for $partlabel."
-    else
-        # Three states to distinguish — and we want different behavior in each:
-        #   (a) NO TPM2 token in LUKS header           → enroll fresh
-        #   (b) TPM2 token present, TPM has the key    → SKIP (BitLocker parity:
-        #                                                      silent re-runs)
-        #   (c) TPM2 token present but TPM was cleared → wipe + re-enroll (the
-        #                                                tpm2_clear recovery case)
-        #
-        # `systemd-cryptenroll <dev>` only sees (a) vs (b)|(c) — it reads the
-        # LUKS header, not the TPM. To distinguish (b) from (c) we need a
-        # read-only probe-unseal. `cryptsetup --test-passphrase --token-only`
-        # tries to unlock using ONLY tokens (no passphrase prompt) and exits
-        # 0/non-zero based on success — exactly what we need. No mapper device
-        # is created (--test-passphrase short-circuits before activation).
-        if ! sudo systemd-cryptenroll "$dev" 2>/dev/null \
-             | awk 'NR>1 && $2=="tpm2"{f=1} END{exit !f}'; then
-            # State (a): no TPM2 token — fresh enroll.
-            NEED_TPM_ENROLL+=("$partlabel")
-        elif sudo cryptsetup --test-passphrase --token-only luksOpen "$dev" _probe 2>/dev/null; then
-            # State (b): TPM2 token works. BitLocker-parity path.
-            log "TPM2 already enrolled on $partlabel (probe-unseal OK) — skipping."
-        else
-            # State (c): zombie token, TPM was cleared since enrollment.
-            warn "TPM2 keyslot on $partlabel is dead (TPM was cleared since enrollment) — will wipe + re-enroll."
-            NEED_TPM_ENROLL+=("$partlabel")
-        fi
-    fi
-
-    if (( ${#NEED_TPM_ENROLL[@]} > 0 )); then
-        if [[ -t 0 ]]; then
-            # Prompt for the LUKS passphrase, cache in a tmpfs file
-            # (/run is RAM-backed; never hits disk), feed to
-            # systemd-cryptenroll via --unlock-key-file.
-            log "Enrolling TPM2 on: ${NEED_TPM_ENROLL[*]}"
-            printf '\033[1;33m[?]\033[0m Enter your LUKS passphrase ONCE (echoes nothing): '
-            read -rs _LUKS_PASS
-            echo
-            _PASS_FILE=$(sudo mktemp /run/luks-pass-XXXXXX)
-            sudo chmod 600 "$_PASS_FILE"
-            printf '%s' "$_LUKS_PASS" | sudo tee "$_PASS_FILE" >/dev/null
-            unset _LUKS_PASS
-            for partlabel in "${NEED_TPM_ENROLL[@]}"; do
-                dev="/dev/disk/by-partlabel/$partlabel"
-                log "Enrolling TPM2 autounlock for $partlabel..."
-                # --wipe-slot=tpm2 first so re-enrollment after tpm2_clear
-                # doesn't double-bind two TPM2 keyslots (one dead, one new)
-                # and consume LUKS slot quota.
-                sudo systemd-cryptenroll --unlock-key-file="$_PASS_FILE" \
-                    --wipe-slot=tpm2 --tpm2-device=auto \
-                    --tpm2-public-key=/etc/systemd/tpm2-pcr-public.pem \
-                    --tpm2-public-key-pcrs=11 --tpm2-pcrs=7 "$dev" \
-                    || warn "TPM enroll failed for $partlabel — boot still works with passphrase."
-            done
-            sudo shred -u "$_PASS_FILE" 2>/dev/null || sudo rm -f "$_PASS_FILE"
-        else
-            # Non-interactive (no TTY) — fall back to per-volume prompting
-            # via systemd-cryptenroll's own readline.
-            for partlabel in "${NEED_TPM_ENROLL[@]}"; do
-                dev="/dev/disk/by-partlabel/$partlabel"
-                log "Enrolling TPM2 autounlock for $partlabel (enter the LUKS passphrase when prompted)..."
-                sudo systemd-cryptenroll --wipe-slot=tpm2 --tpm2-device=auto \
-                    --tpm2-public-key=/etc/systemd/tpm2-pcr-public.pem \
-                    --tpm2-public-key-pcrs=11 --tpm2-pcrs=7 "$dev" \
-                    || warn "TPM enroll failed for $partlabel — boot still works with passphrase."
-            done
-        fi
-        # Drop the stage-2 sentinel so the chroot reseal hook includes
-        # --tpm2-pcrs=7 on every future kernel-update reseal.
-        sudo install -d -m 755 /var/lib && sudo touch /var/lib/tpm-luks-stage2
-    fi
-
-    # After enrollment, flip `tpm2-device=auto` on in /etc/crypttab.initramfs
-    # for cryptroot if it now has a TPM2 slot. chroot.sh wrote the line
-    # WITHOUT that option when TPM enrollment had failed at install time
-    # — leaving it in pre-enrollment would block boot waiting for a
-    # non-existent slot (systemd#39049, #36293). Idempotent: the sed only
-    # matches lines still ending in `luks,discard`.
-    _crypttab_changed=0
     _dev="/dev/disk/by-partlabel/ArchRoot"
-    if [[ -b "$_dev" ]] && \
-       sudo systemd-cryptenroll "$_dev" 2>/dev/null | awk 'NR>1 && $2=="tpm2"{f=1} END{exit !f}'; then
-        if sudo grep -qE "^cryptroot .*luks,discard$" /etc/crypttab.initramfs; then
-            log "Adding tpm2-device=auto to cryptroot in /etc/crypttab.initramfs..."
-            sudo sed -i "/^cryptroot /s/luks,discard\$/luks,discard,tpm2-device=auto/" /etc/crypttab.initramfs
-            _crypttab_changed=1
-        fi
+    if [[ ! -b "$_dev" ]]; then
+        warn "$_dev not found — can't verify TPM enrollment."
+    elif sudo systemd-cryptenroll "$_dev" 2>/dev/null | awk 'NR>1 && $2=="tpm2"{f=1} END{exit !f}'; then
+        log "  TPM2 keyslot present in LUKS header on ArchRoot. ✓"
+        log "  (If first boot was silent, the seal works. If you ever need to"
+        log "  re-enroll — TPM clear, key rotation, etc — see docs/"
+        log "  tpm-luks-bitlocker-parity.md §Recovery.)"
+    else
+        warn "No TPM2 keyslot in LUKS header on ArchRoot. install.sh §5b enrollment must have failed."
+        warn "Boot still works with the LUKS recovery key. To enroll TPM now:"
+        warn "  sudo systemd-cryptenroll --tpm2-device=auto \\"
+        warn "    --tpm2-public-key=/etc/systemd/tpm2-pcr-public.pem \\"
+        warn "    --tpm2-public-key-pcrs=11 --tpm2-pcrs=7 \\"
+        warn "    /dev/disk/by-partlabel/ArchRoot"
+        warn "  (will prompt for the LUKS recovery key once)"
     fi
     unset _dev
-    if (( _crypttab_changed )); then
-        log "Regenerating initramfs (mkinitcpio -P) so TPM2 unlock takes effect next boot..."
-        sudo mkinitcpio -P
-    fi
-    unset _crypttab_changed
 else
-    warn "No TPM device (or SKIP_TPM_LUKS set) — boot will continue to prompt for the LUKS passphrase."
+    log "  TPM device missing or SKIP_TPM_LUKS set — skipping verify."
 fi
 
 # ---------- 8. Bitwarden: self-hosted server + SSH agent wiring ----------
