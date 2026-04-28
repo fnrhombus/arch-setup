@@ -386,24 +386,19 @@ EOF
 install -d -m 755 /usr/local/sbin
 cat > /usr/local/sbin/tpm2-reseal-luks <<'BASH'
 #!/usr/bin/env bash
-# Re-enrol every TPM2-sealed LUKS device with the signed PCR 11 policy
-# (and stage-2 PCR 7 binding if postinstall §7.5 has run). Triggered by
+# Re-enrol every TPM2-sealed LUKS device with the install-time policy
+# (signed PCR 11 + PCR 7). Triggered by
 # /etc/pacman.d/hooks/95-tpm2-reseal.hook after kernel/UKI/limine/systemd/
-# sbctl upgrades.
+# sbctl upgrades, plus manually after Secure-Boot toggle / firmware
+# update / TPM clear.
 #
-# Stage-2 detection: if /var/lib/tpm-luks-stage2 exists (touched by
-# postinstall §7.5 once PCR 7 binding is added), include --tpm2-pcrs=7
-# in the reseal so PCR 7 stays bound. Otherwise stay on signed PCR 11
-# only (the install-time policy).
+# Stage-1 / stage-2 sentinel logic was removed 2026-04-28 — install.sh
+# now enrolls signed-PCR-11 + PCR 7 together, so the reseal hook always
+# applies the same policy.
 set -euo pipefail
 
 PUB=/etc/systemd/tpm2-pcr-public.pem
 [[ -f "$PUB" ]] || { echo "tpm2-reseal: $PUB missing — skipping (was the install half-done?)" >&2; exit 0; }
-
-EXTRA=()
-if [[ -f /var/lib/tpm-luks-stage2 ]]; then
-    EXTRA+=( --tpm2-pcrs=7 )
-fi
 
 reseal_one() {
     local dev="$1"
@@ -412,7 +407,8 @@ reseal_one() {
     systemd-cryptenroll --wipe-slot=tpm2 "$dev" >/dev/null 2>&1 || true
     systemd-cryptenroll --tpm2-device=auto \
         --tpm2-public-key="$PUB" --tpm2-public-key-pcrs=11 \
-        "${EXTRA[@]}" "$dev"
+        --tpm2-pcrs=7 \
+        "$dev"
 }
 
 scan() {
