@@ -855,18 +855,18 @@ auth        include     login
 HYPRLOCKPAMEOF
 
 # ---------- 7.5 LUKS TPM2 autounlock — STAGE 2 (FDE per decisions.md §Q11) ----------
-# install.sh §5b enrolled cryptroot and cryptswap with the signed-PCR-11
-# policy (--tpm2-public-key + --tpm2-public-key-pcrs=11). That gives us
-# silent unseal across kernel updates (mkinitcpio rebuilds the UKI and
-# ukify re-signs the PCR 11 prediction), but it has NO PCR 7 binding —
+# install.sh §5b enrolled cryptroot with the signed-PCR-11 policy
+# (--tpm2-public-key + --tpm2-public-key-pcrs=11). That gives us silent
+# unseal across kernel updates (mkinitcpio rebuilds the UKI and ukify
+# re-signs the PCR 11 prediction), but it has NO PCR 7 binding —
 # install-time can't predict the installed system's PCR 7. Without
 # PCR 7, flipping Secure Boot is silent, which is a security regression
 # vs BitLocker.
 #
 # This stage measures PCR 7 from the installed system (where it's
-# stable) and re-enrolls each TPM2 slot with PCR 7 added to the policy.
-# After this runs, the unseal predicate is "valid signed PCR 11
-# prediction AND PCR 7 matches" — restoring BitLocker-equivalent
+# stable) and re-enrolls the cryptroot TPM2 slot with PCR 7 added to
+# the policy. After this runs, the unseal predicate is "valid signed
+# PCR 11 prediction AND PCR 7 matches" — restoring BitLocker-equivalent
 # semantics around SB toggling. See docs/tpm-luks-bitlocker-parity.md
 # for the full design.
 #
@@ -876,16 +876,11 @@ HYPRLOCKPAMEOF
 #
 # Idempotent: detects existing TPM2 tokens and skips healthy ones, wipes
 # zombie slots (TPM was cleared since enrollment) and re-enrolls cleanly.
-# cryptvar auto-unlocks from a keyfile on the (TPM-unlocked) cryptroot —
-# a second TPM slot would burn LUKS budget without adding at-rest
-# protection (the keyfile is only readable post-cryptroot-unlock).
+# Hibernate uses a btrfs swapfile inside the (TPM-unlocked) cryptroot,
+# so there's no separate cryptswap volume to enroll.
 if [[ -c /dev/tpm0 || -c /dev/tpmrm0 ]] && [[ -z "${SKIP_TPM_LUKS:-}" ]]; then
-    # Enroll TPM2 on BOTH cryptroot and cryptswap — both live in
-    # crypttab.initramfs (cryptswap is there so `resume=` can read the
-    # hibernate image pre-pivot). cryptvar opens from a keyfile on
-    # the (TPM-unlocked) cryptroot, so it doesn't need its own TPM slot.
     NEED_TPM_ENROLL=()
-    for partlabel in ArchRoot ArchSwap; do
+    for partlabel in ArchRoot; do
         dev="/dev/disk/by-partlabel/$partlabel"
         if [[ ! -b "$dev" ]]; then
             warn "$dev not found — skipping TPM enroll for $partlabel."
@@ -920,12 +915,9 @@ if [[ -c /dev/tpm0 || -c /dev/tpmrm0 ]] && [[ -z "${SKIP_TPM_LUKS:-}" ]]; then
 
     if (( ${#NEED_TPM_ENROLL[@]} > 0 )); then
         if [[ -t 0 ]]; then
-            # Prompt for the LUKS passphrase once, cache in a tmpfs file
-            # (/run is RAM-backed; never hits disk), reuse for every
-            # systemd-cryptenroll call via --unlock-key-file. Saves the
-            # user from typing the 48-digit recovery key twice. install.sh
-            # uses the same passphrase for ArchRoot and ArchSwap so a
-            # single read works for both.
+            # Prompt for the LUKS passphrase, cache in a tmpfs file
+            # (/run is RAM-backed; never hits disk), feed to
+            # systemd-cryptenroll via --unlock-key-file.
             log "Enrolling TPM2 on: ${NEED_TPM_ENROLL[*]}"
             printf '\033[1;33m[?]\033[0m Enter your LUKS passphrase ONCE (echoes nothing): '
             read -rs _LUKS_PASS
@@ -965,12 +957,13 @@ if [[ -c /dev/tpm0 || -c /dev/tpmrm0 ]] && [[ -z "${SKIP_TPM_LUKS:-}" ]]; then
     fi
 
     # After enrollment, flip `tpm2-device=auto` on in /etc/crypttab.initramfs
-    # for each volume that now has a TPM2 slot. chroot.sh wrote both lines
-    # WITHOUT that option — pre-enrollment, it blocks boot waiting for a
+    # for cryptroot if it now has a TPM2 slot. chroot.sh wrote the line
+    # WITHOUT that option when TPM enrollment had failed at install time
+    # — leaving it in pre-enrollment would block boot waiting for a
     # non-existent slot (systemd#39049, #36293). Idempotent: the sed only
     # matches lines still ending in `luks,discard`.
     _crypttab_changed=0
-    for pair in "cryptroot:ArchRoot" "cryptswap:ArchSwap"; do
+    for pair in "cryptroot:ArchRoot"; do
         _crypt_name="${pair%:*}"
         _partlabel="${pair#*:}"
         _dev="/dev/disk/by-partlabel/$_partlabel"
