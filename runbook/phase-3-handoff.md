@@ -28,7 +28,7 @@ This document is meant to be fed to Claude Code once you're inside Arch Linux. I
 
 ### Hyprland (Window Manager)
 - **What it is**: Tiling Wayland compositor — windows auto-arrange, keyboard-driven
-- **Config**: Bare Hyprland with **Claude-authored configs in chezmoi**. NOT HyDE, NOT end-4 — every line is owned by us, applied via `chezmoi apply`. Sources at `dotfiles/dot_config/hypr/` in this repo.
+- **Config**: Bare Hyprland with **Claude-authored configs in chezmoi**. NOT HyDE, NOT end-4 — every line is owned by us, applied via `chezmoi apply`. Sources at `dot_config/hypr/` in [rhombu5/dots](https://github.com/rhombu5/dots) (separate dotfiles repo, cloned to `~/.local/share/chezmoi`).
   - Entry point: `~/.config/hypr/hyprland.conf` (sources fragments)
   - Fragments: `monitors.conf`, `workspaces.conf`, `binds.conf`, `decoration.conf`, `animations.conf`, `input.conf`, `exec.conf`, `plugins.conf`, `colors.conf` (matugen-rendered)
   - Lockscreen: `hyprlock.conf` + `hyprlock.colors.conf` (matugen)
@@ -312,8 +312,8 @@ Everything listed below is installed automatically by the phase-2 + phase-3 scri
 11. Auto-rotation for tablet mode
 12. Clipboard history (cliphist + fuzzel keybind)
 13. Screenshots (hyprshot + satty keybinds)
-14. chezmoi — import configs into managed dotfiles
-15. Edge + Firefox browser setup + Bitwarden extension
+14. chezmoi — already wired (rhombu5/dots cloned to `~/.local/share/chezmoi`); learn `chezmoi edit`, `chezmoi diff`, `chezmoi cd` for tweaking and committing dotfile changes
+15. Edge + Firefox browser setup + Bitwarden extension (server: `https://hass4150.duckdns.org:7277`)
 
 ## Upgrade Paths (for later)
 - **Helix → Neovim**: If you outgrow Helix's built-ins and want infinite extensibility

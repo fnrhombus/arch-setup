@@ -12,7 +12,7 @@ Organized by category so you can skim. Nothing here is install instructions — 
 - **Xorg / X11** — The old display server. You care: some apps (especially older Electron builds, Wine, GIMP) still prefer it; `xwayland` runs them on Wayland.
 - **Compositor** — The thing that draws windows on screen under Wayland. Hyprland is a compositor and window manager rolled into one.
 - **Hyprland** — The compositor we chose. Tiling, keyboard-driven, GPU-accelerated effects. You care: *every* GUI session you have will be running in Hyprland.
-- **bare-Hyprland (Claude-authored configs in chezmoi)** — Our dotfile approach. NOT a pre-built pack (no HyDE, no end-4, no Caelestia). Configs at `dotfiles/dot_config/hypr/*` are split into fragments (monitors, workspaces, binds, decoration, animations, plugins, exec). You own every line; future "change X" is one prompt to Claude.
+- **bare-Hyprland (Claude-authored configs in chezmoi)** — Our dotfile approach. NOT a pre-built pack (no HyDE, no end-4, no Caelestia). Configs at `dot_config/hypr/*` in the [rhombu5/dots](https://github.com/rhombu5/dots) repo are split into fragments (monitors, workspaces, binds, decoration, animations, plugins, exec). You own every line; future "change X" is one prompt to Claude.
 - **greetd** — Tiny daemon that "shows a login UI, then starts the session." Replaces SDDM (~3 MB vs ~21 MB). The UI is delegated to a separate program — we use ReGreet.
 - **ReGreet** — GTK4-based greeter UI launched by greetd. Themed via plain GTK CSS so the matugen palette drops in directly. Fingerprint via the same PAM stack as before.
 - **SDDM / GDM / LightDM** — Other display managers (KDE / GNOME / XFCE world). We don't use them; ignore.

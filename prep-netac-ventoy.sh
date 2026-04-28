@@ -212,21 +212,17 @@ log "  (exFAT can't store unix perms/owner/symlinks — rsync errors on those ar
 #   -r recursive, -t times — what we actually need
 #   --no-perms / --no-owner / --no-group — exFAT has no concept of these
 #   (no -l): drop symlinks entirely (exFAT can't represent them either).
+# Dotfiles live in the separate rhombu5/dots repo and are fetched at
+# postinstall time via `chezmoi init --apply` — no copy here.
 if ! rsync -rt --info=progress2 \
         --no-perms --no-owner --no-group \
         --exclude='.git' \
         --exclude='node_modules' \
         --exclude='assets' \
         --exclude='runbook/*.pdf' \
-        --exclude='dotfiles/' \
         "$REPO_ROOT/" "$MNT/"; then
     warn "rsync exited non-zero — likely exFAT metadata-only errors (Operation not permitted on chown/symlink). File content should be intact; verify by spot-checking $MNT/."
 fi
-
-# dotfiles/ is staged separately so chezmoi has a source path. cp -r with
-# --no-preserve handles exFAT cleanly without the rsync flag dance.
-log "Copying dotfiles/ tree (chezmoi source for postinstall §13)..."
-cp -r --no-preserve=mode,ownership "$REPO_ROOT/dotfiles" "$MNT/"
 
 log "Syncing to disk (this may take a minute on a 119 GB partition)..."
 sync

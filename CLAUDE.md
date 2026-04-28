@@ -8,6 +8,8 @@ A **planning and prep repository** for a future Arch Linux dual-boot install on 
 
 Git remote: `git@github.com:fnrhombus/arch-setup.git`. Owner: `fnrhombus`.
 
+**Sister repo for dotfiles**: [rhombu5/dots](https://github.com/rhombu5/dots) — chezmoi source tree (Hyprland configs, matugen templates, helper scripts, validate-hypr-binds CI). Postinstall.sh §13 fetches it via `chezmoi init --apply rhombu5/dots`. Don't add dotfile content back to this repo.
+
 ## Bootstrap phases
 
 This repo's deliverables map to these phases. [docs/decisions.md](docs/decisions.md) is the single source of truth — if any artifact disagrees with it, the artifact is wrong.
@@ -91,22 +93,12 @@ There is no build, lint, or test target. Work is almost entirely **editing markd
 - `wsl-cli-test.sh` is meant to be run inside an `archlinux` WSL distro: `wsl -d archlinux -u tom bash ./wsl-cli-test.sh`. Assume the user has `mise`, `pacman`, and `yay` available inside.
 - `wsl-setup.sh` runs as root *once*, before `wsl-cli-test.sh`: `wsl -d archlinux -u root bash ./wsl-setup.sh && wsl --terminate archlinux`.
 
-### Pre-commit hook (Hyprland binds validation)
-
-`.githooks/pre-commit` runs `validate-hypr-binds` against any staged changes under `dotfiles/dot_config/hypr/`. Refuses commits with duplicate (MOD, KEY) pairs, unknown dispatchers, or malformed `bindd` descriptions. Activate once per fresh clone with:
-
-```sh
-git config core.hooksPath .githooks
-```
-
-`core.hooksPath` is `.git/config`-local — it doesn't ship with the clone, so each new checkout has to set it once. Any future committer (claude or human) needs this active or they'll push broken bind configs.
-
 ## Context that should influence every edit
 
 - **The target machine cannot use NVIDIA under Wayland.** MX250 requires nvidia-470xx, which lacks GBM. Any suggestion involving Optimus/nvidia on this hardware is wrong — Intel UHD 620 only, external monitor via HDMI (wired to iGPU), NVIDIA modules blacklisted.
-- **User does not enjoy config tweaking — but Claude does it for them.** The "no excessive config tweaking" preference is filtered through "Claude does the tweaking efficiently." Result: NO opinionated dotfile pack (HyDE, ml4w, Caelestia all rejected). Configs are **Claude-authored and chezmoi-managed** at `dotfiles/` in this repo. Theme = matugen (Material You from wallpaper). Bootloader = limine. Greeter = greetd + ReGreet. The reinstall-design history is in `docs/reinstall-planning.md`.
+- **User does not enjoy config tweaking — but Claude does it for them.** The "no excessive config tweaking" preference is filtered through "Claude does the tweaking efficiently." Result: NO opinionated dotfile pack (HyDE, ml4w, Caelestia all rejected). Configs are **Claude-authored and chezmoi-managed** in a separate repo, [rhombu5/dots](https://github.com/rhombu5/dots). Theme = matugen (Material You from wallpaper). Bootloader = limine. Greeter = greetd + ReGreet. The reinstall-design history is in `docs/reinstall-planning.md`.
+- **Dotfiles live in a separate repo** — [rhombu5/dots](https://github.com/rhombu5/dots), cloned into `~/.local/share/chezmoi` by `chezmoi init --apply rhombu5/dots`. This repo (arch-setup) holds installer scripts only; **don't propose adding configs back here**. Don't propose `stow` or plain symlinks either.
 - **tmux is required, not optional.** It's there for Claude Code's worktree workflow (Zellij is not supported). Prefix is `Ctrl+a`, carried from the prior `fnwsl` setup.
-- **Dotfiles will be managed by `chezmoi`** eventually — don't propose `stow` or plain symlinks.
 - **Shell stack is locked:** zsh + zgenom + powerlevel10k + the plugin list in `wsl-cli-test.sh`. Mirror any plugin change across both the `.zshrc` block *and* the pre-build block at the bottom of that script, or the zgenom cache will be stale on first login.
 
 ## Conventions

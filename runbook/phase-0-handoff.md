@@ -137,7 +137,7 @@ SKIP_PIN=1   ~/postinstall.sh          # skip TPM PIN setup
 
 - **LUKS prompt rejects the key** → see runbook/INSTALL-RUNBOOK.md §M-luks. If photo is misread, hex chars are 0-9 a-f only (no o/l/I confusion possible).
 - **BitLocker keeps re-prompting** → runbook §C: `manage-bde -protectors -disable C: -RebootCount 0 → reboot → -enable C:`.
-- **Hyprland comes up to a blank screen** (chezmoi didn't apply) → `Ctrl+Alt+F3` to TTY, `chezmoi apply --source=/root/arch-setup/dotfiles --force`.
+- **Hyprland comes up to a blank screen** (chezmoi didn't apply — usually network was down at postinstall §13) → `Ctrl+Alt+F3` to TTY, connect Wi-Fi via `iwctl`, then `chezmoi init --apply rhombu5/dots`.
 - **Nothing boots** → BIOS → Boot Sequence → make sure "Limine Boot Manager" is listed and first.
 
 ## Where to look for more depth

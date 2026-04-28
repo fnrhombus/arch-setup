@@ -166,7 +166,7 @@ It will:
 4. LUKS-format both data partitions, mkfs, pacstrap (~15 min — biggest wait, fully unattended).
 5. Enter chroot (passwords + LUKS UUIDs handed in via mode-600 files), allocate TPM2 SHA-256 PCR bank, install **limine** + greetd + greetd-regreet, write `/etc/crypttab.initramfs` (cryptroot + cryptswap with TPM2) + `/etc/crypttab` (cryptvar via keyfile), add `sd-encrypt` to mkinitcpio HOOKS, install greetd config from `/root/arch-setup/phase-3-arch-postinstall/system-files/`, install pacman post-upgrade hook for TPM2 reseal on kernel/limine updates, wire greetd PAM for gnome-keyring auto-unlock.
 6. `dd` the Arch ISO onto the Netac recovery partition (~1 min, unencrypted by design so it still boots from F12 if Arch is hosed).
-7. Copy `postinstall.sh` + dotfiles into `/home/tom/`.
+7. Copy `postinstall.sh` into `/home/tom/`. (Dotfiles live in the separate [rhombu5/dots](https://github.com/rhombu5/dots) repo and are fetched at postinstall §13 via `chezmoi init --apply`.)
 8. Unmount, close LUKS mappers, and print "Done."
 
 **If install.sh dies:**
@@ -252,7 +252,7 @@ It will:
 10. Builds zgenom plugins (warms cache so first login is fast).
 11. Takes a **snapper baseline snapshot** of `/`.
 12. Installs USB-serial udev rules (ESP32/Pico/FTDI/CH340) and adds you to `uucp`.
-13. **Runs `chezmoi init --source=/root/arch-setup/dotfiles && chezmoi apply`** — writes Hyprland configs (entry + 9 fragments), waybar, swaync, fuzzel, ghostty, yazi, helix, imv, zathura, qt5ct/qt6ct, matugen pipeline + templates, and the helper scripts (theme-toggle, wallpaper-rotate, control-panel, validate-hypr-binds). The `run_once` wallpaper bootstrap downloads from `fnrhombus/callisto` into `~/Pictures/Wallpapers/`.
+13. **Runs `chezmoi init --apply rhombu5/dots`** — clones the [dots repo](https://github.com/rhombu5/dots) into `~/.local/share/chezmoi` and applies it: Hyprland configs (entry + 9 fragments), waybar, swaync, fuzzel, ghostty, yazi, helix, imv, zathura, qt5ct/qt6ct, matugen pipeline + templates, and the helper scripts (theme-toggle, wallpaper-rotate, control-panel, validate-hypr-binds). The `run_once` wallpaper bootstrap downloads from `fnrhombus/callisto` into `~/Pictures/Wallpapers/`. Requires network — postinstall §0 already brought Wi-Fi up.
 14. **Loads Hyprland plugins via `hyprpm`**: hyprexpo (workspace overview) + hyprgrass (touch gestures). Note: must re-run from inside Hyprland to actually take effect — re-runs are idempotent.
 15. Prints a verify table — scan for **FAIL** rows.
 
@@ -674,16 +674,17 @@ Password login returns; re-wire fingerprint after you've reinstalled fprintd.
 
 ### K-pre. chezmoi apply failed in postinstall §13
 
-**Cause:** `postinstall.sh §13` runs `chezmoi init --source=/root/arch-setup/dotfiles && chezmoi apply`. If the source dir wasn't staged at `/root/arch-setup/` (install.sh §11 should have copied it there), chezmoi has nothing to apply and Hyprland comes up with empty config.
+**Cause:** `postinstall.sh §13` runs `chezmoi init --apply rhombu5/dots`, which clones [rhombu5/dots](https://github.com/rhombu5/dots) into `~/.local/share/chezmoi` and applies it. If network was down at that step (or GitHub was throttling), the clone failed and Hyprland comes up with empty config.
 
 **Fix:**
 ```bash
-ls /root/arch-setup/dotfiles/dot_config/hypr/   # should exist
-# If empty:
-sudo cp -r /run/ventoy/dotfiles /root/arch-setup/    # if Ventoy still mounted
-# Or:
-sudo git clone https://github.com/fnrhombus/arch-setup.git /root/arch-setup
-chezmoi init --source=/root/arch-setup/dotfiles
+# Confirm network is up:
+ping -c 1 github.com
+# If you have a partial clone, blow it away and retry:
+rm -rf ~/.local/share/chezmoi
+chezmoi init --apply https://github.com/rhombu5/dots.git
+# Or if a manual checkout is preferred:
+git clone https://github.com/rhombu5/dots.git ~/.local/share/chezmoi
 chezmoi apply --force
 ```
 Re-login (or `Super+Shift+R` to reload Hyprland) once apply finishes.
