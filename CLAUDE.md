@@ -8,7 +8,9 @@ A **planning and prep repository** for a future Arch Linux dual-boot install on 
 
 Git remote: `git@github.com:fnrhombus/arch-setup.git`. Owner: `fnrhombus`.
 
-**Sister repo for dotfiles**: [rhombu5/dots](https://github.com/rhombu5/dots) — chezmoi source tree (Hyprland configs, matugen templates, helper scripts, validate-hypr-binds CI). Postinstall.sh §13 fetches it via `chezmoi init --apply rhombu5/dots`. Don't add dotfile content back to this repo.
+**Repo scope (locked-in 2026-04-27):** this repo is **OS setup automation only**. ISO fetch, Ventoy staging, autounattend.xml, Phase 2 install scripts, Phase 3 postinstall, hardware/decisions docs, runbook. **Anything user-config-shaped goes in [rhombu5/dots](https://github.com/rhombu5/dots)** — the chezmoi source tree (Hyprland configs, matugen templates, helper scripts under `~/.local/bin/`, shell rc files, validate-hypr-binds CI). Postinstall.sh §13 fetches and applies it via `chezmoi init --apply rhombu5/dots`.
+
+When considering a new file, ask: *would this belong in `~/.config/`, `~/.local/bin/`, or a per-user shell file?* If yes → rhombu5/dots. If it's an Arch install step, a Ventoy/USB plumbing piece, an autounattend patch, or a phase-script, it stays here.
 
 ## Bootstrap phases
 

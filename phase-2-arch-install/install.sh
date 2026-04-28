@@ -734,11 +734,17 @@ cat <<EOF
 
 Done. Remove the USB and reboot.
 
-First boot asks for the LUKS passphrase (you set it at the top of this run).
+First boot:
+  - SILENT (no LUKS prompt) if TPM2 enrolled successfully — see the
+    "Enrolling TPM2 (signed PCR 11 policy)" lines above.
+  - Prompts for the 48-digit recovery key if TPM enrollment failed at
+    install time. Postinstall §7.5 retries from the running system.
+
 Log in as 'tom', then:
     ./postinstall.sh           # installs yay, zgenom, chezmoi (clones
                                # rhombu5/dots and applies the bare-Hyprland
                                # configs + matugen pipeline),
-                               # fingerprint, TPM2 enroll for silent LUKS
-                               # unlock, ufw, metis-ddns, printer drivers, etc.
+                               # fingerprint, layers PCR 7 onto the LUKS
+                               # TPM seal (stage 2), ufw, metis-ddns,
+                               # printer drivers, etc.
 EOF
