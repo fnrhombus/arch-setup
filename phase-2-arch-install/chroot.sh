@@ -171,8 +171,14 @@ cat > /etc/kernel/uki.conf <<EOF
 # Consumed by ukify, invoked by mkinitcpio when a preset has default_uki=.
 # Signs PCR 11 predictions for these phases — covers initrd-side LUKS unlock
 # (after enter-initrd, before leave-initrd). Keys generated in install.sh §5a.
+#
+# PCRBanks=sha256 sha1 is belt-and-suspenders: install.sh §5-prep tries to
+# allocate both banks; if that fails on quirky Intel PTT firmware and the
+# TPM ends up sha1-only, the install-time cryptenroll seal will use sha1
+# PCR 11 — and ukify needs to sign sha1 PCR 11 too or boot can never unseal.
+# Signing both is cheap (~few-KB increase in .pcrsig section).
 [UKI]
-PCRBanks=sha256
+PCRBanks=sha256 sha1
 
 [PCRSignature:initrd]
 PCRPrivateKey=/etc/systemd/tpm2-pcr-private.pem
