@@ -1,30 +1,28 @@
 #!/usr/bin/env bash
 # phase-2-arch-install/install.sh
 #
-# Run from the Arch live environment (boot the ISO from Ventoy, pick
-# the "archlinux-*x86_64.iso" entry — filename rolls monthly). This script reads every decision
-# from decisions.md §Q9 and lays down Arch on:
-#   - Samsung 512 GB SSD : LUKS2 + btrfs in the trailing ~316 GB unallocated space
-#                          (EFI/MSR/Windows partitions are left untouched)
-#   - Netac 128 GB SSD   : recovery ISO (1.5 GB, unencrypted) + LUKS2 swap (16 GB,
-#                          random key per boot) + LUKS2 ext4 (~110 GB, keyfile-unlocked)
+# Single-OS Arch install on the Samsung 512 GB SSD. Wipes the disk
+# entirely, lays out:
+#   - EFI System partition, 1 GiB FAT32 (mounted at /boot — UKIs land here)
+#   - LUKS2 partition (rest, ~475 GiB) → btrfs with subvolumes:
+#       @          → /
+#       @home      → /home
+#       @snapshots → /.snapshots
+#       @swap      → /swap (holds a 16 GiB NoCOW swapfile, hibernate-ready)
 #
-# Full-disk encryption per decisions.md §Q11 — parity with Windows BitLocker.
-# Recovery key is auto-generated (BitLocker model: 48 hex chars, displayed
-# once for the user to photograph); post-install phase 3 enrolls TPM2 so
-# boot becomes silent (recovery key stays as fallback).
+# Full-disk encryption per decisions.md §Q11. Recovery key is auto-generated
+# (BitLocker model: 48 numeric digits, displayed once for the user to
+# photograph); §5b enrolls TPM2 against a signed-PCR-11 policy so first
+# boot is silent. Recovery key stays as the LUKS-passphrase fallback.
 #
-# All disk operations are size-gated: the script aborts if the expected
-# disks are absent or if anything looks off. Never silently clobbers.
+# Any other disks plugged in (Netac, etc.) are LEFT UNTOUCHED — the design
+# intentionally puts everything on a single LUKS partition so migration
+# to a future SSD is a one-line `dd` of that partition.
 #
 # Usage:
 #   iwctl                                  # connect wifi (station wlan0 connect <ssid>)
-#   bash /run/ventoy/phase-2-arch-install/install.sh
-#
-# The script self-mounts the Ventoy data partition at /run/ventoy on start
-# (see section 0.5). You do not need to mount it yourself — the obvious
-# `mount /dev/disk/by-label/Ventoy` fails with "Can't open blockdev" because
-# Ventoy holds the USB disk exclusively via dm-linear for ISO serving.
+#   git clone https://github.com/fnrhombus/arch-setup /tmp/arch-setup
+#   bash /tmp/arch-setup/phase-2-arch-install/install.sh
 
 set -euo pipefail
 
