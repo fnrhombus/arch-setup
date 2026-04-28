@@ -361,65 +361,57 @@ else
     warn "systemd-cryptenroll missing in live ISO. First boot will prompt for the LUKS passphrase; postinstall §7.5 will retry."
 fi
 
-log "Creating filesystems on LUKS mappers..."
+log "Creating btrfs on /dev/mapper/cryptroot + EFI on $SAMSUNG_EFI..."
 mkfs.btrfs -f -L ArchRoot /dev/mapper/cryptroot
-mkfs.ext4  -F -L ArchVar  /dev/mapper/cryptvar
-mkswap     -L ArchSwap    /dev/mapper/cryptswap
-# Don't swapon at install time — pacstrap doesn't need it (16 GB RAM) and
-# an active swap would block the cryptsetup close at the bottom of install.
-# NETAC_RECOVERY stays raw and unencrypted — we dd the Arch ISO onto it later.
-# (Rationale: recovery partition is intentionally bootable as-is; encrypting
-# it would defeat the "boot this from F12 if Arch is hosed" survival path.)
+mkfs.fat   -F32 -n EFI    "$SAMSUNG_EFI"
 
 # ---------- 7. btrfs subvolumes ----------
-log "Creating btrfs subvolumes..."
+# @swap is a dedicated subvolume so root snapshots don't drag the swapfile
+# into them (which would defeat snapshot rollback on a hibernate-resume).
+log "Creating btrfs subvolumes (@, @home, @snapshots, @swap)..."
 mount /dev/mapper/cryptroot /mnt
 btrfs subvolume create /mnt/@
 btrfs subvolume create /mnt/@home
 btrfs subvolume create /mnt/@snapshots
+btrfs subvolume create /mnt/@swap
 umount /mnt
 
 # ---------- 8. mount ----------
 log "Mounting filesystems..."
 MOPTS="noatime,compress=zstd:3,space_cache=v2,ssd"
 mount -o "$MOPTS,subvol=@"          /dev/mapper/cryptroot /mnt
-mkdir -p /mnt/{home,.snapshots,boot,var/log,var/cache}
+mkdir -p /mnt/{home,.snapshots,boot,swap}
 mount -o "$MOPTS,subvol=@home"      /dev/mapper/cryptroot /mnt/home
 mount -o "$MOPTS,subvol=@snapshots" /dev/mapper/cryptroot /mnt/.snapshots
+# @swap mounts WITHOUT compression (mandatory for a btrfs swapfile —
+# kernel rejects swapon on a compressed file).
+mount -o noatime,subvol=@swap       /dev/mapper/cryptroot /mnt/swap
 mount "$SAMSUNG_EFI" /mnt/boot
-# Netac ext4 at /var: we mount the single ext4 volume at /var and bind-mount
-# /var/log and /var/cache from it. Simpler: mount it at an intermediate path
-# and bind the two subdirs. But cleanest: put /var itself on Netac. However,
-# decisions.md §Q9 says "/var/log + /var/cache on Netac" (not all of /var),
-# so use two subdirs + bind mounts so other /var paths stay on btrfs.
-mkdir -p /mnt/mnt/netac-var
-mount /dev/mapper/cryptvar /mnt/mnt/netac-var
-mkdir -p /mnt/mnt/netac-var/{log,cache}
-mount --bind /mnt/mnt/netac-var/log   /mnt/var/log
-mount --bind /mnt/mnt/netac-var/cache /mnt/var/cache
 
-# ---------- 8.5 cryptvar keyfile (for unattended unlock at boot) ----------
-# cryptroot prompts for the passphrase at boot; cryptvar is unlocked from a
-# keyfile living on the (now-unlocked) root fs so the user doesn't type the
-# passphrase twice. The keyfile is 4096 random bytes, mode 400, root:root,
-# at /etc/cryptsetup-keys.d/cryptvar.key — a path systemd-cryptsetup-generator
-# understands natively.
-log "Generating keyfile for cryptvar auto-unlock..."
-install -d -m 700 /mnt/etc/cryptsetup-keys.d
-(umask 077 && dd if=/dev/urandom of=/mnt/etc/cryptsetup-keys.d/cryptvar.key \
-    bs=512 count=8 status=none)
-chmod 400 /mnt/etc/cryptsetup-keys.d/cryptvar.key
-printf '%s' "$LUKS_PW" | cryptsetup luksAddKey --key-file=- \
-    "$NETAC_VAR" /mnt/etc/cryptsetup-keys.d/cryptvar.key
+# ---------- 8.5 swapfile (NoCOW, hibernate-ready) ----------
+# btrfs swapfile requirements (kernel 5.0+, well-established):
+#   - subvolume must be NoCOW (chattr +C, applied to empty file BEFORE
+#     any data lands)
+#   - file must be NOT sparse — use fallocate or dd, not truncate
+#   - file must NOT be on a snapshot (the @swap dedicated subvol guards
+#     against this)
+#   - mount option `compress` must NOT cover the swapfile
+#
+# Size = 16 GiB (matches RAM, hibernate-image-fits requirement).
+log "Creating 16 GiB swapfile at /mnt/swap/swapfile..."
+truncate -s 0 /mnt/swap/swapfile
+chattr +C /mnt/swap/swapfile
+fallocate -l 16G /mnt/swap/swapfile
+chmod 600 /mnt/swap/swapfile
+mkswap /mnt/swap/swapfile
 
-# Wipe any Arch-managed files left on the EFI System Partition from a
-# previous aborted install. Phase 1 mkfs'd the ESP fresh for Windows, so
-# Microsoft's bootloader must survive; only Arch's kernel/initramfs/ucode
-# would conflict with pacstrap's next run.
-rm -f /mnt/boot/intel-ucode.img \
-      /mnt/boot/amd-ucode.img \
-      /mnt/boot/initramfs-linux*.img \
-      /mnt/boot/vmlinuz-linux*
+# Capture the resume_offset for the kernel cmdline (chroot.sh will write
+# it into /etc/kernel/cmdline). On btrfs, the offset is reported by
+# `btrfs inspect-internal map-swapfile -r` (modern, exact) — stash it now
+# while /mnt/swap is mounted.
+SWAP_RESUME_OFFSET=$(btrfs inspect-internal map-swapfile -r /mnt/swap/swapfile)
+[[ -n "$SWAP_RESUME_OFFSET" ]] || die "Couldn't get resume_offset for swapfile."
+log "swapfile resume_offset: $SWAP_RESUME_OFFSET"
 
 # ---------- 9. pacstrap ----------
 log "Running pacstrap (this pulls ~1-2 GB over the network)..."
