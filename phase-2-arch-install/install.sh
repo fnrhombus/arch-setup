@@ -276,34 +276,19 @@ SAMSUNG_ROOT="/dev/$SAMSUNG_ROOT"
 log "EFI System partition: $SAMSUNG_EFI"
 log "Linux root partition: $SAMSUNG_ROOT"
 
-# ---------- 6. LUKS format + filesystems ----------
-# Encrypt both data partitions with the same passphrase. The passphrase is
-# the ONLY key at install time; phase 3's postinstall.sh enrolls TPM2 later
-# so boot becomes silent. Passphrase stays as the recovery fallback.
+# ---------- 6. LUKS format + open ----------
+# Single LUKS2 volume on the Samsung. The passphrase is the ONLY key at
+# install time; §5b below enrolls TPM2 against a signed-PCR-11 policy so
+# first boot is silent. Passphrase stays as the recovery fallback.
 #
 # luksFormat defaults: LUKS2 + argon2id KDF + aes-xts-plain64. --batch-mode
 # suppresses the "THIS WILL OVERWRITE DATA" confirmation (we already got
-# the user's `yes` in section 3). --key-file=- reads the passphrase from
-# stdin so it never appears in `ps`.
+# the user's `yes` in §3). --key-file=- reads the passphrase from stdin so
+# it never appears in `ps`.
 log "Encrypting Samsung root ($SAMSUNG_ROOT) with LUKS2..."
 printf '%s' "$LUKS_PW" | cryptsetup luksFormat --type luks2 --batch-mode \
     --label ArchRootLUKS --key-file=- "$SAMSUNG_ROOT"
 printf '%s' "$LUKS_PW" | cryptsetup open --key-file=- "$SAMSUNG_ROOT" cryptroot
-
-log "Encrypting Netac /var ($NETAC_VAR) with LUKS2..."
-printf '%s' "$LUKS_PW" | cryptsetup luksFormat --type luks2 --batch-mode \
-    --label ArchVarLUKS --key-file=- "$NETAC_VAR"
-printf '%s' "$LUKS_PW" | cryptsetup open --key-file=- "$NETAC_VAR" cryptvar
-
-# Hibernate-ready swap: persistent LUKS2 (NOT a per-boot random key) so
-# the resume-from-hibernate image survives a power cycle. Same passphrase
-# as cryptroot — both volumes get TPM2 enrolled in §5b below, so first
-# boot unlocks both silently against PCR 0+7 and the user never types
-# the passphrase under normal operation.
-log "Encrypting Netac swap ($NETAC_SWAP) with LUKS2 (persistent, hibernate-ready)..."
-printf '%s' "$LUKS_PW" | cryptsetup luksFormat --type luks2 --batch-mode \
-    --label ArchSwapLUKS --key-file=- "$NETAC_SWAP"
-printf '%s' "$LUKS_PW" | cryptsetup open --key-file=- "$NETAC_SWAP" cryptswap
 
 # ---------- 5a. PCR signing keypair (UKI + signed-policy seal) ----------
 # Generate an RSA-2048 keypair used to sign UKI PCR predictions. ukify
