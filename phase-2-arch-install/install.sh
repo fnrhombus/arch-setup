@@ -341,6 +341,35 @@ SWAP_RESUME_OFFSET=$(btrfs inspect-internal map-swapfile -r /mnt/swap/swapfile)
 [[ -n "$SWAP_RESUME_OFFSET" ]] || die "Couldn't get resume_offset for swapfile."
 log "swapfile resume_offset: $SWAP_RESUME_OFFSET"
 
+# ---------- 5-prep. TPM2 PCR bank allocation ----------
+# Intel PTT firmware on Whiskey Lake (this Dell) ships with only the
+# pcr-sha1 bank active. systemd-cryptenroll silently falls back to SHA-1
+# when SHA-256 isn't available — but more importantly, any later
+# `tpm2_pcrallocate` call to switch to sha256 is a TPM-firmware-level
+# reset that WIPES all currently-sealed objects. So we must allocate the
+# desired banks BEFORE §5b's enrollment, not after.
+#
+# Goal: sha256+sha1 active. Some PTT firmwares only allow one bank at a
+# time — fall through to sha256-only if the dual allocation is rejected.
+# Either way we land on a working bank that postinstall §7.5 can then
+# re-seal against without further reallocations.
+#
+# tpm2-tools is in the Arch live ISO since 2023, but guard with a
+# command check anyway so this gracefully no-ops on hosts that don't
+# have it (the §5b cryptenroll would then just use whatever's active).
+log "Allocating TPM2 PCR banks (sha256+sha1, fallback sha256-only) BEFORE enrollment..."
+if [[ ( -c /dev/tpm0 || -c /dev/tpmrm0 ) ]] && command -v tpm2_pcrallocate >/dev/null 2>&1; then
+    if ! tpm2_pcrallocate sha256:all+sha1:all 2>/dev/null; then
+        log "  sha256+sha1 rejected; trying sha256-only..."
+        tpm2_pcrallocate sha256:all 2>/dev/null \
+            || warn "  pcrallocate failed entirely; first-boot seal may use sha1 (postinstall §7.5 will reseal)."
+    fi
+    # Verify what's active so install logs show ground truth.
+    tpm2_getcap pcrs 2>/dev/null | grep -iE 'sha[0-9]+:' | head -4 || true
+else
+    log "  TPM device or tpm2_pcrallocate missing — skipping bank allocation."
+fi
+
 # ---------- 5a. PCR signing keypair (UKI + signed-policy seal) ----------
 # Generate an RSA-2048 keypair used to sign UKI PCR predictions. ukify
 # (called by mkinitcpio in chroot.sh) embeds the signed predictions in the
