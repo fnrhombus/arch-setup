@@ -143,7 +143,7 @@ cat ~/.local/share/hyprland/hyprland.log | tail -100
 
 ### Arch won't boot (limine menu missing or broken)
 
-1. **F12 at the Dell logo** → pick the Netac's EFI boot entry directly. With the custom-ISO build, the Netac recovery partition holds our pre-baked ISO with `dotfiles/` and `phase-2-arch-install/` in `/root/arch-setup/`.
+1. **F12 at the Dell logo** → pick the Netac's EFI boot entry directly. With the custom-ISO build, the Netac recovery partition holds our pre-baked ISO with `phase-2-arch-install/` in `/root/arch-setup/`. (Dotfiles aren't bundled — postinstall fetches them from [rhombu5/dots](https://github.com/rhombu5/dots) over the network.)
 2. If the Netac entry isn't in F12 either, boot the **Ventoy USB** → Arch live ISO.
 3. From the live environment — the EFI lives at `/boot` on the installed system. Reinstall limine:
    ```bash

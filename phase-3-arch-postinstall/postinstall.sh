@@ -27,9 +27,10 @@
 #     brought in from fnwsl; WSL-specific pieces dropped). p10k config itself
 #     is authored by the user via `p10k configure` on first shell launch —
 #     no pre-shipped ~/.p10k.zsh.
-#   - chezmoi apply against /root/arch-setup/dotfiles — writes the bare
-#     Hyprland configs (split fragments), waybar, swaync, fuzzel, ghostty,
-#     yazi, helix, qt5/6ct, matugen pipeline + templates, helper scripts.
+#   - chezmoi init --apply rhombu5/dots — clones the dots repo into
+#     ~/.local/share/chezmoi and writes the bare Hyprland configs (split
+#     fragments), waybar, swaync, fuzzel, ghostty, yazi, helix, qt5/6ct,
+#     matugen pipeline + templates, helper scripts.
 #   - 2-in-1 touch: iio-sensor-proxy / iio-hyprland (rotation), wvkbd (OSK),
 #     hyprgrass plugin (touch gestures), libwacom (Wacom AES stylus)
 #   - matugen Material You palette derived from wallpaper; rendered into
@@ -1309,13 +1310,13 @@ _POSTINSTALL_NONINTERACTIVE=1 zsh -i -c 'echo zgenom warmup complete' 2>/dev/nul
     || warn "zgenom warmup had issues; first login will rebuild."
 
 # ---------- 11. tmux config — handled by chezmoi (§13) ----------
-# dotfiles/dot_tmux.conf is the source of truth (Ctrl+a prefix, splits open
+# dot_tmux.conf in rhombu5/dots is the source of truth (Ctrl+a prefix, splits open
 # in pane CWD for the Claude Code worktree workflow, matugen-rendered colors
 # via ~/.config/tmux/colors.conf). No tpm — sesh-bin (§3 yay) covers session
 # switching, and matugen replaces the catppuccin/tmux plugin's coloring.
 
 # ---------- 12. Helix config — handled by chezmoi (§13) ----------
-# dotfiles/dot_config/helix/config.toml is the source of truth (theme = matugen).
+# dot_config/helix/config.toml in rhombu5/dots is the source of truth (theme = matugen).
 # No write here.
 
 # ---------- 13. Hyprland configs via chezmoi (bare-Hyprland design) ----------
@@ -1323,37 +1324,33 @@ _POSTINSTALL_NONINTERACTIVE=1 zsh -i -c 'echo zgenom warmup complete' 2>/dev/nul
 # desktop-requirements.md). Reasons in the memo: HyDE writes a wall of
 # upstream config we don't own, contaminates /boot loader entries on
 # install, and the "saves user time" value evaporated when the user said
-# "Claude does the tweaking." Now: Claude-authored configs live in
-# /root/arch-setup/dotfiles, applied via chezmoi.
+# "Claude does the tweaking." Now: Claude-authored configs live in the
+# rhombu5/dots repo, applied via chezmoi.
 #
 # Theme is matugen (Material You from wallpaper) — every component (waybar,
 # swaync, fuzzel, ghostty, helix, hypr-colors, tmux, gtk, qt) reads colors
-# from a matugen-rendered template. See dotfiles/dot_config/matugen/config.toml.
+# from a matugen-rendered template. See dot_config/matugen/config.toml in
+# the dots repo.
 #
-# Idempotent: chezmoi's `apply` is a no-op when source matches dest.
-DOTFILES_SRC="/root/arch-setup/dotfiles"
-if [[ ! -d "$DOTFILES_SRC" ]]; then
-    # Local fallback: dotfiles checkout co-located with this script
-    # (works when postinstall is run from /home/tom/arch-setup/ rather than
-    # the chroot-staged /root/arch-setup/).
-    DOTFILES_SRC="$SCRIPT_DIR/../dotfiles"
-fi
+# `chezmoi init --apply` clones the repo into ~/.local/share/chezmoi and
+# applies in one step. Idempotent: a second run is a no-op when source
+# matches dest. Requires network — we assume it's up by §13 (the user
+# connected via iwctl in §0, and pacman/yay in earlier sections proved it).
+DOTS_REPO="https://github.com/rhombu5/dots.git"
 
-if [[ ! -d "$DOTFILES_SRC" ]]; then
-    warn "dotfiles tree not found at /root/arch-setup/dotfiles or alongside this script."
-    warn "  Custom-ISO install bakes it in; Ventoy install copies it via install.sh §11."
-    warn "  Skipping chezmoi apply — Hyprland will start with empty config."
-elif ! command -v chezmoi >/dev/null; then
+if ! command -v chezmoi >/dev/null; then
     warn "chezmoi not installed — was it dropped from §1 pacman list?"
+    warn "  Skipping dotfile apply — Hyprland will start with empty config."
+elif [[ -d "$HOME/.local/share/chezmoi/.git" ]]; then
+    log "chezmoi source already present at ~/.local/share/chezmoi — pulling + applying..."
+    git -C "$HOME/.local/share/chezmoi" pull --ff-only \
+        || warn "git pull on chezmoi source failed — applying current checkout."
+    chezmoi apply --force \
+        || warn "chezmoi apply reported issues — check 'chezmoi status' and 'chezmoi diff'."
 else
-    # Pass --source on apply directly. Skipping `chezmoi init` because with
-    # a local --source it just writes a config file pointing at it, then
-    # apply still has to be told the source separately or it falls back to
-    # ~/.local/share/chezmoi (which we don't populate) and errors with
-    # "stat /home/tom/.local/share/chezmoi: no such file or directory".
-    log "Applying chezmoi from $DOTFILES_SRC (writes ~/.config, ~/.local/bin, ~/.local/share)..."
-    chezmoi apply --source="$DOTFILES_SRC" --force \
-        || warn "chezmoi apply reported issues — check 'chezmoi status --source=$DOTFILES_SRC' and 'chezmoi diff --source=$DOTFILES_SRC'."
+    log "Cloning rhombu5/dots into ~/.local/share/chezmoi and applying..."
+    chezmoi init --apply "$DOTS_REPO" \
+        || warn "chezmoi init --apply failed — Hyprland will start with empty config. Re-run 'chezmoi init --apply $DOTS_REPO' once network is up."
 fi
 
 # Initial wallpaper render: chezmoi's run_once script downloads from callisto;
@@ -1447,8 +1444,9 @@ HYPRPMEOF
     fi
 fi
 
-# Ghostty config + greetd-regreet config are now part of dotfiles/system-files
-# (matugen-themed). No separate §14 / §15 needed — legacy blocks removed.
+# Ghostty config is matugen-themed via the rhombu5/dots chezmoi tree (§13).
+# greetd-regreet system config is installed by install.sh from
+# phase-3-arch-postinstall/system-files/greetd/. No separate §14 / §15 needed.
 
 # ---------- 16. Snapper: baseline snapshot of / ----------
 # NOTE: install.sh already created the @snapshots subvolume and mounted it at

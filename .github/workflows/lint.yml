@@ -38,17 +38,6 @@ jobs:
             assets
             staged-azure-ddns
 
-  validate-hypr-binds:
-    name: validate-hypr-binds
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - name: Run validator
-        run: |
-          chmod +x dotfiles/dot_local/bin/executable_validate-hypr-binds
-          HYPR_DIR=dotfiles/dot_config/hypr \
-            bash dotfiles/dot_local/bin/executable_validate-hypr-binds
-
   pacman-package-check:
     name: pacman packages exist in extra
     runs-on: ubuntu-latest

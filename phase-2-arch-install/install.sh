@@ -597,8 +597,10 @@ cp "$SOURCE_DIR/phase-2-arch-install/chroot.sh" /mnt/root/chroot.sh
 chmod +x /mnt/root/chroot.sh
 
 # Stage the entire repo at /root/arch-setup/ inside the chroot so chroot.sh
-# can install greetd system-files from phase-3-arch-postinstall/system-files/
-# and so postinstall can find dotfiles/ for chezmoi init.
+# can install greetd system-files from phase-3-arch-postinstall/system-files/.
+# (Dotfiles live in a separate repo — rhombu5/dots — and are fetched by
+# postinstall via `chezmoi init --apply`. Nothing dotfile-related is staged
+# at install time.)
 mkdir -p /mnt/root/arch-setup
 cp -r "$SOURCE_DIR"/. /mnt/root/arch-setup/
 
@@ -669,16 +671,16 @@ else
 fi
 
 # ---------- 13. post-install hook ----------
-# Stage phase-3 script + setup-azure-ddns + the dotfiles tree where the
-# user can run them after first login. (The full repo is already at
-# /mnt/root/arch-setup/ from the staging step in §11.)
+# Stage phase-3 script + setup-azure-ddns where the user can run them
+# after first login. (The full repo is already at /mnt/root/arch-setup/
+# from the staging step in §11.)
 install -d -m 755 /mnt/home/tom
 cp "$SOURCE_DIR/phase-3-arch-postinstall/postinstall.sh"     /mnt/home/tom/postinstall.sh 2>/dev/null \
     || warn "phase-3 script missing — copy it later from /root/arch-setup."
 cp "$SOURCE_DIR/phase-3-arch-postinstall/setup-azure-ddns.sh" /mnt/home/tom/setup-azure-ddns.sh 2>/dev/null || true
 chmod +x /mnt/home/tom/postinstall.sh /mnt/home/tom/setup-azure-ddns.sh 2>/dev/null || true
-# Dotfiles (Claude-authored, chezmoi-managed) live at /root/arch-setup/dotfiles
-# and are applied by postinstall via `chezmoi init --source=...`.
+# Dotfiles (Claude-authored, chezmoi-managed) live in the rhombu5/dots
+# repo and are fetched + applied by postinstall via `chezmoi init --apply`.
 arch-chroot /mnt chown -R tom:tom /home/tom
 
 # ---------- 14. cleanup ----------
@@ -698,8 +700,9 @@ Done. Remove the USB and reboot.
 
 First boot asks for the LUKS passphrase (you set it at the top of this run).
 Log in as 'tom', then:
-    ./postinstall.sh           # installs yay, zgenom, chezmoi (applies the
-                               # bare-Hyprland dotfiles + matugen pipeline),
+    ./postinstall.sh           # installs yay, zgenom, chezmoi (clones
+                               # rhombu5/dots and applies the bare-Hyprland
+                               # configs + matugen pipeline),
                                # fingerprint, TPM2 enroll for silent LUKS
                                # unlock, ufw, metis-ddns, printer drivers, etc.
 EOF

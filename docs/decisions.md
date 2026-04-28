@@ -19,7 +19,7 @@
 ## Requirements
 - [x] Fingerprint scanner support (fprintd + libfprint). **Device: Goodix `27c6:538c`** — supported only via the AUR `libfprint-goodix-53xc` package (older Dell OEM blob, pre-v0.0.11) riding on `libfprint-tod-git`. Current upstream AUR `libfprint-2-tod1-goodix` / `-v2` ship a **550A-only** blob that does NOT cover 538C. `libfprint-tod-git` must be built with `!lto` in PKGBUILD options — LTO strips ABI symbol versioning and breaks the link. `postinstall.sh` pre-flights this automatically. Enrollment on a bare TTY needs `sudo fprintd-enroll -f <finger> tom` (polkit denies unprivileged enroll without a graphical session).
 - [x] Lid close: no sleep/shutdown on AC power (logind.conf) — wired by phase-2 `chroot.sh` via `/etc/systemd/logind.conf.d/10-lid.conf` (`HandleLidSwitchExternalPower=ignore`).
-- [ ] **External** Wacom Intuos USB tablet support (only when plugged in — the 17" 7786 has NO built-in active digitizer, capacitive touch only). `libwacom` + the in-tree kernel `wacom` driver are both installed by `postinstall.sh`. Pressure/tilt work under Wayland via libinput; per-tablet pressure curves go in `dotfiles/dot_config/hypr/input.conf` `device:` blocks.
+- [ ] **External** Wacom Intuos USB tablet support (only when plugged in — the 17" 7786 has NO built-in active digitizer, capacitive touch only). `libwacom` + the in-tree kernel `wacom` driver are both installed by `postinstall.sh`. Pressure/tilt work under Wayland via libinput; per-tablet pressure curves go in `dot_config/hypr/input.conf` `device:` blocks in [rhombu5/dots](https://github.com/rhombu5/dots).
 - [x] **Touchscreen** — ELAN i2c-hid (`ELAN2097:00 04F3:2666`), bound by the in-kernel `i2c-hid-acpi` → `hid-multitouch` chain. NOT Goodix — the `27c6:*` Goodix on this machine is the **fingerprint** reader. NOT IPTS either (Surface-only). Whiskey-Lake quirk: live ISO often doesn't autoload `i2c-hid-acpi` until userspace, so the touchscreen is invisible from the live ISO and visible from the installed system.
 - [ ] Touch gestures (touchpad + tablet mode):
   - Two-finger drag → scroll (libinput default, no config needed)
@@ -73,13 +73,13 @@
     Claude doing it. Once Claude becomes the editor, opinionated packs lose
     their value (saved-time argument evaporates) and add cost (you don't own
     the config; future "change X" means fighting upstream defaults).
-  - Configs live at `dotfiles/dot_config/hypr/` in this repo, split into
+  - Configs live at `dot_config/hypr/` in [rhombu5/dots](https://github.com/rhombu5/dots) (separate chezmoi repo), split into
     fragments (monitors, workspaces, binds, decoration, animations, plugins,
-    exec, hypridle, hyprlock). Applied via `chezmoi apply` from postinstall §13.
+    exec, hypridle, hyprlock). Fetched + applied via `chezmoi init --apply rhombu5/dots` from postinstall §13.
   - Theme via **matugen** (Material You from wallpaper) — see §Q10-K. Every
     component (waybar, swaync, fuzzel, ghostty, helix, hypr-colors, tmux, gtk,
     qt) reads colors from a matugen-rendered template under
-    `dotfiles/dot_config/matugen/templates/`.
+    `dot_config/matugen/templates/` in the dots repo.
   - Default terminal is **Ghostty** (set directly in `binds.conf` —
     `bind = SUPER, Return, exec, ghostty`). No kitty involved.
   - Keybindings (~85 of them, validated by `dot_local/bin/validate-hypr-binds`
@@ -105,7 +105,7 @@
 ### Q7: Terminal Multiplexer
 - **tmux** — required for Claude Code worktree support (Zellij not yet supported)
 - Worktree workflow: one session per worktree, fuzzy-switch via sesh/fzf
-- Config in chezmoi at `dotfiles/dot_tmux.conf`. No tpm — colors come from a matugen-rendered template (`dotfiles/dot_config/matugen/templates/tmux-colors.conf` → `~/.config/tmux/colors.conf`, sourced by `~/.tmux.conf`); session switching lives in **`sesh`** (`sesh-bin` from AUR), which IS the worktree-per-session workflow primitive (one sesh entry per worktree, fuzzy-pick).
+- Config in chezmoi at `dot_tmux.conf` in [rhombu5/dots](https://github.com/rhombu5/dots). No tpm — colors come from a matugen-rendered template (`dot_config/matugen/templates/tmux-colors.conf` → `~/.config/tmux/colors.conf`, sourced by `~/.tmux.conf`); session switching lives in **`sesh`** (`sesh-bin` from AUR), which IS the worktree-per-session workflow primitive (one sesh entry per worktree, fuzzy-pick).
 
 ### Q8: Shell
 - **zsh** with zgenom plugin manager (same setup as fnwsl, adapted for Arch)
@@ -208,13 +208,14 @@
 
 #### K) Theme: matugen (Material You, wallpaper-derived)
 - Palette generated dynamically from the current wallpaper.
-- Templates render: Hyprland colors, waybar CSS, swaync CSS, ReGreet CSS, Ghostty, GTK (3 + 4 CSS), Qt (qt5ct/qt6ct), fuzzel, helix, hyprlock, yazi, zathura, tmux. See `dotfiles/dot_config/matugen/config.toml` for the full list.
+- Templates render: Hyprland colors, waybar CSS, swaync CSS, ReGreet CSS, Ghostty, GTK (3 + 4 CSS), Qt (qt5ct/qt6ct), fuzzel, helix, hyprlock, yazi, zathura, tmux. See `dot_config/matugen/config.toml` in [rhombu5/dots](https://github.com/rhombu5/dots) for the full list.
 - Master dark/light switch via `~/.local/bin/theme-toggle` — three entry points: Super+Shift+T hotkey, waybar sun/moon icon, fuzzel control-panel entry.
 - **Switched from Catppuccin Mocha 2026-04-22**: Catppuccin was a default-of-the-day pick, never load-bearing. The user wanted dynamic accent from wallpaper + an easy dark/light master switch — matugen delivers both natively. The script-implementation pass was completed 2026-04-23: scripts, dotfiles, and verify checks no longer reference Catppuccin anywhere (legacy mentions in `runbook/GLOSSARY.md`, this document, and `docs/reinstall-planning.md` are intentional history).
 
 #### L) Dotfiles: chezmoi
-- Template-based, git-backed, Bitwarden integration for secrets
-- Can unify fnwsl + Arch configs in one repo with machine-specific templates
+- Template-based, git-backed, Bitwarden integration for secrets (self-hosted Vaultwarden at `https://hass4150.duckdns.org:7277`).
+- Source repo: [rhombu5/dots](https://github.com/rhombu5/dots) — public, cross-platform (Arch + WSL + Windows hosts differentiated via `.chezmoi.os` / `.chezmoiignore`).
+- Bootstrap on a fresh machine: `chezmoi init --apply rhombu5/dots`.
 
 #### M) System monitor: btop
 - Already familiar from fnwsl
@@ -260,8 +261,8 @@ and accepted on the "clean-slate, no bias" principle. See
 
 ### Q13: bare-Hyprland config layout
 
-- **Source of truth**: `dotfiles/dot_config/hypr/` in this repo. Applied to
-  `~/.config/hypr/` by `chezmoi apply` (postinstall §13).
+- **Source of truth**: `dot_config/hypr/` in [rhombu5/dots](https://github.com/rhombu5/dots) (separate repo). Applied to
+  `~/.config/hypr/` by `chezmoi init --apply rhombu5/dots` (postinstall §13).
 - **Entry point**: `hyprland.conf` — sources nine fragments via `source =`
   directives (one per concern):
   - `colors.conf` — matugen-rendered palette ($primary, $on_surface, etc.)
@@ -316,7 +317,7 @@ present.
 - `wvkbd` (AUR) — `wvkbd-mobintl` on-screen keyboard.
 - `hyprgrass` (hyprpm plugin) — long-press, edge swipes, OSK-toggle gestures beyond Hyprland's built-in 3-finger workspace swipe.
 
-**Validator hook**: `dotfiles/.chezmoiscripts/run_before_validate-binds.sh.tmpl` runs `validate-hypr-binds` before every `chezmoi apply`. A keybind conflict or unknown dispatcher fails the validator → fails the apply, so a broken config can never reach `~/.config/hypr/`.
+**Validator hook**: `.chezmoiscripts/run_before_validate-binds.sh.tmpl` in [rhombu5/dots](https://github.com/rhombu5/dots) runs `validate-hypr-binds` before every `chezmoi apply`. A keybind conflict or unknown dispatcher fails the validator → fails the apply, so a broken config can never reach `~/.config/hypr/`. The same validator runs in the dots repo's CI workflow.
 
 ### Q11: Full-Disk Encryption (LUKS2 + TPM2 autounlock)
 

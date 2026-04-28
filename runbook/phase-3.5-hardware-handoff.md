@@ -104,7 +104,7 @@ phase-3.5-hardware/
 
 **30 — Touch gestures (hyprgrass)**
 - `hyprgrass` already loaded via `hyprpm` in postinstall §14
-- Add bindings to `dotfiles/dot_config/hypr/binds.conf` using the new `gesture = ...` syntax (Hyprland 0.51+) — three-finger swipe left/right → workspace prev/next, three-finger up → hyprexpo
+- Add bindings to `dot_config/hypr/binds.conf` in [rhombu5/dots](https://github.com/rhombu5/dots) using the new `gesture = ...` syntax (Hyprland 0.51+) — three-finger swipe left/right → workspace prev/next, three-finger up → hyprexpo. Edit via `chezmoi edit ~/.config/hypr/binds.conf` then `chezmoi cd` to commit + push to dots.
 - Re-run `chezmoi apply`; the validator will catch dispatcher typos
 
 **40 — External Wacom Intuos** *(only if user plugs one in)*
