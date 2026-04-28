@@ -243,6 +243,9 @@ About to:
       - EFI System partition, 1 GiB FAT32 (mounted at /boot — UKIs land here)
       - LUKS2 + btrfs (rest, ~475 GiB) with subvolumes @, @home, @snapshots, @swap
   - Inside the btrfs, create a 16 GiB NoCOW swapfile (hibernate-ready)
+  - CLEAR the TPM2 (storage hierarchy) so any stale state from prior install
+    attempts — old LUKS seals, leftover pinutil PINs, BitLocker NV slots — is
+    wiped. Subsequent install steps then enroll fresh.
   - pacstrap a full Arch system and configure per decisions.md
 
 If you have a Netac SSD or other disks plugged in, they will be left UNTOUCHED.
@@ -340,6 +343,39 @@ mkswap /mnt/swap/swapfile
 SWAP_RESUME_OFFSET=$(btrfs inspect-internal map-swapfile -r /mnt/swap/swapfile)
 [[ -n "$SWAP_RESUME_OFFSET" ]] || die "Couldn't get resume_offset for swapfile."
 log "swapfile resume_offset: $SWAP_RESUME_OFFSET"
+
+# ---------- 5-pre. TPM2 clear (wipe stale state from prior install attempts) ----------
+# TPM NV storage and sealed objects persist across reboots, BIOS resets,
+# and disk wipes — only an explicit TPM2_Clear() command (or BIOS "Clear
+# TPM" toggle) wipes them. Prior install attempts on this hardware leave
+# stale state behind:
+#
+#   - Sealed LUKS keys from previous cryptenrolls (now unsealable, harmless
+#     but wastes a NV slot)
+#   - pinutil PIN entries for the old `tom` user (postinstall §7 sees these
+#     as "already set" and skips the PIN setup prompt — confusing on a
+#     clean install)
+#   - BitLocker recovery info if Windows was ever installed on this
+#     machine (no longer relevant with single-OS Arch)
+#
+# Clear the storage hierarchy so install starts from a known-clean TPM
+# state. Auth value is empty by default after firmware POST. If clear
+# fails (auth set, vendor lockout), warn but don't abort — most install
+# steps work fine without a clean TPM, and the user can clear via BIOS.
+log "Clearing TPM2 state from any prior install attempts (storage hierarchy)..."
+if [[ ( -c /dev/tpm0 || -c /dev/tpmrm0 ) ]] && command -v tpm2_clear >/dev/null 2>&1; then
+    if tpm2_clear -c platform 2>/dev/null \
+        || tpm2_clear -c lockout 2>/dev/null; then
+        log "  TPM2 cleared. Stale sealed objects + NV slots wiped."
+    else
+        warn "  tpm2_clear failed (auth set or hierarchy locked). The TPM may"
+        warn "  have stale state from a prior install. If postinstall §7"
+        warn "  reports 'PIN already set' on a fresh install, BIOS → Security"
+        warn "  → TPM2 → Clear → reboot, then re-run install.sh."
+    fi
+else
+    log "  TPM device or tpm2_clear missing — skipping clear."
+fi
 
 # ---------- 5-prep. TPM2 PCR bank allocation ----------
 # Intel PTT firmware on Whiskey Lake (this Dell) ships with only the
