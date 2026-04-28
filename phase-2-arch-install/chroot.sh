@@ -4,10 +4,10 @@
 # Runs inside `arch-chroot /mnt` from install.sh. Sets up:
 #   - timezone, locale, hostname (= metis)
 #   - user tom with wheel/sudo
-#   - limine bootloader (shares the EFI Windows created at /boot, written
-#     to the fallback path \EFI\BOOT\BOOTX64.EFI so Windows NVRAM resets
-#     don't kill us)
-#   - persistent LUKS2 cryptswap (hibernate-ready; resume= in cmdline)
+#   - limine bootloader (UEFI binary at the ESP fallback path
+#     \EFI\BOOT\BOOTX64.EFI + a NVRAM entry — fallback-path copy is the
+#     load-bearing one since some firmware drops NVRAM entries on update)
+#   - hibernate via btrfs swapfile (resume= + resume_offset= in /etc/kernel/cmdline)
 #   - NVIDIA blacklist (MX250 Optimus — Intel iGPU only, decisions.md §Q5)
 #   - NetworkManager + greetd + bluetooth + fprintd enabled
 #   - greetd PAM stack from system-files/pam.d/greetd (gnome-keyring + fprintd)
@@ -205,19 +205,17 @@ install -d -m 755 /boot/EFI/Linux
 sed -i 's/^MODULES=.*/MODULES=(btrfs)/' /etc/mkinitcpio.conf
 sed -i 's/^HOOKS=.*/HOOKS=(base systemd autodetect modconf kms keyboard sd-vconsole block sd-encrypt filesystems fsck)/' /etc/mkinitcpio.conf
 
-# Switch presets to UKI mode + drop fallback build to fit the 512 MiB ESP.
+# Switch presets to UKI mode + drop fallback build.
 #
 # UKI sizes: ~80 MB default, ~160 MB fallback (autodetect strips modules
 # from the default initramfs; fallback bundles all of them). Two kernels
-# × two variants = ~480 MB just for UKIs, blowing past the 512 MiB ESP
-# (which also has to fit limine + Windows bootmgr + a future sbctl-signed
-# copy). Dropping the fallback variant brings us to ~160 MB total UKIs +
-# ~10 MB headroom for limine/Windows = comfortable fit.
+# × default-only = ~160 MB on the 1 GiB ESP — plenty of room left for
+# sbctl-signed copies once Secure Boot is enrolled.
 #
-# Trade-off: no fallback initramfs means a broken autodetect leaves you
-# with no boot path. Mitigation: linux-lts default UKI IS the fallback —
-# kernel regressions are the main reason fallback exists, and LTS covers
-# that. Bad-autodetect is rare on this stable hardware.
+# Trade-off vs. keeping fallback: a broken autodetect on the default UKI
+# leaves no boot path. Mitigation: linux-lts default UKI IS the regression
+# fallback — kernel regressions are the canonical reason fallback exists,
+# and LTS covers that. Bad-autodetect is rare on this stable hardware.
 #
 # Idempotent: multiple sed runs converge.
 for _preset in /etc/mkinitcpio.d/linux.preset /etc/mkinitcpio.d/linux-lts.preset; do
@@ -251,9 +249,9 @@ log "Installing limine bootloader..."
 pacman -S --noconfirm --needed limine
 
 # UEFI install: copy the limine EFI binary to the ESP fallback path
-# (\EFI\BOOT\BOOTX64.EFI). Firmware boots this without needing an NVRAM
-# entry — crucial because Windows periodically wipes NVRAM entries for
-# non-Windows loaders (per autounattend-oobe-patch.md).
+# (\EFI\BOOT\BOOTX64.EFI). Firmware boots this without needing a NVRAM
+# entry — load-bearing because some firmware drops NVRAM entries on
+# BIOS update or CMOS reset.
 install -d /boot/EFI/BOOT
 install -m 644 /usr/share/limine/BOOTX64.EFI /boot/EFI/BOOT/BOOTX64.EFI
 
