@@ -1,6 +1,6 @@
 # Phase 3.5 — 2-in-1 Hardware Handoff
 
-**You are Claude Code, invoked inside a booted Arch system sometime after the user finished the base install (phases 1–3 of `INSTALL-RUNBOOK.md`). They have been using the laptop for a while and are now ready to wire the 2-in-1 specific hardware that the base install deliberately skipped.**
+**You are Claude Code, invoked inside a booted Arch system sometime after the user finished Phase 2 + Phase 3. They have been using the laptop for a while and are now ready to wire the 2-in-1 specific hardware that the base install deliberately skipped.**
 
 Read this doc fully before touching anything. Then read `../docs/decisions.md` (for hardware + system context) and `phase-3-handoff.md` (for user preferences and overall stack — in the same directory as this file).
 

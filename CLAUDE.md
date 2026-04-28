@@ -38,8 +38,8 @@ End-to-end flow from a bare laptop:
 
 Markdown files split into two groups by audience:
 
-- **[docs/](docs/)** — Planning and rationale. Read on the dev machine when editing the project. Not strictly needed at the laptop (but staged anyway, since phase-3.5 references `docs/decisions.md`).
-- **[runbook/](runbook/)** — What the user reads *at the laptop* during the install. `pnpm pdf` renders every `runbook/*.md` to a sibling `.pdf`; `INSTALL-RUNBOOK.pdf` is the one you print.
+- **[docs/](docs/)** — Planning and rationale. Read when editing the project; the source of truth for design decisions.
+- **[runbook/](runbook/)** — Claude-coaching docs. The user does NOT print or follow a runbook — they have a Claude session to coach them through. These files brief that Claude session: phase-3 hands off post-install teaching, phase-3.5 lists deferred 2-in-1 hardware work, GLOSSARY + SURVIVAL are reference material.
 
 Everything else at the repo root is a deliverable the install consumes (phase scripts) or dev-machine plumbing (`package.json`, `.mise.toml`, `scripts/`).
 
@@ -51,8 +51,7 @@ Everything else at the repo root is a deliverable the install consumes (phase sc
 - [docs/tpm-luks-bitlocker-parity.md](docs/tpm-luks-bitlocker-parity.md) — Full design of the LUKS+TPM seal: signed-PCR-11 policy at install time + stage-2 PCR 7 binding from postinstall. Trust-anchor shift, threat model, recovery procedures.
 - [docs/wsl-setup-lessons.md](docs/wsl-setup-lessons.md) — Hard-won WSL pitfalls harvested from a prior `fnwsl` repo (MTU 1350 before any network op, `GIT_TEMPLATE_DIR=""` on every clone, `ZGEN_DIR` must be set before sourcing zgenom, never use raw.githubusercontent.com, etc.). **Consult before touching any setup script** — these gotchas are silent and expensive.
 
-### runbook/ — read at the laptop
-- [runbook/INSTALL-RUNBOOK.md](runbook/INSTALL-RUNBOOK.md) — Step-by-step script the user reads at the physical laptop, phase by phase. Duplicate of some decisions.md content by design, but biased toward *actions* vs. *rationale*. PDF output lives at `runbook/INSTALL-RUNBOOK.pdf`.
+### runbook/ — Claude-coaching handoffs
 - [runbook/phase-3-handoff.md](runbook/phase-3-handoff.md) — The document fed to the next Claude session *inside Arch after install*. Describes the user, hardware, installed stack, and what Claude is expected to teach (Hyprland, Helix, tmux). Keep in sync with `docs/decisions.md`.
 - [runbook/phase-3.5-hardware-handoff.md](runbook/phase-3.5-hardware-handoff.md) — Handoff between phases 3 and 4 — tracks which requirements in `docs/decisions.md` still need fingerprint/pen/tablet/RDP validation on real hardware.
 - [runbook/GLOSSARY.md](runbook/GLOSSARY.md) — Every non-obvious tool/utility/package that shows up in decisions.md + postinstall.sh, with a brief full-name / what-it-does / when-you-care blurb.
@@ -74,6 +73,42 @@ Everything else at the repo root is a deliverable the install consumes (phase sc
 ### CLI-stack shakedown (phase 0.5, optional)
 - [wsl-cli-test.sh](wsl-cli-test.sh) — Idempotent setup script for an Arch WSL distro used to validate the CLI stack (zsh + zgenom plugins, tmux, helix, mise tools, chezmoi). Ends with a `verify` block that lists FAIL/OK per tool — always preserve that verification section when editing.
 - [wsl-setup.sh](wsl-setup.sh) — Minimal `/etc/wsl.conf` writer; runs once as root inside the Arch WSL distro (sets default user `tom`, enables systemd, disables Windows PATH interop).
+
+## Coaching the user through the install
+
+The user does NOT follow a written runbook — Claude coaches in real time. There IS no `INSTALL-RUNBOOK.md` (removed 2026-04-27). The points below give a fresh Claude session the minimum context it needs to walk Tom through Phase 0 → Phase 3.
+
+### Phase 0 — boot-medium prep (before the laptop boots)
+
+- The laptop boots from a regular Arch live USB (no Ventoy, no autounattend). Make the USB on Tom's dev machine: download the latest Arch ISO from archlinux.org, write to USB with **Rufus** (Windows: `winget install Rufus.Rufus`) or `dd` on Linux.
+- Verify the ISO against the upstream `sha256sums.txt` before writing — otherwise a corrupt download silently produces a stick that gets ~10 min into boot before failing on `loop0`.
+- BIOS prep at the laptop: F2 → **SATA Operation = AHCI** (RAID/Intel-RST hides the disk from the installer); **Secure Boot OFF** for the install (limine binary isn't signed yet — sbctl wires this up later).
+- F12 boot menu → pick the USB stick.
+
+### Phase 2 — running install.sh
+
+Coaching the user during the install:
+- Tom needs Wi-Fi from the live shell. `iwctl` → `station wlan0 connect <SSID>` → enter PSK. Wi-Fi profiles for the user's home/office SSIDs are also embedded in `install.sh` §2 — if `archlinux.org` pings on first try, `install.sh` skips manual Wi-Fi.
+- `git clone https://github.com/fnrhombus/arch-setup -b claude/option-b-uki-tpm-parity /tmp/arch-setup && bash /tmp/arch-setup/phase-2-arch-install/install.sh` (drop `-b` once option-b is merged to main).
+- Three prompts up front: root password (twice), tom password (twice), then a 48-digit LUKS recovery key gets auto-generated and displayed in a red banner. Tom MUST photograph the screen — the key only exists in the LUKS header and his photo. Banner blocks until he types `I HAVE THE KEY` exactly.
+- After "Proceed?" `yes`, install runs unattended for ~15-25 min (pacstrap + mkinitcpio UKI builds + chroot config). Tom can step away.
+- On completion: remove the USB, reboot. **First boot is silent** if TPM2 enrollment succeeded at install time (look for `Enrolling TPM2 (signed PCR 11 policy)` in the install log). If TPM enroll failed, Tom enters the recovery key once; postinstall §7.5 retries.
+
+### Phase 3 — running postinstall.sh
+
+- Login as `tom`. Run `~/postinstall.sh`. Watch for:
+  - §1 pacman packages (~5 min, ~1.5 GB download)
+  - §3 yay + AUR builds (~10 min — VSCode, Edge, claude-desktop, etc.)
+  - §7 fingerprint enrollment — Tom needs to swipe ONE finger 13 times when prompted
+  - §7.5 stage-2 LUKS TPM2 reseal — prompts for the LUKS passphrase ONCE; this layers PCR 7 onto the seal so SB toggle becomes meaningful
+  - §13 chezmoi clones rhombu5/dots and applies the bare-Hyprland configs
+- After it completes: reboot one more time. Boot is still silent (the §7.5 reseal kept PCR-7-bound TPM unlock working). Greetd shows up; Tom logs in fingerprint-or-password; Hyprland comes up themed via matugen.
+
+### What to know that isn't in a script
+
+- **TPM2 / signed-PCR-11 design rationale** — `docs/tpm-luks-bitlocker-parity.md`. Read this before answering "why didn't first boot prompt me for the key" or "what happens if I enable Secure Boot."
+- **Migration to a future SSD** — `dd` the LUKS partition byte-for-byte to the new drive, then `btrfs filesystem resize max /` if the destination is bigger. No re-keying, no second-disk dependencies. The single-LUKS-partition design exists for this exact path.
+- **The Netac SSD** — slated for replacement, deliberately untouched by `install.sh`. Don't propose "use the Netac for X" — Tom wants it free of state.
 
 ## Working on this repo
 

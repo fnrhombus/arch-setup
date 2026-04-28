@@ -7,7 +7,7 @@ This document is meant to be fed to Claude Code once you're inside Arch Linux. I
 - Coming from Windows + VSCode + Docker
 - No vim/terminal editor experience — willing to learn
 - Doesn't enjoy endless config tweaking, but wants an awesome system
-- Goal: eventually Linux-only (Windows dual-boot is a safety net)
+- Linux-only single-OS install (Windows dual-boot dropped 2026-04-27)
 - GitHub username: fnrhombus
 - Has an existing WSL zsh/tmux setup (fnwsl repo) — carry over patterns where appropriate
 
@@ -15,8 +15,8 @@ This document is meant to be fed to Claude Code once you're inside Arch Linux. I
 - Dell Inspiron 7786 (17" 2-in-1 convertible, touchscreen)
 - Intel i7-8565U, 16GB DDR4-2400 (single channel — consider adding second stick)
 - Intel UHD 620 only (NVIDIA MX250 blacklisted — incompatible with Wayland)
-- Samsung SSD 840 PRO 512GB — SATA SSD, ~540 MB/s (dual-boot: Windows + Arch)
-- Netac SSD 128GB — SATA SSD (Windows C: from previous install, may repurpose)
+- Samsung SSD 840 PRO 512GB — SATA SSD, ~540 MB/s (Arch only — full disk)
+- Netac SSD 128GB — present but unused; slated for replacement
 - External monitor via HDMI direct (DisplayLink dock used only for ethernet + USB hub, not video)
 - Wacom Intuos pen tablet
 - Dell Wireless 1801 WiFi (Qualcomm Atheros) + BT 4.0
@@ -185,15 +185,14 @@ This document is meant to be fed to Claude Code once you're inside Arch Linux. I
 - HDMI port is wired to Intel iGPU — external monitor works without NVIDIA
 - If nvidia modules are loading, check `/etc/modprobe.d/blacklist-nvidia.conf`
 
-### Dual Boot
-- Windows and Arch share the EFI partition on Samsung 512GB SSD
-- **Bootloader**: limine (replaced systemd-boot). Config: `/boot/limine.conf`. UEFI binary at `/boot/EFI/BOOT/BOOTX64.EFI` (fallback path so Windows wiping NVRAM doesn't kill us).
+### Boot + storage
+- **Bootloader**: limine. Config: `/boot/limine.conf`. UEFI binary at `/boot/EFI/BOOT/BOOTX64.EFI` (fallback path so a NVRAM reset doesn't kill us). Linux entries chainload UKIs from `/boot/EFI/Linux/`.
 - **Snapper integration**: `limine-snapper-sync` auto-generates boot menu entries from snapper snapshots — pick yesterday's snapshot at the menu to roll back a bad pacman update.
-- Samsung layout: [EFI 512MB] [MSR 16MB] [Windows 160GiB] [Linux ~316GiB LUKS + btrfs with @, @home, @snapshots]
-- Netac 128GB: [ArchRecovery 1.5GiB] [ArchSwap 16GiB LUKS, hibernate-ready] [ArchVar 110GiB LUKS ext4 → /var/log + /var/cache binds]
-- SATA mode: AHCI (RAID hides the drives from Linux installer)
-- Windows Fast Startup and hibernation: **disabled** on Windows side. Linux hibernation: **enabled** (S4) with TPM2-sealed cryptswap (per `decisions.md` Battery bullet).
-- Windows partition mounted read-only at /mnt/windows for media access
+- Samsung layout (single OS): [EFI 1GiB FAT32] [LUKS2 ~475GiB → btrfs with @, @home, @snapshots, @swap]
+- 16 GiB NoCOW swapfile inside `@swap` for hibernate (S4). `resume=/dev/mapper/cryptroot resume_offset=<N>` in `/etc/kernel/cmdline`.
+- SATA mode: AHCI (RAID hides the drives from Linux).
+- Hibernation: **enabled** (S4); user-invoked via Super+Shift+H per `decisions.md` Battery bullet.
+- Netac 128GB: present but untouched — slated for replacement. Migration to a future SSD is a one-line `dd` of the LUKS partition.
 
 ### Browsers
 - Edge (default) — sync with Windows side. Installed from AUR (`microsoft-edge-stable-bin`).
@@ -324,17 +323,17 @@ Everything listed below is installed automatically by the phase-2 + phase-3 scri
 - **Replace dead battery**: Lid-close hibernate flips from dead-code to active automatically (logind config is forward-compat).
 - **Secure Boot via sbctl**: Currently disabled. The reinstall pre-installs `sbctl` (postinstall §1) and the `95-limine-redeploy.hook` is already SB-aware (`/usr/local/sbin/limine-redeploy` calls `sbctl sign -s` after copy if SB is enrolled, no-op otherwise). To enable end-to-end:
   1. **Reboot, BIOS, set Secure Boot to "Setup Mode"** (clears stored keys, lets sbctl enroll custom ones).
-  2. **From Arch**, enroll keys + Microsoft KEK (so Windows still chainloads):
+  2. **From Arch**, enroll our own keys (and optionally Microsoft's, in case you ever want to UEFI-boot a vendor-signed binary):
      ```
      sudo sbctl create-keys
-     sudo sbctl enroll-keys --microsoft
+     sudo sbctl enroll-keys --microsoft   # --microsoft optional but harmless
      ```
-  3. **Sign every boot artifact** (sbctl tracks them after the first `-s` and its own pacman hook keeps them signed across upgrades):
+  3. **Sign every boot artifact** (sbctl tracks them after the first `-s` and its own pacman hook keeps them signed across upgrades). With UKIs, the kernel + initramfs are inside the signed PE, so signing the UKI itself is the only kernel-side step:
      ```
      sudo sbctl sign -s /boot/EFI/BOOT/BOOTX64.EFI
      sudo sbctl sign -s /usr/share/limine/BOOTX64.EFI
-     sudo sbctl sign -s /boot/vmlinuz-linux
-     sudo sbctl sign -s /boot/vmlinuz-linux-lts
+     sudo sbctl sign -s /boot/EFI/Linux/arch-linux.efi
+     sudo sbctl sign -s /boot/EFI/Linux/arch-linux-lts.efi
      sudo sbctl verify     # confirm all 4 say "Signed"
      ```
   4. **Reboot, BIOS, flip Secure Boot to "User Mode" (enabled)**. First boot will prompt for the LUKS recovery key — PCR 7 changed (SB toggled on), so the TPM seal is invalid.
@@ -344,4 +343,4 @@ Everything listed below is installed automatically by the phase-2 + phase-3 scri
      sudo /usr/local/sbin/tpm2-reseal-luks
      sudo reboot
      ```
-  7. Subsequent boots are silent again. Next BitLocker boot on the Windows side will also prompt once (PCR 7 changed there too) — same recovery flow as the original install.
+  7. Subsequent boots are silent again — the seal now binds to the new PCR 7 (SB-on) and survives every kernel update via the signed-PCR-11 UKI policy.
