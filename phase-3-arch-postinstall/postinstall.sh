@@ -880,12 +880,11 @@ HYPRLOCKPAMEOF
 # so there's no separate cryptswap volume to enroll.
 if [[ -c /dev/tpm0 || -c /dev/tpmrm0 ]] && [[ -z "${SKIP_TPM_LUKS:-}" ]]; then
     NEED_TPM_ENROLL=()
-    for partlabel in ArchRoot; do
-        dev="/dev/disk/by-partlabel/$partlabel"
-        if [[ ! -b "$dev" ]]; then
-            warn "$dev not found — skipping TPM enroll for $partlabel."
-            continue
-        fi
+    partlabel=ArchRoot
+    dev="/dev/disk/by-partlabel/$partlabel"
+    if [[ ! -b "$dev" ]]; then
+        warn "$dev not found — skipping TPM enroll for $partlabel."
+    else
         # Three states to distinguish — and we want different behavior in each:
         #   (a) NO TPM2 token in LUKS header           → enroll fresh
         #   (b) TPM2 token present, TPM has the key    → SKIP (BitLocker parity:
@@ -911,7 +910,7 @@ if [[ -c /dev/tpm0 || -c /dev/tpmrm0 ]] && [[ -z "${SKIP_TPM_LUKS:-}" ]]; then
             warn "TPM2 keyslot on $partlabel is dead (TPM was cleared since enrollment) — will wipe + re-enroll."
             NEED_TPM_ENROLL+=("$partlabel")
         fi
-    done
+    fi
 
     if (( ${#NEED_TPM_ENROLL[@]} > 0 )); then
         if [[ -t 0 ]]; then
@@ -963,20 +962,16 @@ if [[ -c /dev/tpm0 || -c /dev/tpmrm0 ]] && [[ -z "${SKIP_TPM_LUKS:-}" ]]; then
     # non-existent slot (systemd#39049, #36293). Idempotent: the sed only
     # matches lines still ending in `luks,discard`.
     _crypttab_changed=0
-    for pair in "cryptroot:ArchRoot"; do
-        _crypt_name="${pair%:*}"
-        _partlabel="${pair#*:}"
-        _dev="/dev/disk/by-partlabel/$_partlabel"
-        [[ -b "$_dev" ]] || continue
-        if sudo systemd-cryptenroll "$_dev" 2>/dev/null | awk 'NR>1 && $2=="tpm2"{f=1} END{exit !f}'; then
-            if sudo grep -qE "^${_crypt_name} .*luks,discard$" /etc/crypttab.initramfs; then
-                log "Adding tpm2-device=auto to $_crypt_name in /etc/crypttab.initramfs..."
-                sudo sed -i "/^${_crypt_name} /s/luks,discard\$/luks,discard,tpm2-device=auto/" /etc/crypttab.initramfs
-                _crypttab_changed=1
-            fi
+    _dev="/dev/disk/by-partlabel/ArchRoot"
+    if [[ -b "$_dev" ]] && \
+       sudo systemd-cryptenroll "$_dev" 2>/dev/null | awk 'NR>1 && $2=="tpm2"{f=1} END{exit !f}'; then
+        if sudo grep -qE "^cryptroot .*luks,discard$" /etc/crypttab.initramfs; then
+            log "Adding tpm2-device=auto to cryptroot in /etc/crypttab.initramfs..."
+            sudo sed -i "/^cryptroot /s/luks,discard\$/luks,discard,tpm2-device=auto/" /etc/crypttab.initramfs
+            _crypttab_changed=1
         fi
-    done
-    unset _crypt_name _partlabel _dev pair
+    fi
+    unset _dev
     if (( _crypttab_changed )); then
         log "Regenerating initramfs (mkinitcpio -P) so TPM2 unlock takes effect next boot..."
         sudo mkinitcpio -P
