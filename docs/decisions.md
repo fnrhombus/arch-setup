@@ -120,25 +120,22 @@
 
 ### Q9: Partition Plan
 
-**Samsung 512GB SSD (main):**
+**Single-disk install on Samsung 512GB SSD.** Other disks (Netac, future replacements) left untouched.
+
 ```
-[EFI 1GiB FAT32] [MSR 16MB] [Windows 160GB NTFS] [Linux ~316GB btrfs]
+[EFI 1GiB FAT32] [LUKS2 → btrfs ~475GiB]
 ```
 
-**Netac 128GB SSD (secondary — non-speed-critical):**
-```
-[Arch recovery ISO ~1.5GB unencrypted] [swap 16GB LUKS2] [/var/log + /var/cache ~110GB LUKS2 ext4]
-```
-- Recovery partition: stock Arch live ISO `dd`'d to partition, bootable from the F12 firmware menu (Dell shows the Netac's EFI boot entry directly). Replaces need for live USB after initial install.
-- Swap is **persistent LUKS2** (not random-key dm-crypt) — required for hibernate. TPM2-enrolled in postinstall §7.5 so it auto-unseals at boot.
-- /var/log + /var/cache also LUKS2-wrapped (cryptvar mapper); keyfile-unlocked from the TPM-unsealed cryptroot. See §Q11 for the full encryption design.
-
-- **btrfs subvolumes**: @, @home, @snapshots
-- **Mount options**: `noatime,compress=zstd:3,space_cache=v2,ssd` (level-3 zstd is the Arch-wiki default — good ratio, negligible CPU cost; `space_cache=v2` + `ssd` are the modern defaults for SATA SSDs).
-- /var/log and /var/cache on Netac — keeps them off btrfs snapshots and off the main SSD's endurance budget.
-- Windows partition mounted read-only at `/mnt/windows` for media access (read-only avoids the NTFS-fuse write-corruption risk).
-- **Resize strategy (Linux → Windows)**: `phase-6-grow-windows.sh` adds a new btrfs device at the tail of the Samsung, runs `btrfs device add`+`remove` to migrate data, then deletes the original partition — free space ends up **directly adjacent to Windows** so Disk Management's Extend Volume works. Swap lives on the *Netac*, so nothing sits between Windows and the new free space.
-- Disable Windows Fast Startup + hibernation for clean dual-boot (baked into `autounattend.xml` via `Specialize.ps1`).
+- **EFI System partition (p1, 1 GiB FAT32, mounted at `/boot`)** — holds limine + UKIs (`arch-linux.efi`, `arch-linux-lts.efi`, ~80 MB each). 1 GiB instead of the older 512 MiB to fit sbctl-signed copies after Secure Boot is enrolled.
+- **LUKS2 partition (p2, rest of disk)** — single LUKS volume, mapper name `cryptroot`. Inside: btrfs with subvolumes:
+  - `@` → `/`
+  - `@home` → `/home`
+  - `@snapshots` → `/.snapshots` (snapper target)
+  - `@swap` → `/swap` (holds a 16 GiB NoCOW swapfile, hibernate-ready)
+- **Mount options**: `noatime,compress=zstd:3,space_cache=v2,ssd` (Arch-wiki defaults). The `@swap` subvolume mounts WITHOUT `compress=` because btrfs swapfiles can't live on a compressed file.
+- **Hibernate**: kernel cmdline carries `resume=/dev/mapper/cryptroot resume_offset=<N>`, where `<N>` is the swapfile's physical extent offset (captured by `install.sh` §8.5 via `btrfs inspect-internal map-swapfile -r`).
+- **Migration to a future SSD** is one line: `dd` the LUKS partition byte-for-byte to the new drive, then `btrfs filesystem resize max /` if the destination is bigger. No second-disk dependencies, no re-keying.
+- See §Q11 for the full encryption design (LUKS2 + signed-PCR-11 TPM seal + stage-2 PCR 7 binding).
 
 ### Q10: Other Needs
 
