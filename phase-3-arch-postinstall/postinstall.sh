@@ -954,10 +954,26 @@ if command -v bw >/dev/null; then
     fi
 fi
 
-# Pre-seed the Bitwarden desktop app's environmentUrls so the first launch
-# lands on your self-hosted server (no need to pick "Self-hosted" from the
-# dropdown). Structure is documented-minimal: if Bitwarden desktop rejects
-# it, just pick "Self-hosted" at the login screen and enter the URL there.
+# Pre-seed the Bitwarden desktop app's `global` settings so the first
+# launch lands on the self-hosted server with the user's preferred
+# tray + autostart + browser-integration setup. Only writes if no
+# data.json exists yet — re-running postinstall won't clobber any
+# settings the user has tuned in-GUI.
+#
+# What's seeded vs interactive:
+#   ✓ environmentUrls.base   — self-hosted server URL
+#   ✓ tray.enabled, .minimizeToTray, .startToTray   — tray behavior
+#   ✓ openAtLogin = false    — Hyprland exec-once handles autostart
+#   ✓ enableBrowserIntegration — flag only; toggle in-GUI once after
+#                                 first launch to write per-browser
+#                                 native-messaging manifests under
+#                                 ~/.mozilla/native-messaging-hosts/
+#                                 (or Edge/Chromium equivalent).
+#   ✗ "Unlock with system authentication" — PAM + keyring handshake;
+#                                            must enable via Settings.
+#   ✗ "Enable SSH agent" — creates ~/.bitwarden-ssh-agent.sock at
+#                          toggle time; must enable via Settings.
+#   ✗ "Ask for SSH auth = Never" — per-key, set when adding each key.
 BW_DESKTOP_DIR="$HOME/.config/Bitwarden"
 if [[ ! -f "$BW_DESKTOP_DIR/data.json" ]]; then
     mkdir -p "$BW_DESKTOP_DIR"
@@ -966,7 +982,14 @@ if [[ ! -f "$BW_DESKTOP_DIR/data.json" ]]; then
   "global": {
     "environmentUrls": {
       "base": "$BW_SERVER"
-    }
+    },
+    "tray": {
+      "enabled": true,
+      "minimizeToTray": true,
+      "startToTray": true
+    },
+    "openAtLogin": false,
+    "enableBrowserIntegration": true
   }
 }
 EOF
@@ -1666,11 +1689,21 @@ cat <<'POSTINSTALL_OUTRO'
 
 [1] Reboot or log out → log back in via greetd to start Hyprland.
 
-[2] Bitwarden desktop:
-      - Launch, log in once with your master password.
-      - Settings → Security → enable "Unlock with system keyring".
-      - Settings → SSH agent → enable. Import keys as "SSH key" items.
-    After that, vault + agent + sudo-PIN + fingerprint all unlock via login.
+[2] Bitwarden first launch — server URL + tray + autostart-off pre-seeded.
+    Hyprland's exec-once already started bitwarden-desktop. Log in once
+    with your master password (server URL is already https://hass4150.duckdns.org:7277).
+    Then in Settings:
+      - Security → "Unlock with system authentication" — enable. Binds to
+        PAM + gnome-keyring at toggle time; can't be JSON-seeded.
+      - SSH agent → enable. Creates ~/.bitwarden-ssh-agent.sock. As you
+        add SSH-key vault items, set "Ask for SSH auth = Never" per key.
+      - "Allow browser integration" — flag is pre-seeded, but toggle OFF
+        then ON once in the GUI to write the per-browser native-messaging
+        manifests under ~/.mozilla/native-messaging-hosts/ (or Edge /
+        Chromium equivalent). Without that step the browser extension
+        can't talk to the desktop.
+    After SSH-agent is on with at least one key, vault + agent + sudo-PIN +
+    fingerprint all unlock via login.
 
 [3] gh + git identity:
       Already wired if the first-login planter ran (see ~/.gitconfig.local).
