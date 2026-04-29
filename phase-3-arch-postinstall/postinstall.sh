@@ -822,21 +822,19 @@ sudo chmod 755 /usr/local/bin/lid-closed
 log "Writing PAM stacks for sudo / hyprlock..."
 
 # sudo: PIN (3 attempts) → (lid-aware) fingerprint(20s) → password.
-# `[success=done default=1]` on each libpinpam line: success=done returns
-# auth success immediately; default=1 jumps one rule forward on any other
-# return, giving the user a fresh PIN prompt. Three rows = three attempts
-# before falling through to fingerprint/password. The third row uses
-# `default=ignore` so a third failure cleanly continues to the next module.
+# sudo: PIN only. No fingerprint, no password fallback. Daily auth happens
+# at greetd (fingerprint+password); sudo trusts the already-authenticated
+# session and gates with a TPM-backed PIN, period. If the PIN ever breaks
+# (TPM clear, pinpam regression), recover via TTY root login (Ctrl+Alt+F2,
+# log in as root with the install-time root password) and edit this file.
+#
+# `auth required libpinpam.so` — must succeed for auth to pass. No fall-
+# through. pinpam handles its own retry loop ("X attempts remaining"), so
+# multi-line PAM-level retries are redundant.
 sudo tee /etc/pam.d/sudo >/dev/null <<'SUDOPAMEOF'
 #%PAM-1.0
-# arch-setup: PIN primary (3 tries), fingerprint optional (skipped if lid
-# closed, 20s timeout if open), password fallback. See postinstall.sh §7a.
-auth        [success=done default=1]    libpinpam.so
-auth        [success=done default=1]    libpinpam.so
-auth        [success=done default=ignore] libpinpam.so
-auth        [success=1 default=ignore]  pam_exec.so quiet /usr/local/bin/lid-closed
-auth        sufficient  pam_fprintd.so              max-tries=5 timeout=20
-auth        include     system-auth
+# arch-setup: PIN-only sudo. See postinstall.sh §7a.
+auth        required    libpinpam.so
 account     include     system-auth
 session     include     system-auth
 SUDOPAMEOF
@@ -1540,9 +1538,9 @@ check "pinpam in sudo"       "grep -q libpinpam /etc/pam.d/sudo"
 check "pinpam in hyprlock"   "grep -q libpinpam /etc/pam.d/hyprlock"
 check "no pinpam in greetd"  "! grep -vE '^[[:space:]]*#' /etc/pam.d/greetd | grep -q libpinpam"
 check "fprintd in greetd"    "grep -vE '^[[:space:]]*#' /etc/pam.d/greetd | grep -qE 'success=done.*default=ignore.*pam_fprintd.*max-tries=1.*timeout=5'"
-check "fprintd in sudo"      "grep -q 'pam_fprintd.*max-tries=5.*timeout=20' /etc/pam.d/sudo"
+check "no fprintd in sudo (PIN-only)" "! grep -q pam_fprintd /etc/pam.d/sudo"
+check "sudo is PIN-only (one auth line)" "grep -cE '^auth' /etc/pam.d/sudo | grep -qx 1"
 check "fprintd in hyprlock"  "grep -q 'pam_fprintd.*max-tries=5.*timeout=20' /etc/pam.d/hyprlock"
-check "pinpam before fprintd sudo" "awk '/libpinpam/{p=NR} /pam_fprintd/{f=NR} END{exit !(p && f && p<f)}' /etc/pam.d/sudo"
 check "pinpam before fprintd hyprlock" "awk '/libpinpam/{p=NR} /pam_fprintd/{f=NR} END{exit !(p && f && p<f)}' /etc/pam.d/hyprlock"
 check "pam_unix in sys-auth" "grep -q pam_unix /etc/pam.d/system-auth"
 check "LUKS root TPM2"      "sudo systemd-cryptenroll /dev/disk/by-partlabel/ArchRoot 2>/dev/null | awk 'NR>1 && \$2==\"tpm2\"{f=1} END{exit !f}'"
