@@ -1,6 +1,0 @@
-#!/bin/bash
-# NetworkManager dispatcher — trigger an azure-ddns run on interface up.
-# The periodic systemd timer covers steady-state; this hook closes the gap
-# between "link associated" and "next timer tick".
-[ "$2" = "up" ] || exit 0
-systemctl start --no-block azure-ddns.service
