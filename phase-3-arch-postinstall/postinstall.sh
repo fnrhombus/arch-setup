@@ -163,6 +163,7 @@ log "Installing pacman packages from official repos..."
 sudo pacman -Syu --noconfirm --needed \
     --overwrite '/boot/memtest86+/*' \
     base-devel git curl wget openssh \
+    inetutils \
     zsh tmux helix \
     bat fd ripgrep eza lsd btop jq fzf zoxide direnv \
     sd go-yq xh \
@@ -391,13 +392,13 @@ AUR_PACKAGES=(
     # then use the dGPU for photogrammetry/ML without ever touching display.
     nvidia-470xx-dkms
     nvidia-470xx-utils
-    # winapps-git: Parallels-Coherence-equivalent — runs Windows apps from a
-    # KVM/QEMU Win11 VM as native windows on the Linux desktop via RDP.
-    # Requires a Windows VM set up via virt-manager separately (see Phase 4
-    # docs). Pulls in freerdp + jq as deps. The actual KVM stack (qemu-full,
-    # virt-manager, libvirt, edk2-ovmf, swtpm, dnsmasq) is in the pacman §1
-    # list above so it's available before WinApps runs.
-    winapps-git
+    # winapps-git: deferred — was failing yay lookup as of 2026-04-29 (AUR
+    # rename or removal; needs investigation). Optional Phase 4 functionality
+    # for running Windows apps from a KVM/QEMU Win11 VM as native windows on
+    # the Linux desktop via RDP. The KVM stack (qemu-full, virt-manager,
+    # libvirt, edk2-ovmf, swtpm, dnsmasq) is in the pacman §1 list, so the
+    # user can install winapps manually once they get to that part of
+    # Phase 4: `yay -S winapps` (or whatever the current AUR name is).
 )
 # yay -S --needed exits 0 even when its AUR RPC query EOFs out — it
 # treats "couldn't query AUR" as "package not selected, nothing to do"
@@ -1514,7 +1515,7 @@ check "bluetooth"           "systemctl is-enabled bluetooth"
 echo "-- printing (Canon Pro 9000 Mk II via USB) --"
 check "cups installed"      "pacman -Q cups"
 check "cups.socket enabled" "systemctl is-enabled cups.socket"
-check "gutenprint PPDs"     "ls -d /usr/share/cups/model/gutenprint* 2>/dev/null | head -1 | grep -q gutenprint"
+check "gutenprint PPDs"     "pacman -Q gutenprint"
 check "tom in lp group"     "id -nG tom | grep -qw lp"
 
 echo "-- secrets / auth --"
@@ -1661,7 +1662,9 @@ cat <<'POSTINSTALL_OUTRO'
           installed
         - libvirtd.socket enabled
         - tom in libvirt + kvm groups (log out + back in to take effect)
-        - winapps-git installed from AUR
+        - winapps NOT auto-installed (was failing yay lookup; AUR rename or
+          removal as of 2026-04-29). Install manually when you need it:
+          `yay -Ss winapps` to find the current package, then `yay -S <name>`.
 
       One-time Windows install via virt-manager:
         1. Download a Win11 ISO (microsoft.com/software-download/windows11)
