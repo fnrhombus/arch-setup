@@ -191,7 +191,8 @@ sudo pacman -Syu --noconfirm --needed \
     mise chezmoi github-cli \
     docker docker-compose docker-buildx \
     snapper snap-pac \
-    cmake cpio
+    cmake cpio \
+    qemu-full virt-manager libvirt edk2-ovmf swtpm dnsmasq iptables-nft
 
 sudo pkgfile -u
 
@@ -232,6 +233,26 @@ sudo systemctl enable --now docker.service
 if ! id -nG tom | grep -qw docker; then
     sudo usermod -aG docker tom
     warn "Added tom to docker group — log out and back in for it to take effect."
+fi
+
+# ---------- 1a-virt. KVM/libvirt for Windows VM + WinApps ----------
+# qemu-full + virt-manager + libvirt + edk2-ovmf + swtpm + dnsmasq are
+# the standard "Windows-in-a-VM" stack on Arch. WinApps (AUR §3) talks
+# to a libvirt-managed Win11 VM via RDP to surface individual Windows
+# apps as Linux-native windows (Parallels-Coherence-equivalent).
+#
+# tom needs libvirt + kvm group membership to run virt-manager without
+# sudo. libvirtd.socket starts the daemon on demand when virt-manager /
+# WinApps connects.
+log "Enabling libvirtd socket and adding tom to libvirt + kvm groups..."
+sudo systemctl enable --now libvirtd.socket
+if ! id -nG tom | grep -qw libvirt; then
+    sudo usermod -aG libvirt tom
+    warn "Added tom to libvirt group — log out and back in for it to take effect."
+fi
+if ! id -nG tom | grep -qw kvm; then
+    sudo usermod -aG kvm tom
+    warn "Added tom to kvm group — log out and back in for it to take effect."
 fi
 
 # ---------- 1a-tss. TPM access for tom (needed by pinutil) ----------
@@ -358,6 +379,19 @@ AUR_PACKAGES=(
     bibata-cursor-theme
     pacseek
     limine-snapper-sync
+    # NVIDIA compute-only stack for the MX250 (Pascal, compute capability 6.1).
+    # Display modules are blacklisted in chroot.sh; these pull in the kernel
+    # driver + nvidia-smi/CUDA runtime libs. Apps like Meshroom or COLMAP can
+    # then use the dGPU for photogrammetry/ML without ever touching display.
+    nvidia-470xx-dkms
+    nvidia-470xx-utils
+    # winapps-git: Parallels-Coherence-equivalent — runs Windows apps from a
+    # KVM/QEMU Win11 VM as native windows on the Linux desktop via RDP.
+    # Requires a Windows VM set up via virt-manager separately (see Phase 4
+    # docs). Pulls in freerdp + jq as deps. The actual KVM stack (qemu-full,
+    # virt-manager, libvirt, edk2-ovmf, swtpm, dnsmasq) is in the pacman §1
+    # list above so it's available before WinApps runs.
+    winapps-git
 )
 # yay -S --needed exits 0 even when its AUR RPC query EOFs out — it
 # treats "couldn't query AUR" as "package not selected, nothing to do"
@@ -1654,7 +1688,52 @@ cat <<'POSTINSTALL_OUTRO'
         sudo ufw delete allow <port>/tcp # remove
       Rules apply to BOTH IPv4 and IPv6 — ufw is dual-stack.
 
-See runbook/INSTALL-RUNBOOK.md (printed PDF) for the same instructions
-in case this output scrolls off.
+[7] Windows VM + WinApps (Parallels-Coherence-equivalent):
+
+      Prereqs done by postinstall:
+        - qemu-full + virt-manager + libvirt + edk2-ovmf + swtpm + dnsmasq
+          installed
+        - libvirtd.socket enabled
+        - tom in libvirt + kvm groups (log out + back in to take effect)
+        - winapps-git installed from AUR
+
+      One-time Windows install via virt-manager:
+        1. Download a Win11 ISO (microsoft.com/software-download/windows11)
+           — install with virt-manager, name the VM 'RDPWindows' (matches
+           WinApps default).
+        2. Inside the VM: enable Remote Desktop, set a local user with a
+           password, install your Windows apps (3DF Zephyr, Office, etc.).
+        3. Snapshot the VM (virt-manager → Snapshots) before WinApps wires.
+
+      Configure WinApps (one-time):
+        winapps-setup
+        # follow prompts; point at the RDPWindows VM. WinApps then
+        # auto-detects installed Windows apps and creates ~/.local/share/
+        # applications/*.desktop entries that launch them as Linux windows.
+
+      Daily use: launch Windows apps from Fuzzel like any Linux app —
+      they run inside the VM but appear as standalone Hyprland windows.
+
+[8] NVIDIA MX250 for CUDA compute (no display):
+
+      Prereqs done by postinstall:
+        - nvidia-470xx-dkms + nvidia-470xx-utils installed (AUR)
+        - Display modules (nvidia_drm, nvidia_modeset) blacklisted
+        - Compute modules (nvidia, nvidia_uvm) load on demand
+
+      Verify after first reboot:
+        sudo modprobe nvidia
+        nvidia-smi                       # should show 'GeForce MX250'
+
+      Install CUDA toolkit when needed (e.g. for Meshroom or COLMAP):
+        sudo pacman -S cuda             # current 12.x — may have Pascal
+                                        # caveats; check Meshroom/COLMAP
+                                        # docs for the supported CUDA range
+                                        # before switching.
+
+      Photogrammetry apps NOT installed by default — pick when ready:
+        Meshroom (AliceVision)  — yay -S meshroom
+        COLMAP                  — sudo pacman -S colmap
+
 ====================================================================
 POSTINSTALL_OUTRO
