@@ -431,6 +431,37 @@ if (( ${#AUR_FAILED[@]} > 0 )); then
     warn "Resolve manually (often: 'pacman -R <conflicting-variant>' then 'yay -S <pkg>'), then re-run this script."
 fi
 
+# ---------- 3-edge. Microsoft Edge: suppress OOBE / welcome / sign-in nags ----------
+# Edge's default first-launch flow drops the user into a multi-page welcome
+# wizard ("Make Edge yours" → sign-in prompt → choose appearance → import →
+# pin to taskbar) BEFORE navigating to whatever URL xdg-open passed it.
+# That broke the user during `gh auth login`: the device-code URL was
+# requested, but Edge stayed on edge://welcome-edge until OOBE finished.
+#
+# Managed-policy file at /etc/opt/edge/policies/managed/ short-circuits
+# all of that. HideFirstRunExperience is the single most important key;
+# the others suppress nags that show up later (sign-in pop-ups, telemetry
+# banners, Microsoft Rewards promos, etc).
+#
+# Policy reference:
+#   https://learn.microsoft.com/en-us/deployedge/microsoft-edge-policies
+if pacman -Q microsoft-edge-stable-bin >/dev/null 2>&1; then
+    log "Writing Edge managed policy (suppress OOBE / sign-in / promos)..."
+    sudo install -d -m 755 /etc/opt/edge/policies/managed
+    sudo tee /etc/opt/edge/policies/managed/arch-setup.json >/dev/null <<'EDGEPOLICYEOF'
+{
+    "HideFirstRunExperience": true,
+    "DefaultBrowserSettingEnabled": false,
+    "BrowserSignin": 0,
+    "MetricsReportingEnabled": false,
+    "PersonalizationReportingEnabled": false,
+    "PromotionalTabsEnabled": false,
+    "ShowMicrosoftRewards": false,
+    "PromotionsEnabled": false
+}
+EDGEPOLICYEOF
+fi
+
 # ---------- 3a. certbot-dns-azure plugin (pipx — not packaged for Arch) ----------
 # certbot-dns-azure is PyPI-only: not in extra, not in AUR, not community-
 # repackaged. Arch's system python blocks `pip install` via PEP 668, so we
