@@ -1051,76 +1051,26 @@ if [[ -S "$HOME/.bitwarden-ssh-agent.sock" ]]; then
 fi
 EOF
 
-# ---------- 9. GitHub identity + SSH-signing planter ----------
-# Two-phase planter:
-#   Phase A (auth):    bw login -> gh auth login -> write name/email in ~/.gitconfig.local.
-#                      Self-deletes planter A once gh auth status is OK.
-#   Phase B (signing): plants ~/.zshrc.d/arch-ssh-signing.zsh which checks
-#                      `ssh-add -L` every shell until it returns a pubkey from
-#                      the Bitwarden SSH agent. When it does, writes the
-#                      allowedSignersFile + signingkey stanza and registers
-#                      the pubkey with GitHub via `gh ssh-key add`. Self-deletes
-#                      once allowed_signers is populated and gh accepts the key.
+# ---------- 9. GitHub identity (one-shot if gh already authed) ----------
+# The planter scripts that handle bw login / gh auth login / SSH-signing
+# wire-up live in rhombu5/dots as
+#   ~/.local/share/arch-setup-bootstraps/{first-login,ssh-signing}.sh
+# applied by §13's chezmoi apply and dispatched by
+#   ~/.zshrc.d/arch-bootstrap-runner.zsh
+# on each interactive shell. Each script self-checks its precondition
+# and self-deletes on success.
 #
-# This decouples identity setup (needs gh only) from SSH signing (needs the
-# Bitwarden desktop app to be running with the SSH-agent toggle enabled and
-# at least one "SSH key" vault item loaded).
-
-mkdir -p "$HOME/.zshrc.d"
-
-# Phase B planter — always written; it's idempotent and self-deletes on success.
-cat > "$HOME/.zshrc.d/arch-ssh-signing.zsh" <<'SIGEOF'
-# arch: wait for Bitwarden SSH agent to expose a key, then wire git signing (self-deleting)
-# Skipped during postinstall's own zgenom warmup — see arch-first-login.zsh.
-if [[ -n "${_POSTINSTALL_NONINTERACTIVE:-}" ]]; then
-    return 0
-fi
-# Explicitly set SSH_AUTH_SOCK to the Bitwarden socket here (rather than rely
-# on .zshrc.d load order) so we never wire signing to the wrong agent's key
-# if some future drop-in sets a competing SSH_AUTH_SOCK first.
-if [[ -t 0 ]] && command -v gh &>/dev/null && gh auth status &>/dev/null \
-   && [[ -S "$HOME/.bitwarden-ssh-agent.sock" ]]; then
-  _pubkey=$(SSH_AUTH_SOCK="$HOME/.bitwarden-ssh-agent.sock" ssh-add -L 2>/dev/null | head -1)
-  if [[ "$_pubkey" == ssh-* ]]; then
-    _gh_user=$(gh api user --jq '.login' 2>/dev/null) || _gh_user=""
-    _gh_id=$(gh api user --jq '.id' 2>/dev/null) || _gh_id=""
-    if [[ -n "$_gh_user" && -n "$_gh_id" ]]; then
-      _gh_email="${_gh_id}+${_gh_user}@users.noreply.github.com"
-      echo "${_gh_email} ${_pubkey}" > ~/.ssh/allowed_signers
-      # Append signing stanza if not already present
-      if ! grep -q 'gpgsign = true' ~/.gitconfig.local 2>/dev/null; then
-        cat >> ~/.gitconfig.local <<GITEOF
-[gpg]
-    format = ssh
-[gpg "ssh"]
-    allowedSignersFile = ~/.ssh/allowed_signers
-    defaultKeyCommand = ssh-add -L
-[commit]
-    gpgsign = true
-[tag]
-    gpgsign = true
-GITEOF
-      fi
-      _tmp=$(mktemp); printf '%s\n' "$_pubkey" > "$_tmp"
-      gh ssh-key add "$_tmp" --title "$(hostname) - arch" --type authentication 2>/dev/null || true
-      gh ssh-key add "$_tmp" --type signing 2>/dev/null || true
-      rm -f "$_tmp"
-      echo "arch: wired SSH signing with pubkey from Bitwarden SSH agent."
-      rm -f ~/.zshrc.d/arch-ssh-signing.zsh
-    fi
-    unset _gh_user _gh_id _gh_email _tmp
-  fi
-  unset _pubkey
-fi
-SIGEOF
-
-# Phase A planter — only if gh isn't already authed.
+# What stays here is the install-time fast path: if `gh` already authed
+# (e.g. the user re-runs postinstall after first login), surgically write
+# user.name/user.email into ~/.gitconfig.local so we don't wait for the
+# next interactive shell to do it.
 #
-# CRITICAL: use `git config --file` for individual keys, NOT `cat > ~/.gitconfig.local`.
-# Earlier versions did `cat >` which clobbered the whole file on every postinstall
-# re-run — wiping the [commit]/gpg.ssh signing block that Phase B below appends,
-# plus any hand-added user config. `git config --file` surgically updates user.name
-# and user.email, leaving other sections intact.
+# CRITICAL: use `git config --file` for individual keys, NOT
+# `cat > ~/.gitconfig.local`. Earlier versions did `cat >` which clobbered
+# the whole file on every postinstall re-run — wiping the [commit]/gpg.ssh
+# signing block that ssh-signing.sh appends, plus any hand-added user
+# config. `git config --file` surgically updates leaving other sections
+# intact.
 if gh auth status &>/dev/null; then
     log "Configuring GitHub identity (gh already authed)..."
     gh_user=$(gh api user --jq '.login' 2>/dev/null) || gh_user=""
@@ -1133,42 +1083,7 @@ if gh auth status &>/dev/null; then
         echo "  Git identity: ${gh_user} <${gh_email}>"
     fi
 else
-    log "gh not authed yet — planting first-login auth script."
-    cat > "$HOME/.zshrc.d/arch-first-login.zsh" <<'AUTHEOF'
-# arch: one-time bw+gh login (self-deleting). Skipped during postinstall's
-# own zgenom warmup (which sources this file too) so the script doesn't
-# block waiting for a browser-based gh auth flow it can't complete.
-if [[ -n "${_POSTINSTALL_NONINTERACTIVE:-}" ]]; then
-    return 0
-fi
-if [[ -t 0 ]]; then
-  if command -v bw &>/dev/null && ! bw login --check &>/dev/null; then
-    echo ""
-    echo "=== arch: Bitwarden CLI login (for secrets scripting) ==="
-    bw login || true
-  fi
-  if command -v gh &>/dev/null && ! gh auth status &>/dev/null; then
-    echo ""
-    echo "=== arch: GitHub auth ==="
-    gh auth login || true
-  fi
-  if command -v gh &>/dev/null && gh auth status &>/dev/null; then
-    _gh_user=$(gh api user --jq '.login' 2>/dev/null) || _gh_user=""
-    _gh_id=$(gh api user --jq '.id' 2>/dev/null) || _gh_id=""
-    if [[ -n "$_gh_user" && -n "$_gh_id" ]]; then
-      _gh_email="${_gh_id}+${_gh_user}@users.noreply.github.com"
-      # Surgical update via `git config --file` — do NOT `cat > ~/.gitconfig.local`;
-      # that would wipe the SSH-signing block Phase B appends.
-      touch ~/.gitconfig.local
-      git config --file ~/.gitconfig.local user.name  "$_gh_user"
-      git config --file ~/.gitconfig.local user.email "$_gh_email"
-      echo "arch: git identity = ${_gh_user} <${_gh_email}>"
-    fi
-    unset _gh_user _gh_id _gh_email
-    rm -f ~/.zshrc.d/arch-first-login.zsh
-  fi
-fi
-AUTHEOF
+    log "gh not authed — first-login.sh (from dots) will run on next interactive shell."
 fi
 
 # ---------- 9a. fnpostinstall shell function ----------
@@ -1395,13 +1310,13 @@ fi
 #   2. The normal first-install path: postinstall runs from a TTY where
 #      HYPRLAND_INSTANCE_SIGNATURE isn't set, so `hyprpm enable` would
 #      fail with "(3) failed to get the current hyprland version". The
-#      bootstrap is handled by the chezmoi-managed shell-init fragment
-#      `dot_zshrc.d/arch-hyprpm-bootstrap.zsh` in rhombu5/dots — applied
-#      by §13 above. It fires on the first Hyprland-session shell, uses an
-#      $XDG_RUNTIME_DIR marker to attempt the install at most once per
-#      session (so partial-install states don't fire a TPM-PIN prompt on
-#      every new ghostty window), and stays idempotent under chezmoi
-#      re-apply. See the file's own header comments for full rationale.
+#      bootstrap is handled by ~/.local/share/arch-setup-bootstraps/hyprpm.sh
+#      from rhombu5/dots — applied by §13 above and dispatched by
+#      ~/.zshrc.d/arch-bootstrap-runner.zsh on each interactive shell. It
+#      uses a $XDG_RUNTIME_DIR marker to attempt install at most once per
+#      Hyprland session (so partial-install states don't fire a TPM-PIN
+#      prompt on every new ghostty window) and self-deletes on success.
+#      See the bootstrap script's own header for full rationale.
 if command -v hyprpm >/dev/null && [[ -n "${HYPRLAND_INSTANCE_SIGNATURE:-}" ]]; then
     log "Ensuring Hyprland plugins (hyprexpo + hyprgrass)..."
     hyprpm update >/dev/null 2>&1 || true
@@ -1655,8 +1570,9 @@ check "LE cert (if issued)" "! test -d /etc/letsencrypt/live/metis.rhombus.rocks
 echo "-- snapshots / udev / planters --"
 check "snapper config /"    "sudo test -f /etc/snapper/configs/root"
 check "udev usb-serial"     "test -f /etc/udev/rules.d/99-usb-serial.rules"
-check "gh-auth planter or done" "test -f $HOME/.zshrc.d/arch-first-login.zsh || test -f $HOME/.gitconfig.local"
-check "ssh-signing planter" "test -f $HOME/.zshrc.d/arch-ssh-signing.zsh || grep -q allowedSignersFile $HOME/.gitconfig.local 2>/dev/null"
+check "bootstrap dispatcher (dots)"   "test -f $HOME/.zshrc.d/arch-bootstrap-runner.zsh"
+check "gh-auth bootstrap or done"     "test -f $HOME/.local/share/arch-setup-bootstraps/first-login.sh || test -f $HOME/.gitconfig.local"
+check "ssh-signing bootstrap or done" "test -f $HOME/.local/share/arch-setup-bootstraps/ssh-signing.sh || grep -q allowedSignersFile $HOME/.gitconfig.local 2>/dev/null"
 check "fnpostinstall fn"    "test -f $HOME/.zshrc.d/arch-postinstall.zsh"
 
 # Summary panel
