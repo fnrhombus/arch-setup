@@ -392,13 +392,10 @@ AUR_PACKAGES=(
     # then use the dGPU for photogrammetry/ML without ever touching display.
     nvidia-470xx-dkms
     nvidia-470xx-utils
-    # winapps-git: deferred — was failing yay lookup as of 2026-04-29 (AUR
-    # rename or removal; needs investigation). Optional Phase 4 functionality
-    # for running Windows apps from a KVM/QEMU Win11 VM as native windows on
-    # the Linux desktop via RDP. The KVM stack (qemu-full, virt-manager,
-    # libvirt, edk2-ovmf, swtpm, dnsmasq) is in the pacman §1 list, so the
-    # user can install winapps manually once they get to that part of
-    # Phase 4: `yay -S winapps` (or whatever the current AUR name is).
+    # WinApps is NOT on AUR (verified empty `winapps` search 2026-04-29). The
+    # earlier `winapps-git` AUR pkg referenced an upstream that has since
+    # migrated from Fmstrat/winapps to winapps-org/winapps. We install it
+    # from upstream source in §3-winapps below — clone-and-symlink, no AUR.
 )
 # yay -S --needed exits 0 even when its AUR RPC query EOFs out — it
 # treats "couldn't query AUR" as "package not selected, nothing to do"
@@ -430,6 +427,33 @@ done
 if (( ${#AUR_FAILED[@]} > 0 )); then
     warn "AUR install failures: ${AUR_FAILED[*]}"
     warn "Resolve manually (often: 'pacman -R <conflicting-variant>' then 'yay -S <pkg>'), then re-run this script."
+fi
+
+# ---------- 3-winapps. WinApps from upstream (winapps-org/winapps) ----------
+# WinApps lets you launch Windows apps from a KVM/QEMU Win11 VM as native
+# Hyprland windows via RDP — the Parallels-Coherence equivalent. The KVM
+# stack (qemu-full, virt-manager, libvirt, edk2-ovmf, swtpm, dnsmasq) is
+# already in the pacman §1 list above.
+#
+# WinApps is NOT on AUR (the prior `winapps-git` package referenced
+# Fmstrat/winapps which has migrated to winapps-org/winapps). We install
+# from upstream source: clone to /opt/winapps, symlink the setup script
+# onto PATH. Configuration (which requires a running Win11 VM) is deferred
+# to Phase 4 — see §22 for the runbook entry.
+#
+# Idempotent: subsequent runs `git pull` to refresh; the symlink is
+# unconditional (ln -sf).
+log "Installing WinApps from upstream (winapps-org/winapps)..."
+if [[ ! -d /opt/winapps/.git ]]; then
+    sudo git clone --depth 1 https://github.com/winapps-org/winapps.git /opt/winapps \
+        || warn "WinApps clone failed — re-run later or install manually."
+else
+    sudo git -C /opt/winapps pull --ff-only >/dev/null 2>&1 || \
+        warn "WinApps repo update failed — keeping existing checkout."
+fi
+if [[ -x /opt/winapps/setup.sh ]]; then
+    sudo ln -sf /opt/winapps/setup.sh /usr/local/bin/winapps-setup
+    log "  WinApps installed. Run 'winapps-setup --user' once your Win11 VM is configured."
 fi
 
 # ---------- 3-edge. Microsoft Edge: suppress OOBE / welcome / sign-in nags ----------
@@ -1568,6 +1592,15 @@ check "certbot"             "command -v certbot"
 check "certbot azure plugin" "sudo test -d /opt/pipx/venvs/certbot && sudo ls /opt/pipx/venvs/certbot/lib/python*/site-packages 2>/dev/null | grep -q certbot_dns_azure"
 check "LE cert (if issued)" "! test -d /etc/letsencrypt/live/metis.rhombus.rocks || sudo test -f /etc/letsencrypt/live/metis.rhombus.rocks/fullchain.pem"
 
+echo "-- VM stack (qemu/libvirt/winapps) --"
+check "qemu installed"       "pacman -Q qemu-full"
+check "virt-manager"         "command -v virt-manager"
+check "libvirtd.socket"      "systemctl is-enabled libvirtd.socket"
+check "tom in libvirt grp"   "id -nG tom | grep -qw libvirt"
+check "tom in kvm grp"       "id -nG tom | grep -qw kvm"
+check "winapps source"       "test -d /opt/winapps/.git"
+check "winapps-setup PATH"   "command -v winapps-setup"
+
 echo "-- snapshots / udev / planters --"
 check "snapper config /"    "sudo test -f /etc/snapper/configs/root"
 check "udev usb-serial"     "test -f /etc/udev/rules.d/99-usb-serial.rules"
@@ -1662,9 +1695,8 @@ cat <<'POSTINSTALL_OUTRO'
           installed
         - libvirtd.socket enabled
         - tom in libvirt + kvm groups (log out + back in to take effect)
-        - winapps NOT auto-installed (was failing yay lookup; AUR rename or
-          removal as of 2026-04-29). Install manually when you need it:
-          `yay -Ss winapps` to find the current package, then `yay -S <name>`.
+        - WinApps source cloned to /opt/winapps (winapps-org/winapps);
+          'winapps-setup' is on PATH. Run it once the VM is up.
 
       One-time Windows install via virt-manager:
         1. Download a Win11 ISO (microsoft.com/software-download/windows11)
@@ -1675,10 +1707,12 @@ cat <<'POSTINSTALL_OUTRO'
         3. Snapshot the VM (virt-manager → Snapshots) before WinApps wires.
 
       Configure WinApps (one-time):
-        winapps-setup
-        # follow prompts; point at the RDPWindows VM. WinApps then
-        # auto-detects installed Windows apps and creates ~/.local/share/
-        # applications/*.desktop entries that launch them as Linux windows.
+        winapps-setup --user --setupAllOfficiallySupportedApps
+        # Non-interactive — auto-installs all officially supported app
+        # launchers WinApps can detect. For a guided run instead, just
+        # `winapps-setup --user` (wizard).
+        # Output: ~/.local/bin/winapps + ~/.local/share/applications/
+        # *.desktop entries that launch each Windows app as a Linux window.
 
       Daily use: launch Windows apps from Fuzzel like any Linux app —
       they run inside the VM but appear as standalone Hyprland windows.
