@@ -1422,36 +1422,54 @@ if command -v hyprpm >/dev/null; then
         log "Not in a Hyprland session — planting first-Hyprland-login hyprpm runner."
         mkdir -p "$HOME/.zshrc.d"
         cat > "$HOME/.zshrc.d/arch-hyprpm-bootstrap.zsh" <<'HYPRPMEOF'
-# Self-deletes once hyprexpo + hyprgrass are enabled AND post-plugins.conf
-# has been sourced into the running Hyprland. Only fires inside a Hyprland
-# session — a TTY login (no HYPRLAND_INSTANCE_SIGNATURE) is silently
+# Self-deletes once hyprexpo + hyprgrass are enabled. Only fires inside a
+# Hyprland session — a TTY login (no HYPRLAND_INSTANCE_SIGNATURE) is silently
 # ignored.
+#
+# IMPORTANT: `hyprpm update` invokes sudo internally (rebuilds plugin DSOs
+# against current Hyprland headers, which can require pacman to install
+# matching -dev packages). With pinpam wired into the sudo PAM stack, that
+# fires a TPM-PIN prompt on every new zsh — including every new ghostty
+# window. So the planter MUST short-circuit before `hyprpm update` once both
+# plugins are listed; the alternative is a PIN prompt every shell launch.
 if [[ -n "${HYPRLAND_INSTANCE_SIGNATURE:-}" ]] && command -v hyprpm >/dev/null; then
-    hyprpm update >/dev/null 2>&1 || true
-    if ! hyprpm list 2>/dev/null | grep -q hyprexpo; then
-        hyprpm add https://github.com/hyprwm/hyprland-plugins 2>/dev/null \
-            && hyprpm enable hyprexpo 2>/dev/null
-    fi
-    if ! hyprpm list 2>/dev/null | grep -q hyprgrass; then
-        hyprpm add https://github.com/horriblename/hyprgrass 2>/dev/null \
-            && hyprpm enable hyprgrass 2>/dev/null
-    fi
-    # Source per-plugin config files — only for plugins that loaded.
-    # Self-deletes once any successfully-loaded plugin has its config
-    # sourced; failed-build plugins are skipped (the planter stays in
-    # place to retry on subsequent logins).
-    _any_loaded=0
-    for _plug in hyprexpo hyprgrass; do
-        if hyprpm list 2>/dev/null | grep -q "$_plug" \
-           && [[ -f "$HOME/.config/hypr/post-plugins.d/$_plug.conf" ]]; then
-            hyprctl keyword source "$HOME/.config/hypr/post-plugins.d/$_plug.conf" >/dev/null 2>&1 || true
-            _any_loaded=1
-        fi
-    done
-    if hyprpm list 2>/dev/null | grep -q hyprexpo \
-       && hyprpm list 2>/dev/null | grep -q hyprgrass; then
+    _have_hyprexpo=0; _have_hyprgrass=0
+    hyprpm list 2>/dev/null | grep -q hyprexpo  && _have_hyprexpo=1
+    hyprpm list 2>/dev/null | grep -q hyprgrass && _have_hyprgrass=1
+
+    if (( _have_hyprexpo && _have_hyprgrass )); then
+        # Both plugins already built — source their post-plugins config (cheap,
+        # no sudo) and remove this planter so future shells skip it entirely.
+        for _plug in hyprexpo hyprgrass; do
+            if [[ -f "$HOME/.config/hypr/post-plugins.d/$_plug.conf" ]]; then
+                hyprctl keyword source "$HOME/.config/hypr/post-plugins.d/$_plug.conf" >/dev/null 2>&1 || true
+            fi
+        done
         rm -f ~/.zshrc.d/arch-hyprpm-bootstrap.zsh
+    else
+        # At least one plugin is missing — try to install it. `hyprpm update`
+        # is required before `hyprpm add` so headers match.
+        hyprpm update >/dev/null 2>&1 || true
+        if (( ! _have_hyprexpo )); then
+            hyprpm add https://github.com/hyprwm/hyprland-plugins 2>/dev/null \
+                && hyprpm enable hyprexpo 2>/dev/null
+        fi
+        if (( ! _have_hyprgrass )); then
+            hyprpm add https://github.com/horriblename/hyprgrass 2>/dev/null \
+                && hyprpm enable hyprgrass 2>/dev/null
+        fi
+        for _plug in hyprexpo hyprgrass; do
+            if hyprpm list 2>/dev/null | grep -q "$_plug" \
+               && [[ -f "$HOME/.config/hypr/post-plugins.d/$_plug.conf" ]]; then
+                hyprctl keyword source "$HOME/.config/hypr/post-plugins.d/$_plug.conf" >/dev/null 2>&1 || true
+            fi
+        done
+        if hyprpm list 2>/dev/null | grep -q hyprexpo \
+           && hyprpm list 2>/dev/null | grep -q hyprgrass; then
+            rm -f ~/.zshrc.d/arch-hyprpm-bootstrap.zsh
+        fi
     fi
+    unset _have_hyprexpo _have_hyprgrass _plug
 fi
 HYPRPMEOF
     fi
