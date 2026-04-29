@@ -28,7 +28,7 @@ The phase-2 / phase-3 scripts MUST match the design above. As of 2026-04-23 they
 ### What's ready
 - `phase-2-arch-install/install.sh` + `chroot.sh` — limine + greetd + hibernate-cryptswap + TPM2 + Samsung disk path passed through `/root/.luks` to chroot.
 - `phase-3-arch-postinstall/postinstall.sh` — pacman + AUR lists verified live; bare-Hyprland chezmoi apply at §13; CUPS + gutenprint for the user's Canon Pro 9000 Mk II at §1-print; Azure DDNS via `setup-azure-ddns.sh` (works around the Python 3.14 `az ad sp create-for-rbac --years` argparse bug); verify block sweeps for greetd / matugen / hyprgrass / cups; `limine-snapper-sync` installed.
-- `phase-3-arch-postinstall/setup-azure-ddns.sh` — idempotent SP rotation, writes `/etc/metis-ddns.env` + `/etc/letsencrypt/azure.ini`.
+- `phase-3-arch-postinstall/setup-azure-ddns.sh` — idempotent SP rotation, writes `/etc/azure-ddns.env` + `/etc/letsencrypt/azure.ini`.
 - `dotfiles/` — full chezmoi source tree: 9 hyprland fragments, matugen config + 14 templates (incl. tmux), waybar / swaync / fuzzel / ghostty / yazi / helix / imv / zathura / qt / matugen, helper scripts (theme-toggle, wallpaper-rotate, control-panel, validate-hypr-binds), wallpaper-rotate systemd timer.
 - Runbook PDFs renderable via `pnpm pdf` (Edge headless on Linux works with `EDGE=/usr/bin/microsoft-edge-stable`).
 

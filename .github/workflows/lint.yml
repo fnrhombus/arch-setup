@@ -41,7 +41,6 @@ jobs:
             prep-netac-ventoy.sh
           ignore_paths: >
             assets
-            staged-azure-ddns
 
   pacman-package-check:
     name: pacman packages exist in extra

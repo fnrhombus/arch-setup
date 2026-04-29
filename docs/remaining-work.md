@@ -41,17 +41,6 @@ See `runbook/phase-3.5-hardware-handoff.md` for the full handoff. Packages are a
 - [ ] Fan inspection / clean (laptop has a thermal-throttle quirk flagged earlier in the session but never documented as a decision).
 - [ ] Write up the thermal-threshold quirk in `decisions.md` once observed behavior is clear.
 
-## `staged-azure-ddns/` → `fnrhombus/azure-ddns` split-out
-
-The `staged-azure-ddns/` directory in this repo is the shape of the future standalone repo. **Its own dedicated handoff for the new-repo Claude session lives at [`staged-azure-ddns/HANDOFF.md`](../staged-azure-ddns/HANDOFF.md)** — that doc is self-contained and briefs a cold-start session on everything it needs to do (verify PKGBUILD, tag v0.1.0, AUR submission, known gaps, design choices to preserve).
-
-User asked to keep the new repo private initially (AUR / public release after one-user success).
-
-- [ ] Create private repo `fnrhombus/azure-ddns` on GitHub.
-- [ ] Copy `staged-azure-ddns/*` to the new repo's root (keep directory structure).
-- [ ] Hand the new session `staged-azure-ddns/HANDOFF.md` — it takes over from there.
-- [ ] Once the new repo is live, replace `arch-setup/phase-3-arch-postinstall/metis-ddns/` with a submodule pointing at it, or keep it as-is and sync manually on changes.
-
 ## Repo hygiene
 
 - [ ] Once the reinstall is verified end-to-end on Metis, merge `desktop-design` → `main` and delete the branch.
