@@ -92,14 +92,22 @@ log "Applying tom password (pre-hashed by install.sh)..."
 echo "tom:$TOM_PW_HASH" | chpasswd -e
 sed -i 's/^# %wheel ALL=(ALL:ALL) ALL/%wheel ALL=(ALL:ALL) ALL/' /etc/sudoers
 
-# ---------- NVIDIA blacklist (decisions.md §Q5) ----------
-log "Blacklisting NVIDIA modules (MX250 → Intel UHD 620 only)..."
+# ---------- NVIDIA: display-blacklist, compute-allow (decisions.md §Q5) ----------
+# MX250 can't drive Wayland (nvidia-470xx lacks GBM), so the DISPLAY
+# modules stay blacklisted — Hyprland runs on Intel UHD 620 only. But
+# the kernel module (nvidia) and CUDA (nvidia_uvm) DO load, so headless
+# CUDA compute works (photogrammetry: Meshroom / COLMAP; ML; etc.).
+# nvidia-470xx-dkms package gets installed by postinstall §3.
+log "Configuring NVIDIA: display modules blacklisted, compute (CUDA) allowed..."
 cat > /etc/modprobe.d/blacklist-nvidia.conf <<EOF
+# nouveau (open driver) would conflict with nvidia-470xx — keep blocked.
 blacklist nouveau
-blacklist nvidia
+# Display modules: never want these loaded; would try to drive Wayland.
 blacklist nvidia_drm
 blacklist nvidia_modeset
-blacklist nvidia_uvm
+# Note: nvidia + nvidia_uvm are NOT blacklisted — they're needed for CUDA.
+# They load on demand when a CUDA app runs (or you can modprobe them
+# explicitly). nvidia stays idle when no compute workload is running.
 EOF
 
 # ---------- lid-close policy (decisions.md Requirements) ----------
