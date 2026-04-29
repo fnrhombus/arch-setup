@@ -14,10 +14,11 @@
 #   - Callisto pubkey (hardcoded, idempotent append to authorized_keys)
 #   - ufw firewall (default deny in, allow ssh, enable) — required because
 #     router's IPv6 filter is host-global, can't filter per port
-#   - metis-ddns: bash + systemd timer that keeps metis.rhombus.rocks A+AAAA
-#     in sync with this host's public IPs against Azure DNS (no maintained
-#     off-the-shelf option exists). Stubs /etc/metis-ddns.env on first run
-#     — fill in SP creds once, then enable the timer.
+#   - azure-ddns: AUR package (https://github.com/fnrhombus/azure-ddns) —
+#     bash + systemd timer that keeps metis.rhombus.rocks A+AAAA in sync
+#     with this host's public IPs against Azure DNS (no maintained off-
+#     the-shelf option exists). The package ships a stub /etc/azure-ddns.env;
+#     `setup-azure-ddns.sh` fills in SP creds and enables the timer.
 #   - Claude Code CLI + bash completion
 #   - Goodix-aware fingerprint enrollment (VID 27C6 detected → detailed diag on fail)
 #   - pinpam TPM-PIN + PAM wiring for sudo/polkit/hyprlock
@@ -379,6 +380,11 @@ AUR_PACKAGES=(
     bibata-cursor-theme
     pacseek
     limine-snapper-sync
+    # Azure DNS dynamic updater. Extracted from this repo to a standalone
+    # AUR package; ships /usr/bin/azure-ddns + systemd unit/timer + NM
+    # dispatcher hook. setup-azure-ddns.sh (staged at /home/tom/) handles
+    # the Azure-side provisioning.
+    azure-ddns
     # NVIDIA compute-only stack for the MX250 (Pascal, compute capability 6.1).
     # Display modules are blacklisted in chroot.sh; these pull in the kernel
     # driver + nvidia-smi/CUDA runtime libs. Apps like Meshroom or COLMAP can
@@ -508,49 +514,59 @@ sudo systemctl enable --now ufw.service
 sudo systemctl disable --now keyd.service 2>/dev/null || true
 sudo rm -f /etc/keyd/default.conf
 
-# ---------- 4d. metis-ddns: Azure DNS dynamic updater ----------
+# ---------- 4d. azure-ddns: Azure DNS dynamic updater ----------
 # Keeps metis.rhombus.rocks A+AAAA records pointed at this host's current
-# public IPv4/IPv6. Nothing maintained off-the-shelf supports Azure DNS
-# (ddclient/inadyn lack a provider), so we ship a small bash script + systemd
-# timer + NM-dispatcher hook. See phase-3-arch-postinstall/metis-ddns/.
+# public IPv4/IPv6. Provided by the `azure-ddns` AUR package (extracted
+# from this repo to https://github.com/fnrhombus/azure-ddns; installed
+# via §3 above). The package ships:
+#   /usr/bin/azure-ddns
+#   /usr/lib/systemd/system/azure-ddns.{service,timer}
+#   /usr/lib/NetworkManager/dispatcher.d/90-azure-ddns
+#   /etc/azure-ddns.env (template; mode 600, root-owned, placeholder values)
 #
-# The env file at /etc/metis-ddns.env (mode 600) holds the service-principal
-# credentials. We stub it on first install with the template — user must
-# fill in the actual TENANT/CLIENT/SECRET/SUBSCRIPTION/RG once via
-# `az ad sp create-for-rbac --name metis-ddns --role "DNS Zone Contributor"
-# --scopes <zone-id>` and then `sudo systemctl start metis-ddns.service`.
-DDNS_DIR="$SCRIPT_DIR/metis-ddns"
-if [[ -d "$DDNS_DIR" ]]; then
-    log "Installing metis-ddns script + systemd unit + timer + NM hook..."
-    sudo install -m 755 "$DDNS_DIR/metis-ddns"             /usr/local/bin/metis-ddns
-    sudo install -m 644 "$DDNS_DIR/metis-ddns.service"     /etc/systemd/system/metis-ddns.service
-    sudo install -m 644 "$DDNS_DIR/metis-ddns.timer"       /etc/systemd/system/metis-ddns.timer
-    sudo install -d -m 755 /etc/NetworkManager/dispatcher.d
-    sudo install -m 755 "$DDNS_DIR/90-metis-ddns"          /etc/NetworkManager/dispatcher.d/90-metis-ddns
-    sudo install -m 644 "$DDNS_DIR/metis-ddns.env.template" /etc/metis-ddns.env.template
-    if [[ ! -f /etc/metis-ddns.env ]]; then
-        sudo install -m 600 -o root -g root "$DDNS_DIR/metis-ddns.env.template" /etc/metis-ddns.env
-        warn "Stubbed /etc/metis-ddns.env — fill in service principal creds, then:"
-        warn "    sudo systemctl start metis-ddns.service && sudo journalctl -u metis-ddns -n 20"
-    fi
-    sudo install -d -m 755 /var/lib/metis-ddns
-    # Stub Let's Encrypt credentials for the dns-azure plugin (same SP works
-    # for both DDNS record updates and dns-01 challenge TXT records).
-    sudo install -d -m 755 /etc/letsencrypt
-    sudo install -m 644 "$DDNS_DIR/letsencrypt-azure.ini.template" /etc/letsencrypt/azure.ini.template
-    if [[ ! -f /etc/letsencrypt/azure.ini ]]; then
-        sudo install -m 600 -o root -g root "$DDNS_DIR/letsencrypt-azure.ini.template" /etc/letsencrypt/azure.ini
-    fi
-    sudo systemctl daemon-reload
-    # Enable the timer (don't --now: env file likely empty on first pass; the
-    # timer's first tick will no-op-fail until creds are filled in, which is
-    # fine — we just don't want the FAILED state to scream at first boot).
-    sudo systemctl enable metis-ddns.timer
-    # Enable certbot's renewal timer too — no-op until a cert exists.
-    sudo systemctl enable certbot-renew.timer 2>/dev/null || true
-else
-    warn "metis-ddns/ sidecar dir missing — Azure DDNS not installed."
+# `setup-azure-ddns.sh` (staged at /home/tom/) does the Azure-side
+# provisioning + writes real values into /etc/azure-ddns.env. We just
+# enable the timer here; first tick no-op-fails until creds are filled in,
+# which is fine — we just don't want a FAILED state screaming at first boot.
+log "Enabling azure-ddns timer (real creds filled in by setup-azure-ddns.sh)..."
+sudo install -d -m 755 /var/lib/azure-ddns
+sudo systemctl daemon-reload
+sudo systemctl enable azure-ddns.timer
+
+# Stub /etc/letsencrypt/azure.ini for certbot's dns-azure plugin (same SP
+# creds as the DDNS daemon — DNS Zone Contributor covers both record
+# updates and dns-01 challenge TXT records). setup-azure-ddns.sh rewrites
+# this with real values; until then certbot-renew.timer no-ops.
+sudo install -d -m 755 /etc/letsencrypt
+if [[ ! -f /etc/letsencrypt/azure.ini ]]; then
+    sudo tee /etc/letsencrypt/azure.ini >/dev/null <<'CERTBOTEOF'
+# /etc/letsencrypt/azure.ini — credentials for certbot's dns-azure plugin.
+# mode 600, owner root. NEVER commit this file with real values.
+#
+# Mirror values from /etc/azure-ddns.env after setup-azure-ddns.sh runs.
+#
+# Issuance command (one-time, after DNS is live):
+#   sudo certbot certonly \
+#       --authenticator dns-azure \
+#       --dns-azure-credentials /etc/letsencrypt/azure.ini \
+#       --dns-azure-propagation-seconds 60 \
+#       -d metis.rhombus.rocks \
+#       --agree-tos -m <your-email> --no-eff-email
+#
+# Renewal: certbot installs certbot-renew.timer that runs `certbot renew`
+# twice daily. Idempotent — only acts within 30d of expiry.
+
+dns_azure_environment = "AzurePublicCloud"
+dns_azure_tenant_id =
+dns_azure_subscription_id =
+dns_azure_resource_group =
+dns_azure_sp_client_id =
+dns_azure_sp_client_secret =
+CERTBOTEOF
+    sudo chmod 600 /etc/letsencrypt/azure.ini
+    sudo chown root:root /etc/letsencrypt/azure.ini
 fi
+sudo systemctl enable certbot-renew.timer 2>/dev/null || true
 
 # ---------- 5. Claude Code CLI ----------
 # Two-stage install:
@@ -1107,10 +1123,10 @@ fi
 # .zshrc.d fragment so it lands on $PATH via the .zshrc loop.
 #
 # Clones the whole repo to a tmpfs path instead of fetching just
-# postinstall.sh — earlier versions used `gh api contents/...` for a
-# single-file pull, but §4d needs the sibling `metis-ddns/` sidecar dir
-# next to postinstall.sh, which a single-file fetch doesn't supply.
-# Passes any args through (e.g. `fnpostinstall --no-verify`).
+# postinstall.sh — earlier sections (greetd PAM template, system-files/
+# tree) reference sibling files via $SCRIPT_DIR, which a single-file
+# fetch wouldn't supply. Passes any args through
+# (e.g. `fnpostinstall --no-verify`).
 cat > "$HOME/.zshrc.d/arch-postinstall.zsh" <<'FNEOF'
 # arch-setup: re-run the latest postinstall from GitHub, logging to /tmp.
 fnpostinstall() {
@@ -1601,13 +1617,13 @@ check "limine-snapper-sync" "pacman -Q limine-snapper-sync"
 check "sbctl installed"    "command -v sbctl"
 check "limine-redeploy hook" "test -x /usr/local/sbin/limine-redeploy"
 check "smartd enabled"      "systemctl is-enabled smartd.service"
-check "metis-ddns binary"   "test -x /usr/local/bin/metis-ddns"
-check "metis-ddns service"  "systemctl is-enabled metis-ddns.service 2>/dev/null || systemctl cat metis-ddns.service >/dev/null 2>&1"
-check "metis-ddns timer"    "systemctl is-enabled metis-ddns.timer"
-check "metis-ddns NM hook"  "test -x /etc/NetworkManager/dispatcher.d/90-metis-ddns"
-check "metis-ddns env"      "sudo test -f /etc/metis-ddns.env"
-check "metis-ddns env filled" "sudo grep -qE '^AZ_TENANT_ID=.+' /etc/metis-ddns.env"
-check "metis-ddns last run OK" "sudo systemctl status metis-ddns.service 2>/dev/null | grep -q 'status=0/SUCCESS' || ! sudo test -f /etc/metis-ddns.env || ! sudo grep -qE '^AZ_TENANT_ID=.+' /etc/metis-ddns.env"
+check "azure-ddns binary"   "test -x /usr/bin/azure-ddns"
+check "azure-ddns service"  "systemctl cat azure-ddns.service >/dev/null 2>&1"
+check "azure-ddns timer"    "systemctl is-enabled azure-ddns.timer"
+check "azure-ddns NM hook"  "test -x /usr/lib/NetworkManager/dispatcher.d/90-azure-ddns"
+check "azure-ddns env"      "sudo test -f /etc/azure-ddns.env"
+check "azure-ddns env filled" "sudo grep -qE '^AZ_TENANT_ID=.+' /etc/azure-ddns.env"
+check "azure-ddns last run OK" "sudo systemctl status azure-ddns.service 2>/dev/null | grep -q 'status=0/SUCCESS' || ! sudo test -f /etc/azure-ddns.env || ! sudo grep -qE '^AZ_TENANT_ID=.+' /etc/azure-ddns.env"
 check "certbot"             "command -v certbot"
 check "certbot azure plugin" "sudo test -d /opt/pipx/venvs/certbot && sudo ls /opt/pipx/venvs/certbot/lib/python*/site-packages 2>/dev/null | grep -q certbot_dns_azure"
 check "LE cert (if issued)" "! test -d /etc/letsencrypt/live/metis.rhombus.rocks || sudo test -f /etc/letsencrypt/live/metis.rhombus.rocks/fullchain.pem"
@@ -1665,8 +1681,8 @@ cat <<'POSTINSTALL_OUTRO'
         az login
         ~/setup-azure-ddns.sh           # idempotent; rotates secret on each run
 
-      The script writes /etc/metis-ddns.env + /etc/letsencrypt/azure.ini and
-      restarts metis-ddns. First call may 403 (role propagation, ~30s–5min)
+      The script writes /etc/azure-ddns.env + /etc/letsencrypt/azure.ini and
+      restarts azure-ddns. First call may 403 (role propagation, ~30s–5min)
       — just retry. Timer + NM hook take over after first success.
 
 [5] Let's Encrypt cert for metis.rhombus.rocks (after step 4 succeeds):

@@ -1,7 +1,0 @@
-#!/bin/bash
-# /etc/NetworkManager/dispatcher.d/90-metis-ddns
-# Trigger a DDNS run whenever an interface comes up. The 10-min systemd
-# timer covers steady-state; this hook closes the gap between "wifi
-# associated" and "next timer tick".
-[ "$2" = "up" ] || exit 0
-systemctl start --no-block metis-ddns.service

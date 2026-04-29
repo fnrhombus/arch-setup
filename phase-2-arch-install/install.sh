@@ -584,6 +584,6 @@ Log in as 'tom', then:
                                # rhombu5/dots and applies the bare-Hyprland
                                # configs + matugen pipeline),
                                # fingerprint, layers PCR 7 onto the LUKS
-                               # TPM seal (stage 2), ufw, metis-ddns,
+                               # TPM seal (stage 2), ufw, azure-ddns,
                                # printer drivers, etc.
 EOF
