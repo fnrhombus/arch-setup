@@ -19,3 +19,5 @@
 
 # Generated PDFs — `pnpm pdf` re-renders from runbook/*.md.
 /runbook/*.pdf
+assets/Win11_25H2_English_x64_v2.iso
+assets/ventoy-1.1.11*
