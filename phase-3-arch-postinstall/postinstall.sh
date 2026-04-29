@@ -1386,105 +1386,45 @@ if [[ -f "$HOME/.config/systemd/user/wallpaper-rotate.timer" ]]; then
 fi
 
 # Hyprland plugins via hyprpm. hyprexpo + hyprgrass per desktop-requirements.md.
-# hyprpm needs HYPRLAND_INSTANCE_SIGNATURE set (the live compositor's IPC
-# socket) to enable a plugin. Postinstall runs from a TTY where that's
-# never set, so `hyprpm enable` fails with "(3) failed to get the current
-# hyprland version". When we're in a Hyprland session (e.g. user re-runs
-# postinstall from a Hyprland terminal), do it inline; otherwise plant
-# a one-shot script in ~/.zshrc.d/ that fires the first time zsh starts
-# *inside* a Hyprland session and self-deletes when both plugins are
-# enabled.
-if command -v hyprpm >/dev/null; then
-    if [[ -n "${HYPRLAND_INSTANCE_SIGNATURE:-}" ]]; then
-        log "Ensuring Hyprland plugins (hyprexpo + hyprgrass)..."
-        hyprpm update >/dev/null 2>&1 || true
-        if ! hyprpm list 2>/dev/null | grep -q hyprexpo; then
-            hyprpm add https://github.com/hyprwm/hyprland-plugins \
-                && hyprpm enable hyprexpo \
-                || warn "hyprexpo install failed — see hyprpm output above."
-        fi
-        if ! hyprpm list 2>/dev/null | grep -q hyprgrass; then
-            hyprpm add https://github.com/horriblename/hyprgrass \
-                && hyprpm enable hyprgrass \
-                || warn "hyprgrass install failed — see hyprpm output above."
-        fi
-        # Source per-plugin config — only the ones whose plugin actually
-        # loaded. A build failure on hyprgrass shouldn't poison hyprexpo's
-        # config or vice versa. See post-plugins.d/README for rationale.
-        for _plug in hyprexpo hyprgrass; do
-            if hyprpm list 2>/dev/null | grep -q "$_plug" \
-               && [[ -f "$HOME/.config/hypr/post-plugins.d/$_plug.conf" ]]; then
-                hyprctl keyword source "$HOME/.config/hypr/post-plugins.d/$_plug.conf" >/dev/null 2>&1 \
-                    || warn "Could not source post-plugins.d/$_plug.conf — try 'hyprctl reload' manually."
-            fi
-        done
-    else
-        log "Not in a Hyprland session — planting first-Hyprland-login hyprpm runner."
-        mkdir -p "$HOME/.zshrc.d"
-        cat > "$HOME/.zshrc.d/arch-hyprpm-bootstrap.zsh" <<'HYPRPMEOF'
-# Bootstraps hyprexpo + hyprgrass on first Hyprland-session shell.
-# Self-deletes once both plugins are listed.
 #
-# WHY THE MARKER:
-# `hyprpm update` and `hyprpm add` both invoke sudo internally (rebuild
-# plugin DSOs against current Hyprland headers; pacman-install matching
-# -dev packages on header drift). Under §7a's pinpam-only sudo, every
-# such call fires a TPM-PIN prompt. Without a marker, a partial-install
-# state (one plugin built, one failed) re-runs hyprpm on EVERY new zsh —
-# meaning every new ghostty window prompts for a PIN. Unacceptable.
-#
-# Marker lives in $XDG_RUNTIME_DIR (auto-wiped on logout). Effect:
-#   - At most one hyprpm install attempt per Hyprland session.
-#   - On success, the planter self-deletes — no future runs.
-#   - On failure, marker forces the rest of the session to no-op; next
-#     login gets one more attempt.
-#   - If both plugins are already listed, planter self-deletes immediately
-#     without touching the marker.
-if [[ -n "${HYPRLAND_INSTANCE_SIGNATURE:-}" ]] && command -v hyprpm >/dev/null; then
-    _have_hyprexpo=0; _have_hyprgrass=0
-    hyprpm list 2>/dev/null | grep -q hyprexpo  && _have_hyprexpo=1
-    hyprpm list 2>/dev/null | grep -q hyprgrass && _have_hyprgrass=1
-
-    if (( _have_hyprexpo && _have_hyprgrass )); then
-        # Both plugins already built — source post-plugins configs (no sudo)
-        # and self-delete so future shells skip the planter entirely.
-        for _plug in hyprexpo hyprgrass; do
-            if [[ -f "$HOME/.config/hypr/post-plugins.d/$_plug.conf" ]]; then
-                hyprctl keyword source "$HOME/.config/hypr/post-plugins.d/$_plug.conf" >/dev/null 2>&1 || true
-            fi
-        done
-        rm -f ~/.zshrc.d/arch-hyprpm-bootstrap.zsh
-    else
-        _marker="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}/arch-hyprpm-bootstrap.attempted"
-        if [[ ! -e "$_marker" ]]; then
-            mkdir -p "${_marker%/*}" 2>/dev/null
-            : > "$_marker"
-            hyprpm update >/dev/null 2>&1 || true
-            if (( ! _have_hyprexpo )); then
-                hyprpm add https://github.com/hyprwm/hyprland-plugins 2>/dev/null \
-                    && hyprpm enable hyprexpo 2>/dev/null
-            fi
-            if (( ! _have_hyprgrass )); then
-                hyprpm add https://github.com/horriblename/hyprgrass 2>/dev/null \
-                    && hyprpm enable hyprgrass 2>/dev/null
-            fi
-            for _plug in hyprexpo hyprgrass; do
-                if hyprpm list 2>/dev/null | grep -q "$_plug" \
-                   && [[ -f "$HOME/.config/hypr/post-plugins.d/$_plug.conf" ]]; then
-                    hyprctl keyword source "$HOME/.config/hypr/post-plugins.d/$_plug.conf" >/dev/null 2>&1 || true
-                fi
-            done
-            if hyprpm list 2>/dev/null | grep -q hyprexpo \
-               && hyprpm list 2>/dev/null | grep -q hyprgrass; then
-                rm -f ~/.zshrc.d/arch-hyprpm-bootstrap.zsh
-            fi
+# Two paths to install:
+#   1. Postinstall is being re-run from inside an existing Hyprland session
+#      (rare but possible — `fnpostinstall` from a Hyprland terminal). Do
+#      the install inline below, eagerly, while we already have the user's
+#      attention on a terminal.
+#   2. The normal first-install path: postinstall runs from a TTY where
+#      HYPRLAND_INSTANCE_SIGNATURE isn't set, so `hyprpm enable` would
+#      fail with "(3) failed to get the current hyprland version". The
+#      bootstrap is handled by the chezmoi-managed shell-init fragment
+#      `dot_zshrc.d/arch-hyprpm-bootstrap.zsh` in rhombu5/dots — applied
+#      by §13 above. It fires on the first Hyprland-session shell, uses an
+#      $XDG_RUNTIME_DIR marker to attempt the install at most once per
+#      session (so partial-install states don't fire a TPM-PIN prompt on
+#      every new ghostty window), and stays idempotent under chezmoi
+#      re-apply. See the file's own header comments for full rationale.
+if command -v hyprpm >/dev/null && [[ -n "${HYPRLAND_INSTANCE_SIGNATURE:-}" ]]; then
+    log "Ensuring Hyprland plugins (hyprexpo + hyprgrass)..."
+    hyprpm update >/dev/null 2>&1 || true
+    if ! hyprpm list 2>/dev/null | grep -q hyprexpo; then
+        hyprpm add https://github.com/hyprwm/hyprland-plugins \
+            && hyprpm enable hyprexpo \
+            || warn "hyprexpo install failed — see hyprpm output above."
+    fi
+    if ! hyprpm list 2>/dev/null | grep -q hyprgrass; then
+        hyprpm add https://github.com/horriblename/hyprgrass \
+            && hyprpm enable hyprgrass \
+            || warn "hyprgrass install failed — see hyprpm output above."
+    fi
+    # Source per-plugin config — only the ones whose plugin actually
+    # loaded. A build failure on hyprgrass shouldn't poison hyprexpo's
+    # config or vice versa. See post-plugins.d/README for rationale.
+    for _plug in hyprexpo hyprgrass; do
+        if hyprpm list 2>/dev/null | grep -q "$_plug" \
+           && [[ -f "$HOME/.config/hypr/post-plugins.d/$_plug.conf" ]]; then
+            hyprctl keyword source "$HOME/.config/hypr/post-plugins.d/$_plug.conf" >/dev/null 2>&1 \
+                || warn "Could not source post-plugins.d/$_plug.conf — try 'hyprctl reload' manually."
         fi
-        unset _marker
-    fi
-    unset _have_hyprexpo _have_hyprgrass _plug
-fi
-HYPRPMEOF
-    fi
+    done
 fi
 
 # Ghostty config is matugen-themed via the rhombu5/dots chezmoi tree (§13).
