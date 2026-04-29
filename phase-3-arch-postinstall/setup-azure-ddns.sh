@@ -102,9 +102,19 @@ AZ_CLIENT_SECRET=${CLIENT_SECRET}
 AZ_SUBSCRIPTION_ID=${SUBSCRIPTION_ID}
 AZ_RESOURCE_GROUP=${RESOURCE_GROUP}
 AZ_DNS_ZONE=${DNS_ZONE}
-AZ_RECORD_NAME=${RECORD_NAME}
+AZ_DNS_RECORD=${RECORD_NAME}
 AZ_DNS_TTL=300
+
+# Stack toggles. Metis is on an IPv6-only DDNS path (the home router does
+# CG-NAT v4, so a public-IP A record would point at the carrier gateway).
 DDNS_DISABLE_IPV4=1
+DDNS_DISABLE_IPV6=0
+
+# Pin to the kernel-managed stable SLAAC GUA. Without this, source-selection
+# defaults to the temporary RFC 4941 address, which rotates every ~24h —
+# DNS would churn and clients would chase a moving target. See
+# https://github.com/fnrhombus/azure-ddns README "IPv6 source selection".
+AZURE_DDNS_IPV6_SELECT=slaac-stable
 EOF
 sudo chmod 600 /etc/azure-ddns.env
 sudo chown root:root /etc/azure-ddns.env
