@@ -243,7 +243,7 @@ Everything listed below is installed automatically by the phase-2 + phase-3 scri
 - File managers: yazi (TUI primary), nautilus (GUI fallback)
 - Hyprland ecosystem: hyprlock, hypridle, hyprpolkitagent, hyprpicker
 - Bar / notifications / launcher / OSD: waybar, swaync, fuzzel, swayosd
-- Settings GUIs: nwg-displays, nwg-look, network-manager-applet (provides nm-connection-editor), pwvucontrol
+- Settings GUIs: nwg-displays, nwg-look, network-manager-applet (provides nm-connection-editor), pavucontrol (per `docs/decisions.md` §Audio mixer GUI — pwvucontrol's AUR build is still broken on wireplumber 0.5, see saivert/pwvucontrol#10)
 - Theme managers: qt5ct, qt6ct, papirus-icon-theme
 - Daily-use viewers: imv, zathura, zathura-pdf-poppler
 - 2-in-1 hardware: iio-sensor-proxy (accelerometer), wvkbd (on-screen keyboard), libwacom (Wacom AES metadata)

@@ -189,7 +189,7 @@ The control-panel script (Super+,) is a fuzzel-launched menu that dispatches to 
 - **nwg-displays** — Display config GUI (resolution, scale, position, rotation). Wayland-native.
 - **nm-connection-editor** — NetworkManager full config GUI (Wi-Fi, VPN, ethernet). From `network-manager-applet` package; we install the binary but skip the tray applet.
 - **overskride** — Bluetooth pairing/management GUI. GTK4/libadwaita, Wayland-native. Replaces the older blueman.
-- **pavucontrol** — Audio mixer GUI: per-app volumes, output device routing, mic levels. Originally written for PulseAudio; works against PipeWire via the `pipewire-pulse` compat shim. (The PipeWire-native equivalent `pwvucontrol` was the original pick but its AUR build is broken until upstream un-blocks on the wireplumber-rs crate.)
+- **pavucontrol** — Audio mixer GUI: per-app volumes, output device routing, mic levels. Originally written for PulseAudio; works against PipeWire via the `pipewire-pulse` compat shim. (The PipeWire-native equivalent `pwvucontrol` was the original pick but its AUR build is still broken on Arch's wireplumber 0.5: pwvucontrol depends on the unmaintained `arcnmx/wireplumber.rs` crate, last commit 2024-09, pinned to the 0.4.x ABI. Tracking saivert/pwvucontrol#10 — re-evaluate when that closes and pwvucontrol lands in `extra`.)
 - **mission-center** — Resource monitor (Task Manager equivalent). GTK4. The one piece a per-tool launcher misses — pairs with btop in the terminal.
 - **pacseek** — TUI fuzzy package installer (pacman + AUR). Searchable, pull request-style preview.
 - **nwg-look** — GTK theme manager (font, GTK theme, icon theme). Run on demand only — if you click Apply after matugen has rendered, nwg-look's settings win until next theme change.

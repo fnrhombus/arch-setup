@@ -178,7 +178,7 @@ sudo pacman -Syu --noconfirm --needed \
     hyprland hyprlock hypridle hyprpolkitagent hyprpicker \
     waybar swaync swayosd \
     xdg-desktop-portal-gtk xdg-desktop-portal-hyprland \
-    network-manager-applet \
+    network-manager-applet pavucontrol \
     nwg-look nwg-displays \
     qt5ct qt6ct papirus-icon-theme \
     imv zathura zathura-pdf-poppler \
@@ -398,12 +398,6 @@ AUR_PACKAGES=(
     bibata-cursor-theme
     pacseek
     limine-snapper-sync
-    # pwvucontrol — PipeWire-native volume/routing GUI. Launched from
-    # control-panel's "Sound" entry and waybar's right-click on the audio
-    # tray icon (both via rhombu5/dots). AUR-only — not packaged in extra.
-    # `pavucontrol` is the older PulseAudio GUI; works under PipeWire's
-    # pulse compat layer but the dots references all use pwvucontrol.
-    pwvucontrol
     # Azure DNS dynamic updater. Extracted from this repo to a standalone
     # AUR package; ships /usr/bin/azure-ddns + systemd unit/timer + NM
     # dispatcher hook. setup-azure-ddns.sh (staged at /home/tom/) handles
