@@ -564,9 +564,24 @@ if ! sudo test -x /opt/pipx/bin/certbot; then
     retry sudo env PIPX_HOME=/opt/pipx PIPX_BIN_DIR=/opt/pipx/bin \
         pipx install certbot
 fi
+# certbot-dns-azure plugin AND josepy>=2.2.0:
+#   - certbot-dns-azure is the actual plugin we need.
+#   - josepy>=2.2.0 is forced because Arch's default python is now 3.14
+#     and PEP 749 (deferred annotations) broke josepy 1.15's metaclass-
+#     based JSONObjectWithFields field discovery — every certbot
+#     invocation died at import time with:
+#       "Field `alg` in JSONObject `Header` has no type annotation."
+#     josepy 2.2.0 reads __annotations__ correctly under 3.14. Pin
+#     here so a fresh install on Python 3.14 doesn't ship a broken
+#     certbot. Drop the explicit pin once certbot ≥ 4.x bumps its
+#     josepy floor past 2.2.0 (currently certbot 3.3.0 still allows 1.15).
 if ! sudo test -d /opt/pipx/venvs/certbot/lib/python*/site-packages/certbot_dns_azure; then
     retry sudo env PIPX_HOME=/opt/pipx PIPX_BIN_DIR=/opt/pipx/bin \
-        pipx inject certbot certbot-dns-azure
+        pipx inject certbot certbot-dns-azure 'josepy>=2.2.0'
+else
+    # Already installed — make sure josepy is current (idempotent on re-runs).
+    sudo /opt/pipx/venvs/certbot/bin/python -m pip install --quiet --upgrade 'josepy>=2.2.0' || \
+        warn "josepy upgrade failed — certbot may fail at import on Python 3.14. Run: sudo /opt/pipx/venvs/certbot/bin/python -m pip install --upgrade 'josepy>=2.2.0'"
 fi
 sudo ln -sf /opt/pipx/bin/certbot /usr/local/bin/certbot
 sudo install -d /etc/systemd/system/certbot-renew.service.d
