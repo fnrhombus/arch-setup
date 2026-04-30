@@ -326,32 +326,35 @@ else
 fi
 
 # ---------- 1d. tablet-mode auto-detection (Inspiron 7786 2-in-1) ----------
-# The 7786 has NO dedicated SW_TABLET_MODE hinge sensor. The kernel's
-# intel_vbtn driver synthesizes SW_TABLET_MODE events from ACPI codes 0xCC
-# (enter tablet) / 0xCD (exit tablet) onto a virtual input device named
-# "Intel HID events". A udev rule watches that device and writes the
-# new state to /run/tablet-mode/state; a user-level systemd path unit
-# (shipped via chezmoi at ~/.config/systemd/user/tablet-mode-watch.path)
+# Hardware reality on the 7786 (empirically traced 2026-04-29 — see
+# docs/tablet-mode-investigation.md):
+#   - INT33D5 ACPI device, claimed by `intel_hid` (NOT `intel_vbtn`,
+#     which matches INT33D6 only and never loads here).
+#   - intel_hid's static "Intel HID events" device has capabilities/sw=0
+#     — it does NOT advertise SW_TABLET_MODE. The first time the
+#     screen folds back, the kernel **dynamically creates** a separate
+#     input device named "Intel HID switches" with EV=0x21 (SYN+SW)
+#     and SW=0x2 (bit 1 = SW_TABLET_MODE). It persists for the rest
+#     of the boot.
+#
+# The udev rule (system-files/udev/99-tablet-mode.rules) keys on
+# `Intel HID switches` and matches both ACTION=add (first fold creates
+# it) and ACTION=change (every later transition), writing the new bit
+# to /run/tablet-mode/state. A user-level systemd path unit (shipped
+# via chezmoi at ~/.config/systemd/user/tablet-mode-watch.path)
 # notices the write and triggers tablet-mode.service, which runs
 # ~/.local/bin/tablet-mode-toggle to disable kbd+touchpad and launch
-# wvkbd-mobintl. See docs/decisions.md §Q9 + runbook/phase-3.5-hardware-handoff.md §60.
+# wvkbd-mobintl. See docs/decisions.md §Q9 +
+# runbook/phase-3.5-hardware-handoff.md §60.
 #
-# Idempotent across re-runs: the udev install is `install -m 0644`, the
-# modprobe is `|| true`, and the user-unit enable is conditional.
-log "Installing tablet-mode udev rule + ensuring intel_vbtn loads..."
+# Idempotent across re-runs: the udev install is `install -m 0644`,
+# the rules-reload is harmless, and the user-unit enable is gated on
+# the unit file being present.
+log "Installing tablet-mode udev rule..."
 sudo install -D -m 0644 \
     "$SCRIPT_DIR/system-files/udev/99-tablet-mode.rules" \
     /etc/udev/rules.d/99-tablet-mode.rules
 sudo udevadm control --reload-rules
-sudo udevadm trigger --subsystem-match=input --action=change || true
-
-# intel_vbtn auto-loads at boot via the INT33D5 ACPI device match on the
-# installed system, but force a load on this run so verify can see the
-# `Intel HID events` device immediately. On hardware that doesn't have
-# the ACPI device (i.e. NOT the 7786 — e.g. when re-running on Metis
-# during dev), modprobe will succeed but no input device materializes;
-# that's fine, just no-ops downstream.
-sudo modprobe intel_vbtn 2>/dev/null || true
 
 # Enable the user-level path watcher. chezmoi (§13 below) writes the unit
 # files to ~/.config/systemd/user/, but the enable has to happen
