@@ -1389,6 +1389,12 @@ alias cat='bat --paging=never'
 
 # --- mc: make directory and cd into it ---
 mc() { mkdir -p "$1" && cd "$1"; }
+
+# --- bw (Bitwarden CLI): pay the master-password cost once per session ---
+# `bwu` unlocks the vault and exports BW_SESSION so subsequent `bw` calls
+# don't reprompt. Auto-unlock on every shell start would make every new
+# terminal blocking on a password — explicitly opt-in instead.
+alias bwu='export BW_SESSION=$(bw unlock --raw)'
 ALIASEOF
 
 log "Pre-building zgenom plugin cache (so first login is fast)..."
