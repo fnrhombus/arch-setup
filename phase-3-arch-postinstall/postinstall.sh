@@ -1510,23 +1510,15 @@ if command -v hyprpm >/dev/null; then
         else
             log "  hyprgrass already added — skipping."
         fi
-        log "  hyprpm add hyprwm/hyprland-plugins (for hyprscrolling)..."
-        # hyprwm/hyprland-plugins is the official meta-repo. `hyprpm add`
-        # builds ALL plugins in it (hyprbars, hyprexpo, hyprscrolling,
-        # hyprtrails, hyprwinwrap, csgo-vulkan-fix); enabling is opt-in
-        # per-plugin (see hypr-plugins-on-login in dots — only hyprscrolling
-        # gets enabled by default).
-        #
-        # Replaced dawsers/hyprscroller 2026-04-30 — that plugin abandoned
-        # at Hyprland 0.48.1 (their hyprpm.toml's last commit_pin), build
-        # fails on 0.54.x. The official hyprwm/hyprscrolling is actively
-        # maintained against current Hyprland HEAD.
-        if ! hyprpm list 2>/dev/null | grep -qi hyprscrolling; then
-            hyprpm add https://github.com/hyprwm/hyprland-plugins \
-                || warn "hyprland-plugins build failed — Super+Alt+S will fail with 'unknown layout' until you re-run 'hyprpm add https://github.com/hyprwm/hyprland-plugins' manually."
-        else
-            log "  hyprland-plugins already added — skipping."
-        fi
+        # Scrolling layout is intentionally NOT installed as a plugin.
+        # Hyprland 0.54 absorbed it into core (algorithm/tiled/scrolling/
+        # ScrollingAlgorithm.cpp). Setting general:layout = scrolling
+        # works natively; bindings live in dot_config/hypr/scrolling.conf
+        # in rhombu5/dots, sourced from hyprland.conf. The journey:
+        #   - dawsers/hyprscroller — abandoned 2024 ("Last commit :-(", pinned at 0.48.1)
+        #   - hyprwm/hyprscrolling — also fails to build on 0.54.x
+        #     (#includes the obsolete IHyprLayout.hpp header)
+        #   - core scrolling layout — works since 0.54.0, no plugin needed
     fi
     # Hyprspace TODO — see plugins.conf in rhombu5/dots. Don't reintroduce blindly.
 fi
