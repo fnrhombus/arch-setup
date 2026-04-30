@@ -577,11 +577,15 @@ fi
 #     josepy floor past 2.2.0 (currently certbot 3.3.0 still allows 1.15).
 if ! sudo test -d /opt/pipx/venvs/certbot/lib/python*/site-packages/certbot_dns_azure; then
     retry sudo env PIPX_HOME=/opt/pipx PIPX_BIN_DIR=/opt/pipx/bin \
-        pipx inject certbot certbot-dns-azure 'josepy>=2.2.0'
+        pipx inject certbot certbot-dns-azure 'josepy>=2.2.0' 'azure-mgmt-dns<9.0.0'
 else
-    # Already installed — make sure josepy is current (idempotent on re-runs).
-    sudo /opt/pipx/venvs/certbot/bin/python -m pip install --quiet --upgrade 'josepy>=2.2.0' || \
-        warn "josepy upgrade failed — certbot may fail at import on Python 3.14. Run: sudo /opt/pipx/venvs/certbot/bin/python -m pip install --upgrade 'josepy>=2.2.0'"
+    # Already installed — make sure pinned deps are current (idempotent on re-runs).
+    # azure-mgmt-dns<9 because 9.0.0 changed DnsManagementClient.__init__ signature
+    # and certbot-dns-azure 2.6.1 still calls the 8.x form, raising:
+    #   TypeError: DnsManagementClient.__init__() takes from 3 to 4 positional
+    #              arguments but 5 were given
+    sudo /opt/pipx/venvs/certbot/bin/python -m pip install --quiet --upgrade 'josepy>=2.2.0' 'azure-mgmt-dns<9.0.0' || \
+        warn "certbot dep refresh failed — certbot may fail at runtime. Run: sudo /opt/pipx/venvs/certbot/bin/python -m pip install --upgrade 'josepy>=2.2.0' 'azure-mgmt-dns<9.0.0'"
 fi
 sudo ln -sf /opt/pipx/bin/certbot /usr/local/bin/certbot
 sudo install -d /etc/systemd/system/certbot-renew.service.d
@@ -1506,12 +1510,22 @@ if command -v hyprpm >/dev/null; then
         else
             log "  hyprgrass already added — skipping."
         fi
-        log "  hyprpm add hyprscroller (scrolling layout)..."
-        if ! hyprpm list 2>/dev/null | grep -qi scroller; then
-            hyprpm add https://github.com/dawsers/hyprscroller \
-                || warn "hyprscroller build failed — Super+Alt+S will fail with 'unknown layout' until you re-run 'hyprpm add https://github.com/dawsers/hyprscroller' manually."
+        log "  hyprpm add hyprwm/hyprland-plugins (for hyprscrolling)..."
+        # hyprwm/hyprland-plugins is the official meta-repo. `hyprpm add`
+        # builds ALL plugins in it (hyprbars, hyprexpo, hyprscrolling,
+        # hyprtrails, hyprwinwrap, csgo-vulkan-fix); enabling is opt-in
+        # per-plugin (see hypr-plugins-on-login in dots — only hyprscrolling
+        # gets enabled by default).
+        #
+        # Replaced dawsers/hyprscroller 2026-04-30 — that plugin abandoned
+        # at Hyprland 0.48.1 (their hyprpm.toml's last commit_pin), build
+        # fails on 0.54.x. The official hyprwm/hyprscrolling is actively
+        # maintained against current Hyprland HEAD.
+        if ! hyprpm list 2>/dev/null | grep -qi hyprscrolling; then
+            hyprpm add https://github.com/hyprwm/hyprland-plugins \
+                || warn "hyprland-plugins build failed — Super+Alt+S will fail with 'unknown layout' until you re-run 'hyprpm add https://github.com/hyprwm/hyprland-plugins' manually."
         else
-            log "  hyprscroller already added — skipping."
+            log "  hyprland-plugins already added — skipping."
         fi
     fi
     # Hyprspace TODO — see plugins.conf in rhombu5/dots. Don't reintroduce blindly.

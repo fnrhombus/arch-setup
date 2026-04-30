@@ -22,6 +22,7 @@
 set -euo pipefail
 
 # ---- Locked config from project memory (project_azure_ddns.md) ----
+TENANT_ID="bb462d15-cc1e-4a17-b0db-3ba7fcd00b21"   # Butler Software LLC
 SUBSCRIPTION_ID="ab78414a-6bf4-4d87-b27c-954c41aa8081"
 RESOURCE_GROUP="rhombus"
 DNS_ZONE="rhombus.rocks"
@@ -39,10 +40,21 @@ die()  { printf '[✗] %s\n' "$*" >&2; exit 1; }
 command -v az >/dev/null || die "azure-cli not installed (sudo pacman -S azure-cli)"
 command -v jq >/dev/null || die "jq not installed (sudo pacman -S jq)"
 
-# Verify auth — prompt to login if not yet authenticated.
-if ! az account show >/dev/null 2>&1; then
-    log "azure-cli not authenticated; running 'az login' (browser will open)..."
-    az login --use-device-code-if-no-browser >/dev/null
+# Verify auth — prompt to login if not yet authenticated, AND make sure
+# the active context is on the right tenant. Without --tenant, az login
+# defaults to the user's HOME tenant, which doesn't have the rhombus.rocks
+# subscription on this account — script then fails with:
+#   ERROR: No subscriptions found for <user>.
+# Forcing --tenant skips the multi-tenant fan-out and lands on Butler
+# Software LLC (where the DNS zone lives) up-front.
+#
+# `--use-device-code-if-no-browser` was hallucinated — it doesn't exist
+# in any az version. Plain `az login` auto-detects browser availability;
+# `--use-device-code` forces device-code unconditionally if needed.
+current_tenant=$(az account show --query tenantId -o tsv 2>/dev/null || true)
+if [[ "$current_tenant" != "$TENANT_ID" ]]; then
+    log "azure-cli not authenticated to tenant $TENANT_ID; running 'az login --tenant $TENANT_ID'..."
+    az login --tenant "$TENANT_ID" >/dev/null
 fi
 
 current_sub=$(az account show --query id -o tsv)
@@ -51,7 +63,6 @@ if [[ "$current_sub" != "$SUBSCRIPTION_ID" ]]; then
     az account set --subscription "$SUBSCRIPTION_ID"
 fi
 
-TENANT_ID=$(az account show --query tenantId -o tsv)
 log "Tenant: $TENANT_ID"
 
 # Verify zone exists (cheap read; fail loudly if missing rather than create
