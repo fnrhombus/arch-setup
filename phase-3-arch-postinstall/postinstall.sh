@@ -1390,11 +1390,29 @@ alias cat='bat --paging=never'
 # --- mc: make directory and cd into it ---
 mc() { mkdir -p "$1" && cd "$1"; }
 
-# --- bw (Bitwarden CLI): pay the master-password cost once per session ---
-# `bwu` unlocks the vault and exports BW_SESSION so subsequent `bw` calls
-# don't reprompt. Auto-unlock on every shell start would make every new
-# terminal blocking on a password — explicitly opt-in instead.
-alias bwu='export BW_SESSION=$(bw unlock --raw)'
+# --- bw (Bitwarden CLI): unlock the vault using libsecret (gnome-keyring) ---
+# Same auth model as the desktop app's "Unlock with system authentication"
+# toggle: master password lives in gnome-keyring (unlocked at login by
+# PAM), CLI pulls it silently to unlock the BW vault for this shell.
+#
+# First call in a fresh keyring prompts for the master password ONCE
+# (`secret-tool store ...`) and persists it. Every subsequent shell can
+# `bwu` without typing anything — the keyring is already unlocked from
+# PAM at login.
+#
+# To wipe the stored master password (e.g. after rotating it):
+#     secret-tool clear service bitwarden user master
+bwu() {
+    local pw
+    if ! pw=$(secret-tool lookup service bitwarden user master 2>/dev/null); then
+        echo "bwu: no master password in keyring — prompting once to seed libsecret..." >&2
+        secret-tool store --label='Bitwarden master password' service bitwarden user master
+        pw=$(secret-tool lookup service bitwarden user master)
+    fi
+    BW_PASSWORD="$pw" export BW_SESSION="$(bw unlock --passwordenv BW_PASSWORD --raw)"
+    unset BW_PASSWORD
+    [[ -n "$BW_SESSION" ]] && echo "bwu: vault unlocked for this shell."
+}
 ALIASEOF
 
 log "Pre-building zgenom plugin cache (so first login is fast)..."
