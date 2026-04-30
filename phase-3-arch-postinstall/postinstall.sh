@@ -342,6 +342,50 @@ fi
 # down both the script and the unit file. The service enable lives in
 # §13a, after chezmoi apply.
 
+# ---------- 1e. Suppress benign systemd-tpm2-setup.service failure ----------
+# systemd ships TWO TPM2 setup services that run at boot:
+#   - systemd-tpm2-setup-early.service: initializes the SRK in the TPM
+#     and writes the public-key file under /run/. SUCCEEDS on this hardware
+#     (with a warning that the TPM lacks a SHA256 PCR bank, falls back to SHA1).
+#   - systemd-tpm2-setup.service:       persists the SRK to /var/, then
+#     attempts to unseal a "machine identity secret" if one was previously
+#     stored. On a fresh install nothing was sealed, so the unseal attempt
+#     fails with "No such device or address" and the service exits 1.
+#     This produces a noisy red 'Failed to start TPM SRK Setup' line right
+#     before greetd.
+#
+# The unseal failure is benign — our LUKS unlock uses systemd-cryptsetup
+# against /etc/crypttab.initramfs (with TPM2-bound recovery key), which is
+# completely independent of systemd's machine-identity feature. systemd-
+# tpm2-setup{,-early} are not on any boot dependency path we use; the
+# failure is purely cosmetic. Mask the late variant to silence it without
+# changing any actual security posture.
+# References:
+#   - man systemd-tpm2-setup.service
+#   - https://github.com/systemd/systemd/blob/main/src/tpm2-setup/tpm2-setup.c
+log "Masking systemd-tpm2-setup.service (benign unseal failure on fresh install)..."
+sudo systemctl mask systemd-tpm2-setup.service
+
+# ---------- 1f. Disable greetd in favour of TTY login ----------
+# Decision (2026-04-30): greetd + ReGreet didn't earn its keep — slow VT
+# handoff, regreet's GTK chrome looks awkward on a 17" panel, and the
+# auth flow gives no visibility into what's failing when fprintd doesn't
+# match. Disable the service; the user logs in at tty1 (with optional
+# fingerprint via the same fprintd PAM stack as sudo) and runs `Hyprland`
+# when they want a session.
+#
+# We keep greetd + greetd-regreet INSTALLED in case we want to flip back
+# (the PAM stacks at /etc/pam.d/greetd and /etc/greetd/config.toml stay).
+# To re-enable: `sudo systemctl enable --now greetd.service`.
+#
+# To auto-launch Hyprland on tty1 login, add to ~/.zprofile (chezmoi can
+# manage this — see dot_zprofile in rhombu5/dots if shipped):
+#   if [[ $(tty) == /dev/tty1 && -z $DISPLAY && -z $WAYLAND_DISPLAY ]]; then
+#       exec Hyprland
+#   fi
+log "Disabling greetd.service (TTY login mode)..."
+sudo systemctl disable greetd.service 2>/dev/null || true
+
 # ---------- 2. yay bootstrap ----------
 if ! command -v yay >/dev/null; then
     log "Bootstrapping yay from AUR..."
@@ -398,11 +442,10 @@ AUR_PACKAGES=(
     bibata-cursor-theme
     pacseek
     limine-snapper-sync
-    # Azure DNS dynamic updater. Extracted from this repo to a standalone
-    # AUR package; ships /usr/bin/azure-ddns + systemd unit/timer + NM
-    # dispatcher hook. setup-azure-ddns.sh (staged at /home/tom/) handles
-    # the Azure-side provisioning.
-    azure-ddns
+    # azure-ddns intentionally NOT here — see §3-azure-ddns below.
+    # We build it from upstream HEAD (github.com/fnrhombus/azure-ddns) so
+    # commits to main are picked up immediately, instead of waiting on the
+    # AUR PKGBUILD bumps which lag behind.
     # NVIDIA compute-only stack for the MX250 (Pascal, compute capability 6.1).
     # Display modules are blacklisted in chroot.sh; these pull in the kernel
     # driver + nvidia-smi/CUDA runtime libs. Apps like Meshroom or COLMAP can
@@ -494,7 +537,9 @@ if pacman -Q microsoft-edge-stable-bin >/dev/null 2>&1; then
 {
     "HideFirstRunExperience": true,
     "DefaultBrowserSettingEnabled": false,
-    "BrowserSignin": 0,
+    "BrowserSignin": 1,
+    "RestoreOnStartup": 1,
+    "SyncDisabled": false,
     "MetricsReportingEnabled": false,
     "PersonalizationReportingEnabled": false,
     "PromotionalTabsEnabled": false,
@@ -587,11 +632,14 @@ sudo systemctl enable --now ufw.service
 sudo systemctl disable --now keyd.service 2>/dev/null || true
 sudo rm -f /etc/keyd/default.conf
 
-# ---------- 4d. azure-ddns: Azure DNS dynamic updater ----------
+# ---------- 4d. azure-ddns: build from upstream HEAD + enable timer ----------
 # Keeps metis.rhombus.rocks A+AAAA records pointed at this host's current
-# public IPv4/IPv6. Provided by the `azure-ddns` AUR package (extracted
-# from this repo to https://github.com/fnrhombus/azure-ddns; installed
-# via §3 above). The package ships:
+# public IPv4/IPv6. Built from upstream HEAD at github.com/fnrhombus/azure-ddns
+# (NOT from the AUR — the AUR PKGBUILD lags behind upstream commits, and
+# we want the latest fix the moment it lands on main). The repo ships its
+# own PKGBUILD at the root, so makepkg builds it directly.
+#
+# The package ships:
 #   /usr/bin/azure-ddns
 #   /usr/lib/systemd/system/azure-ddns.{service,timer}
 #   /usr/lib/NetworkManager/dispatcher.d/90-azure-ddns
@@ -601,6 +649,33 @@ sudo rm -f /etc/keyd/default.conf
 # provisioning + writes real values into /etc/azure-ddns.env. We just
 # enable the timer here; first tick no-op-fails until creds are filled in,
 # which is fine — we just don't want a FAILED state screaming at first boot.
+log "Building azure-ddns from upstream HEAD (github.com/fnrhombus/azure-ddns)..."
+AZDDNS_BUILD=$(mktemp -d)
+trap "rm -rf '$AZDDNS_BUILD'" RETURN 2>/dev/null || true
+if retry git clone --depth 1 https://github.com/fnrhombus/azure-ddns "$AZDDNS_BUILD/azure-ddns"; then
+    pushd "$AZDDNS_BUILD/azure-ddns" >/dev/null
+    if [[ -f PKGBUILD ]]; then
+        # -f forces overwrite of any existing built tarball; -i installs;
+        # --noconfirm avoids prompts. --needed is intentionally OMITTED so
+        # we always rebuild against latest source.
+        if ! makepkg -si --noconfirm --force; then
+            warn "azure-ddns: makepkg -si failed; falling back to AUR build."
+            popd >/dev/null
+            retry_soft yay -S --noconfirm --rebuild --noprovides azure-ddns || \
+                warn "azure-ddns: AUR fallback also failed. Run setup-azure-ddns.sh anyway — it'll surface the missing pieces."
+        else
+            popd >/dev/null
+        fi
+    else
+        warn "azure-ddns repo has no PKGBUILD at root; skipping HEAD build."
+        popd >/dev/null
+    fi
+else
+    warn "azure-ddns: git clone failed; falling back to AUR."
+    retry_soft yay -S --noconfirm --rebuild --noprovides azure-ddns || true
+fi
+rm -rf "$AZDDNS_BUILD"
+
 log "Enabling azure-ddns timer (real creds filled in by setup-azure-ddns.sh)..."
 sudo install -d -m 755 /var/lib/azure-ddns
 sudo systemctl daemon-reload
@@ -1353,46 +1428,44 @@ if [[ -f "$HOME/.config/systemd/user/tablet-mode-watcher.service" ]]; then
         || warn "tablet-mode-watcher.service enable failed — re-run inside a graphical session (or systemctl --user enable --now tablet-mode-watcher.service manually)."
 fi
 
-# Hyprland plugins via hyprpm. Hyprspace + hyprgrass per desktop-requirements.md.
+# Hyprland plugins via hyprpm — eager build, lazy enable.
 #
-# Two paths to install:
-#   1. Postinstall is being re-run from inside an existing Hyprland session
-#      (rare but possible — `fnpostinstall` from a Hyprland terminal). Do
-#      the install inline below, eagerly, while we already have the user's
-#      attention on a terminal.
-#   2. The normal first-install path: postinstall runs from a TTY where
-#      HYPRLAND_INSTANCE_SIGNATURE isn't set, so `hyprpm enable` would
-#      fail with "(3) failed to get the current hyprland version". The
-#      bootstrap is handled by ~/.local/share/arch-setup-bootstraps/hyprpm.sh
-#      from rhombu5/dots — applied by §13 above and dispatched by
-#      ~/.zshrc.d/arch-bootstrap-runner.zsh on each interactive shell. It
-#      uses a $XDG_RUNTIME_DIR marker to attempt install at most once per
-#      Hyprland session (so partial-install states don't fire a TPM-PIN
-#      prompt on every new ghostty window) and self-deletes on success.
-#      See the bootstrap script's own header for full rationale.
-if command -v hyprpm >/dev/null && [[ -n "${HYPRLAND_INSTANCE_SIGNATURE:-}" ]]; then
-    log "Ensuring Hyprland plugins (Hyprspace + hyprgrass)..."
-    hyprpm update >/dev/null 2>&1 || true
-    if ! hyprpm list 2>/dev/null | grep -qi hyprspace; then
-        hyprpm add https://github.com/KZDKM/Hyprspace \
-            && hyprpm enable Hyprspace \
-            || warn "Hyprspace install failed — see hyprpm output above."
-    fi
-    if ! hyprpm list 2>/dev/null | grep -q hyprgrass; then
-        hyprpm add https://github.com/horriblename/hyprgrass \
-            && hyprpm enable hyprgrass \
-            || warn "hyprgrass install failed — see hyprpm output above."
-    fi
-    # Source per-plugin config — only the ones whose plugin actually
-    # loaded. A build failure on hyprgrass shouldn't poison Hyprspace's
-    # config or vice versa. See post-plugins.d/README for rationale.
-    for _plug in hyprspace hyprgrass; do
-        if hyprpm list 2>/dev/null | grep -qi "$_plug" \
-           && [[ -f "$HOME/.config/hypr/post-plugins.d/$_plug.conf" ]]; then
-            hyprctl keyword source "$HOME/.config/hypr/post-plugins.d/$_plug.conf" >/dev/null 2>&1 \
-                || warn "Could not source post-plugins.d/$_plug.conf — try 'hyprctl reload' manually."
+# Design (rewritten 2026-04-30 after a Hyprspace HEAD crash sent the
+# compositor to safe mode every login):
+#   - EAGER (here): `hyprpm update` + `hyprpm add <repo>` for each plugin.
+#     `update` runs `sudo make installheaders` to compile against the
+#     installed Hyprland version, so it needs sudo (we're warm — see the
+#     keeper at top of this script). `add` clones the plugin repo and
+#     builds the .so. Neither needs a Hyprland session, so we can do
+#     them from a TTY here.
+#   - LAZY (on first login): ~/.local/bin/hypr-plugins-on-login (shipped
+#     by chezmoi from rhombu5/dots, called from exec.conf) does the
+#     `hyprpm enable` + post-plugins.d/ sourcing. `enable` writes state
+#     and calls `hyprctl plugin load` — the latter needs HYPRLAND_INSTANCE_
+#     SIGNATURE, hence the deferral. `enable` does NOT need sudo, so
+#     this never re-prompts TPM-PIN on a fresh shell.
+#
+# Hyprspace is INTENTIONALLY skipped here. HEAD (12ddde0, master 2026-04-30)
+# aborts in onKeyPress on the first keystroke after load, sending Hyprland
+# straight into safe mode on every login. Re-introduce after bisecting
+# for a working revision (or wait for an upstream fix). When you do, add
+# both an `hyprpm add` here and an entry in dot_local/bin/executable_hypr-
+# plugins-on-login (rhombu5/dots).
+if command -v hyprpm >/dev/null; then
+    log "Building Hyprland plugins (eager — sudo warm, build output visible)..."
+    log "  hyprpm update (compiles headers against installed Hyprland)..."
+    if ! hyprpm update; then
+        warn "hyprpm update failed — Hyprland plugin DSOs are likely out-of-sync with installed Hyprland. Re-run after fixing the underlying header build, or run 'hyprpm update' manually from a logged-in shell."
+    else
+        log "  hyprpm add hyprgrass (touch gestures)..."
+        if ! hyprpm list 2>/dev/null | grep -qi hyprgrass; then
+            hyprpm add https://github.com/horriblename/hyprgrass \
+                || warn "hyprgrass build failed — touch gestures will be unavailable until you re-run 'hyprpm add https://github.com/horriblename/hyprgrass' manually."
+        else
+            log "  hyprgrass already added — skipping."
         fi
-    done
+    fi
+    # Hyprspace TODO — see comment above. Don't reintroduce blindly.
 fi
 
 # Ghostty config is matugen-themed via the rhombu5/dots chezmoi tree (§13).
