@@ -1405,23 +1405,36 @@ mc() { mkdir -p "$1" && cd "$1"; }
 bwu() {
     local pw session
     for attempt in 1 2; do
+        # 1. Try the keyring first (silent on subsequent calls).
         if ! pw=$(secret-tool lookup service bitwarden user master 2>/dev/null); then
-            echo "bwu: no master password in keyring — prompting once to seed libsecret..." >&2
-            secret-tool store --label='Bitwarden master password' service bitwarden user master || return 1
-            pw=$(secret-tool lookup service bitwarden user master)
+            # 2. Fall back to interactive prompt — using `read -rs` so
+            #    we can validate non-empty BEFORE pushing into libsecret.
+            #    secret-tool store's own prompt is harder to validate.
+            echo -n "Bitwarden master password (one-time seed): " >&2
+            IFS= read -rs pw
+            echo >&2
+            if [[ -z "$pw" ]]; then
+                echo "bwu: empty password — aborting (re-run when ready)." >&2
+                return 1
+            fi
+            printf '%s' "$pw" | secret-tool store \
+                --label='Bitwarden master password' \
+                service bitwarden user master
         fi
         session=$(BW_PASSWORD="$pw" command bw unlock --passwordenv BW_PASSWORD --raw 2>/dev/null) || true
         if [[ -n "$session" ]]; then
             export BW_SESSION="$session"
-            printf '%s' "$BW_SESSION" | secret-tool store --label='Bitwarden CLI session' service bitwarden type session
-            echo "bwu: vault unlocked."
+            printf '%s' "$BW_SESSION" | secret-tool store \
+                --label='Bitwarden CLI session' \
+                service bitwarden type session
+            echo "bwu: vault unlocked." >&2
             return 0
         fi
-        echo "bwu: master password didn't unlock the vault — wiping cached entry, re-prompting..." >&2
+        echo "bwu: that password didn't unlock the vault — wiping cached entry, re-prompting..." >&2
         secret-tool clear service bitwarden user master 2>/dev/null
         pw=""
     done
-    echo "bwu: still couldn't unlock after retry. Try: bw login --check; bw status" >&2
+    echo "bwu: couldn't unlock after retry. Check: bw login --check; bw status" >&2
     return 1
 }
 
