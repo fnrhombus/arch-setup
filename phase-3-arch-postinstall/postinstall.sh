@@ -1017,38 +1017,65 @@ state=$(awk '{print $NF}' "$LID_FILE")
 LIDEOF
 sudo chmod 755 /usr/local/bin/lid-closed
 
-log "Writing PAM stacks for sudo / hyprlock..."
+log "Writing PAM stacks (lid-aware: fprintd if open, PIN if closed, password fallback)..."
 
-# sudo: PIN (3 attempts) → (lid-aware) fingerprint(20s) → password.
-# sudo: PIN only. No fingerprint, no password fallback. Daily auth happens
-# at greetd (fingerprint+password); sudo trusts the already-authenticated
-# session and gates with a TPM-backed PIN, period. If the PIN ever breaks
-# (TPM clear, pinpam regression), recover via TTY root login (Ctrl+Alt+F2,
-# log in as root with the install-time root password) and edit this file.
+# Design (rewritten 2026-04-30 per user spec): lid state determines
+# which factor is primary. The "wrong" factor is SKIPPED entirely —
+# not attempted, not even prompted for. Password is always the final
+# fallback so a broken TPM or unreadable finger doesn't lock the user
+# out.
 #
-# `auth required libpinpam.so` — must succeed for auth to pass. No fall-
-# through. pinpam handles its own retry loop ("X attempts remaining"), so
-# multi-line PAM-level retries are redundant.
-sudo tee /etc/pam.d/sudo >/dev/null <<'SUDOPAMEOF'
+# Behavior:
+#   Lid OPEN   → fprintd primary (max-tries=3, timeout=15) → password
+#   Lid CLOSED → libpinpam primary (its own retry loop)    → password
+#
+# Same stack across sudo / hyprlock / polkit-1 / login (any auth surface
+# the user hits day-to-day). Only greetd is different — it uses its
+# own template at system-files/pam.d/greetd because cold-boot wants
+# password-or-fingerprint without depending on TPM (per Windows Hello
+# pattern). greetd is currently disabled (§1f); template stays in case
+# of revival.
+#
+# Control flow walk (one stack, four lines):
+#   1. pam_exec /usr/local/bin/lid-closed
+#        success=1   → jump 1 line forward (skip fprintd)
+#        default     → ignore (lid open, fall through to fprintd)
+#   2. pam_fprintd.so max-tries=3 timeout=15
+#        success=done → auth complete
+#        default      → jump 1 line forward (skip libpinpam, go to pam_unix)
+#                       i.e. lid open + finger fail → password, NOT PIN
+#   3. libpinpam.so
+#        success=done → auth complete
+#        default      → ignore (lid closed + PIN fail → password)
+#   4. pam_unix.so try_first_pass nullok
+#        required     → password is always the last word
+#
+# Pre-flight: ensure /usr/local/bin/lid-closed exists (created above by
+# the lid-closed installer — sudo tee block earlier in §7a).
+#
+# Recovery: if PAM is borked and you can't sudo, log into a different
+# TTY (Ctrl+Alt+F2 then `root` + install-time root password), then
+# edit /etc/pam.d/<broken-file>. Test with `sudo -k && sudo true`
+# from a fresh shell after every edit.
+
+# The actual stack — emit once into a temp string, then tee to all four
+# files so they stay byte-identical.
+read -r -d '' LID_AWARE_STACK <<'LIDPAMEOF' || true
 #%PAM-1.0
-# arch-setup: PIN-only sudo. See postinstall.sh §7a.
-auth        required    libpinpam.so
+# arch-setup: lid-aware auth. Fprintd if lid open, PIN if closed,
+# password fallback always. See postinstall.sh §7a for design.
+auth        [success=1 default=ignore]    pam_exec.so quiet /usr/local/bin/lid-closed
+auth        [success=done default=1]      pam_fprintd.so max-tries=3 timeout=15
+auth        [success=done default=ignore] libpinpam.so
+auth        required                       pam_unix.so try_first_pass nullok
 account     include     system-auth
 session     include     system-auth
-SUDOPAMEOF
+LIDPAMEOF
 
-# hyprlock: PIN (3 attempts) → (lid-aware) fingerprint(20s) → password.
-sudo tee /etc/pam.d/hyprlock >/dev/null <<'HYPRLOCKPAMEOF'
-#%PAM-1.0
-# arch-setup: PIN primary (3 tries), fingerprint optional (skipped if lid
-# closed, 20s timeout if open), password fallback. See postinstall.sh §7a.
-auth        [success=done default=1]    libpinpam.so
-auth        [success=done default=1]    libpinpam.so
-auth        [success=done default=ignore] libpinpam.so
-auth        [success=1 default=ignore]  pam_exec.so quiet /usr/local/bin/lid-closed
-auth        sufficient  pam_fprintd.so              max-tries=5 timeout=20
-auth        include     login
-HYPRLOCKPAMEOF
+for pam_file in sudo hyprlock polkit-1 login; do
+    log "  /etc/pam.d/${pam_file}"
+    printf '%s\n' "$LID_AWARE_STACK" | sudo tee "/etc/pam.d/${pam_file}" >/dev/null
+done
 
 # ---------- 7.5 LUKS TPM2 autounlock — VERIFY-ONLY (FDE per decisions.md §Q11) ----------
 # install.sh §5b is now the single source of truth for TPM2 enrollment:
@@ -1636,8 +1663,9 @@ check "tablet-mode-watcher.service" "test -f $HOME/.config/systemd/user/tablet-m
 
 echo "-- session / login / display --"
 check "NetworkManager"      "systemctl is-enabled NetworkManager"
-check "greetd"              "systemctl is-enabled greetd"
+check "greetd installed"    "pacman -Q greetd"
 check "greetd-regreet"      "pacman -Q greetd-regreet"
+check "greetd disabled (TTY-login mode)" "! systemctl is-enabled greetd 2>/dev/null"
 check "pipewire"            "pacman -Q pipewire wireplumber"
 check "bluetooth"           "systemctl is-enabled bluetooth"
 
@@ -1653,14 +1681,12 @@ check "fprintd enrolled"    "fprintd-list tom 2>/dev/null | grep -q 'Fingerprint
 check "pinutil (TPM PIN)"   "test -x /usr/bin/pinutil || command -v pinutil"
 check "pinpam .so present"   "test -f /usr/lib/security/libpinpam.so"
 check "PIN actually persisted" "! pinutil test < /dev/null 2>&1 | grep -q NoPinSet"
-check "pinpam in sudo"       "grep -q libpinpam /etc/pam.d/sudo"
-check "pinpam in hyprlock"   "grep -q libpinpam /etc/pam.d/hyprlock"
-check "no pinpam in greetd"  "! grep -vE '^[[:space:]]*#' /etc/pam.d/greetd | grep -q libpinpam"
-check "fprintd in greetd"    "grep -vE '^[[:space:]]*#' /etc/pam.d/greetd | grep -qE 'success=done.*default=ignore.*pam_fprintd.*max-tries=1.*timeout=5'"
-check "no fprintd in sudo (PIN-only)" "! grep -q pam_fprintd /etc/pam.d/sudo"
-check "sudo is PIN-only (one auth line)" "grep -cE '^auth' /etc/pam.d/sudo | grep -qx 1"
-check "fprintd in hyprlock"  "grep -q 'pam_fprintd.*max-tries=5.*timeout=20' /etc/pam.d/hyprlock"
-check "pinpam before fprintd hyprlock" "awk '/libpinpam/{p=NR} /pam_fprintd/{f=NR} END{exit !(p && f && p<f)}' /etc/pam.d/hyprlock"
+check "lid-closed helper"    "test -x /usr/local/bin/lid-closed"
+# Lid-aware stack across sudo/hyprlock/polkit-1/login (per §7a, 2026-04-30 rewrite).
+for _f in sudo hyprlock polkit-1 login; do
+    check "lid-aware PAM in /etc/pam.d/${_f}" "grep -q 'pam_exec.so quiet /usr/local/bin/lid-closed' /etc/pam.d/${_f} && grep -q libpinpam /etc/pam.d/${_f} && grep -q pam_fprintd /etc/pam.d/${_f} && grep -q pam_unix /etc/pam.d/${_f}"
+done
+unset _f
 check "pam_unix in sys-auth" "grep -q pam_unix /etc/pam.d/system-auth"
 check "LUKS root TPM2"      "sudo systemd-cryptenroll /dev/disk/by-partlabel/ArchRoot 2>/dev/null | awk 'NR>1 && \$2==\"tpm2\"{f=1} END{exit !f}'"
 check "PCR signing keypair exists" "[[ -f /etc/systemd/tpm2-pcr-public.pem && -f /etc/systemd/tpm2-pcr-private.pem ]]"
@@ -1735,6 +1761,113 @@ if (( ${#RUN_WARNINGS[@]} > 0 )); then
     for w in "${RUN_WARNINGS[@]}"; do
         printf '  \033[1;33m[!]\033[0m %s\n' "$w"
     done
+fi
+
+# ---------- 20. Interactive follow-up (gh + bw + azure-ddns + certbot) ----------
+# Up to this point the install has been hands-off (modulo fprintd's
+# 13-swipe enrollment + the LUKS recovery key transcription). The next
+# four steps NEED browser auth or device-code flows, so we batch them
+# here at the very end where the user is right there, ready to click.
+#
+# Each block is independent and idempotent:
+#   - skipped if already authed (token present, vault server set, env
+#     filled, cert issued)
+#   - on a non-TTY run (postinstall fired from CI / a script / the
+#     zgenom warmup), the whole block is skipped — re-run from a TTY
+#     to get the prompts.
+#
+# Order matters: gh first (small, fast, fails locally if no browser),
+# then bw, then azure-ddns (which needs az login), then certbot
+# (depends on /etc/letsencrypt/azure.ini which setup-azure-ddns.sh
+# writes).
+if [[ -t 0 ]]; then
+    echo
+    echo "=== Interactive follow-up ==="
+    echo "The remaining steps need browser / device-code auth — quickly walking"
+    echo "through gh, bw, azure-ddns, certbot. Press Ctrl+C any time to skip"
+    echo "the rest; you can re-run individual commands manually later."
+    echo
+
+    # --- 20a. gh auth login ---
+    if command -v gh >/dev/null; then
+        if gh auth status >/dev/null 2>&1; then
+            log "gh already authenticated — skipping login."
+        else
+            log "Running 'gh auth login'..."
+            gh auth login || warn "gh auth login failed or cancelled — re-run manually."
+        fi
+        # Once gh is authed, the ssh-signing planter at
+        # ~/.local/share/arch-setup-bootstraps/ssh-signing.sh wires
+        # `git config commit.gpgsign true` + the SSH-signing key from
+        # the Bitwarden agent. It self-deletes on success. No-op here
+        # if the planter already ran.
+        if [[ -f "$HOME/.local/share/arch-setup-bootstraps/ssh-signing.sh" ]]; then
+            log "Running ssh-signing planter (writes ~/.gitconfig.local + commits sigfile)..."
+            bash "$HOME/.local/share/arch-setup-bootstraps/ssh-signing.sh" || \
+                warn "ssh-signing planter failed — see ~/.local/share/arch-setup-bootstraps/ssh-signing.sh."
+        fi
+    fi
+
+    # --- 20b. bw login ---
+    if command -v bw >/dev/null; then
+        if bw login --check >/dev/null 2>&1; then
+            log "bw already logged in — skipping."
+        else
+            log "Running 'bw login' (server already pointed at $BW_SERVER)..."
+            bw login || warn "bw login failed or cancelled — re-run manually."
+        fi
+    fi
+
+    # --- 20c. setup-azure-ddns.sh (Azure DNS provisioning + creds) ---
+    if [[ -x "$HOME/setup-azure-ddns.sh" ]]; then
+        # Check if creds are already filled in — env file present + non-empty
+        # AZ_TENANT_ID means setup-azure-ddns.sh has run successfully at least once.
+        if sudo grep -qE '^AZ_TENANT_ID=.+' /etc/azure-ddns.env 2>/dev/null; then
+            log "Azure DDNS env already populated — skipping. (Re-run ~/setup-azure-ddns.sh manually to rotate secret.)"
+        else
+            log "Running setup-azure-ddns.sh (browser/device-code auth for az login)..."
+            bash "$HOME/setup-azure-ddns.sh" || \
+                warn "setup-azure-ddns.sh failed — re-run manually after fixing the underlying issue."
+        fi
+    else
+        warn "~/setup-azure-ddns.sh not found — Azure DDNS not provisioned. Stage it from arch-setup/phase-3-arch-postinstall/setup-azure-ddns.sh."
+    fi
+
+    # --- 20d. certbot certonly (Let's Encrypt cert) ---
+    # Only attempt if azure.ini was filled in by setup-azure-ddns.sh AND
+    # we haven't already issued a cert for metis.rhombus.rocks.
+    if [[ -x /usr/local/bin/certbot ]] || command -v certbot >/dev/null; then
+        if sudo test -f /etc/letsencrypt/live/metis.rhombus.rocks/fullchain.pem; then
+            log "Let's Encrypt cert for metis.rhombus.rocks already issued — skipping."
+        elif sudo grep -qE '^dns_azure_sp_client_id\s*=\s*[^[:space:]]+' /etc/letsencrypt/azure.ini 2>/dev/null; then
+            log "Issuing Let's Encrypt cert for metis.rhombus.rocks..."
+            # certbot prompts for email + ToS unless --agree-tos -m are passed.
+            # We use the user's gh email if available, fall back to interactive.
+            ce_email=""
+            if command -v gh >/dev/null && gh auth status >/dev/null 2>&1; then
+                gh_user=$(gh api user --jq '.login' 2>/dev/null) || gh_user=""
+                gh_id=$(gh api user --jq '.id' 2>/dev/null) || gh_id=""
+                if [[ -n "$gh_user" && -n "$gh_id" ]]; then
+                    ce_email="${gh_id}+${gh_user}@users.noreply.github.com"
+                fi
+            fi
+            ce_email_args=()
+            if [[ -n "$ce_email" ]]; then
+                ce_email_args=(--agree-tos -m "$ce_email" --no-eff-email)
+            fi
+            sudo certbot certonly \
+                --authenticator dns-azure \
+                --dns-azure-credentials /etc/letsencrypt/azure.ini \
+                --dns-azure-propagation-seconds 60 \
+                -d metis.rhombus.rocks \
+                "${ce_email_args[@]}" \
+                || warn "certbot certonly failed — see /var/log/letsencrypt/letsencrypt.log."
+        else
+            log "/etc/letsencrypt/azure.ini missing creds — skipping certbot. Run setup-azure-ddns.sh first."
+        fi
+    fi
+else
+    log "Non-TTY run — skipping interactive setup (gh/bw/azure-ddns/certbot)."
 fi
 
 echo
