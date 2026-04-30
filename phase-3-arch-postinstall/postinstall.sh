@@ -175,7 +175,7 @@ sudo pacman -Syu --noconfirm --needed \
     bitwarden bitwarden-cli \
     ghostty fuzzel cliphist satty hyprshot \
     nautilus yazi \
-    hyprland hyprlock hypridle hyprpolkitagent hyprpicker \
+    hyprland hyprlock hypridle hyprpolkitagent hyprpicker uwsm \
     waybar swaync swayosd \
     xdg-desktop-portal-gtk xdg-desktop-portal-hyprland \
     network-manager-applet pavucontrol \
