@@ -125,6 +125,7 @@ There is no build, lint, or test target. Work is almost entirely **editing markd
 - **Dotfiles live in a separate repo** — [rhombu5/dots](https://github.com/rhombu5/dots), cloned into `~/.local/share/chezmoi` by `chezmoi init --apply rhombu5/dots`. This repo (arch-setup) holds installer scripts only; **don't propose adding configs back here**. Don't propose `stow` or plain symlinks either.
 - **tmux is required, not optional.** It's there for Claude Code's worktree workflow (Zellij is not supported). Prefix is `Ctrl+a`, carried from the prior `fnwsl` setup.
 - **Shell stack is locked:** zsh + zgenom + powerlevel10k + the plugin list in `wsl-cli-test.sh`. Mirror any plugin change across both the `.zshrc` block *and* the pre-build block at the bottom of that script, or the zgenom cache will be stale on first login.
+- **Tablet-mode signal path on the 7786 was empirically traced 2026-04-29** — see [docs/tablet-mode-investigation.md](docs/tablet-mode-investigation.md). Read this before designing or editing any tablet-mode auto-detection: the signal lives on a dynamically-created `Intel HID switches` device, not the obvious `Intel HID events`.
 
 ## Conventions
 
