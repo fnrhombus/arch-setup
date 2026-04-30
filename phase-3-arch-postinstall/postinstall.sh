@@ -1403,15 +1403,49 @@ mc() { mkdir -p "$1" && cd "$1"; }
 # To wipe the stored master password (e.g. after rotating it):
 #     secret-tool clear service bitwarden user master
 bwu() {
-    local pw
-    if ! pw=$(secret-tool lookup service bitwarden user master 2>/dev/null); then
-        echo "bwu: no master password in keyring — prompting once to seed libsecret..." >&2
-        secret-tool store --label='Bitwarden master password' service bitwarden user master
-        pw=$(secret-tool lookup service bitwarden user master)
+    local pw session
+    for attempt in 1 2; do
+        if ! pw=$(secret-tool lookup service bitwarden user master 2>/dev/null); then
+            echo "bwu: no master password in keyring — prompting once to seed libsecret..." >&2
+            secret-tool store --label='Bitwarden master password' service bitwarden user master || return 1
+            pw=$(secret-tool lookup service bitwarden user master)
+        fi
+        session=$(BW_PASSWORD="$pw" command bw unlock --passwordenv BW_PASSWORD --raw 2>/dev/null) || true
+        if [[ -n "$session" ]]; then
+            export BW_SESSION="$session"
+            printf '%s' "$BW_SESSION" | secret-tool store --label='Bitwarden CLI session' service bitwarden type session
+            echo "bwu: vault unlocked."
+            return 0
+        fi
+        echo "bwu: master password didn't unlock the vault — wiping cached entry, re-prompting..." >&2
+        secret-tool clear service bitwarden user master 2>/dev/null
+        pw=""
+    done
+    echo "bwu: still couldn't unlock after retry. Try: bw login --check; bw status" >&2
+    return 1
+}
+
+# `bw` wrapper: transparent unlock. If vault is locked or BW_SESSION
+# is missing/stale, pull the cached session from libsecret; if that's
+# also stale, re-run bwu (which uses the master password in libsecret —
+# silent unless the keyring has been wiped). End result: every `bw`
+# command Just Works in any shell after the user has run bwu once.
+#
+# Cost: one `bw status` invocation per call to gate the unlock check
+# (~100ms). Skip the gate when stdin isn't a TTY (scripts/CI) so we
+# don't accidentally prompt during automation.
+bw() {
+    if [[ -t 0 ]]; then
+        if [[ -z "${BW_SESSION:-}" ]]; then
+            BW_SESSION=$(secret-tool lookup service bitwarden type session 2>/dev/null) && export BW_SESSION
+        fi
+        local status
+        status=$(command bw status 2>/dev/null | jq -r .status 2>/dev/null)
+        if [[ "$status" == "locked" ]] || [[ "$status" == "" ]]; then
+            bwu >&2 || return $?
+        fi
     fi
-    BW_PASSWORD="$pw" export BW_SESSION="$(bw unlock --passwordenv BW_PASSWORD --raw)"
-    unset BW_PASSWORD
-    [[ -n "$BW_SESSION" ]] && echo "bwu: vault unlocked for this shell."
+    command bw "$@"
 }
 ALIASEOF
 
