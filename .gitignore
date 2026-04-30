@@ -11,6 +11,9 @@
 # Editor/IDE — machine-specific paths leak in here (mise shims, etc.)
 /.vscode/
 
+# Claude Code worktrees (per-session sandboxes, not source)
+/.claude/worktrees/
+
 # Temp working files
 .tmp-*
 
