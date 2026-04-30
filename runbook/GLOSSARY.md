@@ -34,7 +34,7 @@ Organized by category so you can skim. Nothing here is install instructions — 
 - **hypridle** — Hyprland-native idle daemon. Listens for input, fires actions on timeout (DPMS off at 28 min, lock at 30 min). No idle-hibernate.
 - **hyprpolkitagent** — Hyprland-native polkit agent. Pops up the auth dialog when an app needs root (Bitwarden unlock prompt, mount prompts, etc.).
 - **hyprpicker** — Color picker. Magnifier loupe + autocopy. Bound to Super+P.
-- **hyprexpo** — Hyprland plugin: Mission-Control-style overview with live workspace thumbnails. Bound to Super+grave (the key above Tab). Loaded via `hyprpm`.
+- **Hyprspace** — Hyprland plugin: interactive workspace overview. Bound to Super+grave (the key above Tab). Loaded via `hyprpm`. Click anywhere to drag a window; drop on another workspace tile to move (and follow) it there. Replaced hyprexpo (which is passive — click-to-switch only, no drag).
 - **hyprgrass** — Hyprland plugin: touch gesture engine for the 2-in-1. Single-finger long-press, edge swipes, OSK toggle. Loaded via `hyprpm`.
 - **hyprpm** — Hyprland's plugin manager. `hyprpm add <repo>`, `hyprpm enable <plugin>`, `hyprpm update`. Auto-pins plugins to your Hyprland version.
 - **wvkbd** — On-screen keyboard for tablet mode. `wvkbd-mobintl --hidden` is what hyprgrass's edge-swipe-up toggles.

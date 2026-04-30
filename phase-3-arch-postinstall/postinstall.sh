@@ -1325,7 +1325,7 @@ if [[ -f "$HOME/.config/systemd/user/wallpaper-rotate.timer" ]]; then
         || warn "wallpaper-rotate.timer enable failed — re-run inside a graphical session."
 fi
 
-# Hyprland plugins via hyprpm. hyprexpo + hyprgrass per desktop-requirements.md.
+# Hyprland plugins via hyprpm. Hyprspace + hyprgrass per desktop-requirements.md.
 #
 # Two paths to install:
 #   1. Postinstall is being re-run from inside an existing Hyprland session
@@ -1343,12 +1343,12 @@ fi
 #      prompt on every new ghostty window) and self-deletes on success.
 #      See the bootstrap script's own header for full rationale.
 if command -v hyprpm >/dev/null && [[ -n "${HYPRLAND_INSTANCE_SIGNATURE:-}" ]]; then
-    log "Ensuring Hyprland plugins (hyprexpo + hyprgrass)..."
+    log "Ensuring Hyprland plugins (Hyprspace + hyprgrass)..."
     hyprpm update >/dev/null 2>&1 || true
-    if ! hyprpm list 2>/dev/null | grep -q hyprexpo; then
-        hyprpm add https://github.com/hyprwm/hyprland-plugins \
-            && hyprpm enable hyprexpo \
-            || warn "hyprexpo install failed — see hyprpm output above."
+    if ! hyprpm list 2>/dev/null | grep -qi hyprspace; then
+        hyprpm add https://github.com/KZDKM/Hyprspace \
+            && hyprpm enable Hyprspace \
+            || warn "Hyprspace install failed — see hyprpm output above."
     fi
     if ! hyprpm list 2>/dev/null | grep -q hyprgrass; then
         hyprpm add https://github.com/horriblename/hyprgrass \
@@ -1356,10 +1356,10 @@ if command -v hyprpm >/dev/null && [[ -n "${HYPRLAND_INSTANCE_SIGNATURE:-}" ]]; 
             || warn "hyprgrass install failed — see hyprpm output above."
     fi
     # Source per-plugin config — only the ones whose plugin actually
-    # loaded. A build failure on hyprgrass shouldn't poison hyprexpo's
+    # loaded. A build failure on hyprgrass shouldn't poison Hyprspace's
     # config or vice versa. See post-plugins.d/README for rationale.
-    for _plug in hyprexpo hyprgrass; do
-        if hyprpm list 2>/dev/null | grep -q "$_plug" \
+    for _plug in hyprspace hyprgrass; do
+        if hyprpm list 2>/dev/null | grep -qi "$_plug" \
            && [[ -f "$HOME/.config/hypr/post-plugins.d/$_plug.conf" ]]; then
             hyprctl keyword source "$HOME/.config/hypr/post-plugins.d/$_plug.conf" >/dev/null 2>&1 \
                 || warn "Could not source post-plugins.d/$_plug.conf — try 'hyprctl reload' manually."
@@ -1528,6 +1528,7 @@ check "iio-hyprland (AUR)"  "command -v iio-hyprland"
 check "wvkbd (touch OSK)"   "command -v wvkbd-mobintl"
 check "libwacom"            "pacman -Q libwacom"
 check "hyprgrass plugin"    "hyprpm list 2>/dev/null | grep -q hyprgrass"
+check "Hyprspace plugin"    "hyprpm list 2>/dev/null | grep -qi hyprspace"
 
 echo "-- session / login / display --"
 check "NetworkManager"      "systemctl is-enabled NetworkManager"

@@ -74,7 +74,7 @@ Group A — **Hyprland core configs** (bound to atomic-commit boundaries):
 - `hyprland/binds.conf` — full ~60-80 bindings per
   desktop-requirements.md "Keybinds" section. Remember `Super+B`/`+C`/
   `+E`/`+Return`/`+F` quicklaunches; `Super+Tab` last-workspace;
-  `Super+grave` hyprexpo overview; `Super+Shift+T` theme toggle;
+  `Super+grave` Hyprspace overview; `Super+Shift+T` theme toggle;
   `Super+Shift+H` hibernate; `Super+Shift+L` lock-now; `Super+N`
   notifications; `Super+V` clipboard; `Super+,` settings panel.
 - `hyprland/decoration.conf` — blur, rounded, opacity
@@ -86,8 +86,8 @@ Group A — **Hyprland core configs** (bound to atomic-commit boundaries):
   store` (via `wl-paste --watch`), `swayosd-server`, `hypridle`,
   `hyprpaper` if used (probably not — swww instead), and the matugen
   initial-render call.
-- `hyprland/plugins.conf` — `hyprexpo` config + the issue-138
-  `workspace,e+0` workaround in the bind action
+- `hyprland/post-plugins.d/hyprspace.conf` — Hyprspace config
+  (`autoDrag`, `switchOnDrop`) + `Super+grave → overview:toggle` bind
 - `hypridle.conf` — `1800s → loginctl lock-session`,
   `1800s → hyprctl dispatch dpms off`, `on-resume → dpms on`,
   `before-sleep → loginctl lock-session`
@@ -176,8 +176,9 @@ Group G — **Cheat sheet output**:
 - **Workspace strategy is monitor-bound**, but every workspace bound
   to eDP-1 needs a fallback `monitor:DP-1` so they migrate cleanly
   when the lid closes (post-battery-replacement, but configure now).
-- **hyprexpo issue #138 workaround**: bind action must dispatch
-  `workspace,e+0` BEFORE `hyprexpo:expo,off`. Always.
+- **Workspace overview is Hyprspace, not hyprexpo.** Different namespace
+  (`plugin:overview:*`), different dispatcher (`overview:toggle`), and
+  no issue-138 workaround needed (Hyprspace handles focus correctly).
 
 ## Workflow
 

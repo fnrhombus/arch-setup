@@ -8,7 +8,7 @@ Schemas pulled directly from upstream sources (not blogs / SO):
 
 - Hyprland: `hyprwm/hyprland-wiki@main:content/Configuring/{Variables,Window-Rules,Dispatchers,Binds,Animations,Dwindle-Layout}.md`
 - hyprlock + hypridle: `hyprwm/hyprland-wiki@main:content/Hypr Ecosystem/{hyprlock,hypridle}.md`
-- hyprexpo: `hyprwm/hyprland-plugins@main:hyprexpo/README.md`
+- Hyprspace: `KZDKM/Hyprspace@main:README.md`
 - matugen: `InioX/matugen@main:Cargo.toml` (v4.1.0), `src/template_util/template.rs` (Color struct), `Aiving/material-colors@main:src/scheme/mod.rs` (role list), `CHANGELOG.md`
 - waybar: `Alexays/Waybar/wiki Module:Custom + Module:Hyprland`
 - swaync: `ErikReider/SwayNotificationCenter@main:src/configSchema.json`
@@ -162,8 +162,10 @@ Concretely:
 - `cursor`: inactive_timeout, no_warps, persistent_warps — all valid.
 - `bindel/bindl/bindm/binde/bind` flag combos — all valid (`l`=locked, `e`=repeat, `m`=mouse).
 
-### hyprexpo plugin
-- `columns`, `gap_size`, `bg_col`, `workspace_method`, `gesture_distance` — all current. Already addressed deprecated `enable_gesture/gesture_positive/gesture_negative/gesture_fingers` removal in commit `ebf247a`.
+### Hyprspace plugin (replaced hyprexpo)
+- Namespace: `plugin:overview:*` (NOT `plugin:hyprspace:*`).
+- Used keys: `autoDrag`, `switchOnDrop`, `exitOnClick`, `autoScroll`, `panelColor`, `panelBorderColor`, `panelBorderWidth`, `workspaceActiveBackground`, `workspaceInactiveBackground`. All current per upstream README.
+- Dispatcher: `overview:toggle` / `overview:open` / `overview:close`. The `validate-hypr-binds` allowlist tracks all three.
 
 ### hypridle
 - `general`: lock_cmd, unlock_cmd, before_sleep_cmd, after_sleep_cmd, ignore_dbus_inhibit, ignore_systemd_inhibit — all valid.

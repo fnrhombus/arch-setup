@@ -132,7 +132,7 @@ Status as of this commit:
   - XDPH portal pin: PENDING
   - `style=kvantum` → `style=Fusion`: PENDING
   - Bibata package split (xcursor + hyprcursor): PENDING
-  - hyprexpo deprecated `enable_gesture`/etc keys removed: PENDING
+  - hyprexpo deprecated `enable_gesture`/etc keys removed: OBSOLETE (swapped to Hyprspace)
   - Re-dispatch syntax-validation agent for full coverage: PENDING
 - One known overlap: matugen renders to `~/.config/zathura/zathurarc`,
   which is the same path chezmoi manages — needs the matugen template

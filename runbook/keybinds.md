@@ -78,7 +78,7 @@
 | `Super + Shift + 1..9` | Send window to workspace |
 | `Super + Shift + 0` | Send window to scratch |
 | `Super + Tab` | Last-used workspace |
-| `Super + grave` (\`) | Workspace overview (hyprexpo) |
+| `Super + grave` (\`) | Workspace overview (Hyprspace — drag windows to move) |
 
 ## Mouse
 

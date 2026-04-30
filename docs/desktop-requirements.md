@@ -56,7 +56,7 @@ wleave                           # AUR — GTK4 logout/power menu
 hyprpicker                       # extra — color picker
 
 # Hyprland plugins (loaded via hyprpm at install time, not pacman)
-# - hyprexpo (workspace overview)
+# - Hyprspace (interactive workspace overview, drag-to-move-window)
 # - hyprgrass (touch gestures)
 
 # Portals
@@ -186,7 +186,7 @@ Binding categories:
 - Window/workspace nav: focus neighbors, swap, send-to-workspace, last-workspace toggle
 - App quicklaunches: `Super+B` browser, `Super+C` Claude Code, `Super+E` editor (VSCode), `Super+Return` Ghostty, `Super+F` files (yazi or nautilus)
 - Layout: split direction, master/dwindle toggle, resize submap, toggle floating, toggle pinned
-- Workspace overview: `Super+Tab` last-workspace; `Super+grave` hyprexpo overview
+- Workspace overview: `Super+Tab` last-workspace; `Super+grave` Hyprspace overview (drag windows to move between workspaces)
 - System: `Super+Shift+T` theme toggle, `Super+Shift+H` hibernate, `Super+Shift+L` lock now, `Super+N` notification panel, `Super+V` clipboard picker, `Super+,` settings panel
 - Capture: `PrtSc` region screenshot, `Shift+PrtSc` window, `Ctrl+PrtSc` full screen, `Super+P` color picker
 - Media keys: volume up/down/mute, brightness up/down, mic mute (handled by SwayOSD)
@@ -226,10 +226,11 @@ popup on every dispatched bind, so an unbound key is visually obvious
 
 ## Workspace overview (within the strategy above)
 
-- `hyprexpo` plugin — Mission-Control-style overview with live thumbnails.
-  Bound to `Super+grave` (the key above Tab).
-- Workaround for hyprexpo issue #138 (focus stuck after clicking current workspace):
-  always dispatch `workspace,e+0` before `hyprexpo:expo,off` in the bind.
+- `Hyprspace` plugin (KZDKM) — interactive overview with drag-to-move-window
+  between workspaces. Bound to `Super+grave` (the key above Tab). Configured
+  with `autoDrag = true` (every click on the panel initiates a drag) and
+  `switchOnDrop = true` (releasing a window on another workspace tile follows
+  it there). Replaced hyprexpo, which was passive (click-to-switch only).
 
 ## Settings / control panel
 
@@ -374,10 +375,10 @@ themselves:
   fires AFTER the lock listener (offset timeout by 1s). The earlier note
   in this doc about a `dispatcher = on,resume` flag was wrong — that
   option doesn't exist in hypridle.
-- **hyprexpo workaround for issue #138.** Clicking the currently-visible
-  workspace in the overview leaves focus stuck. In the keybind, always
-  dispatch `workspace,e+0` before `hyprexpo:expo,off`. If this ever
-  blocks, **Hyprspace** (KZDKM) is a config-compatible swap.
+- **Workspace overview = Hyprspace, not hyprexpo.** hyprexpo had issue #138
+  (focus stuck after clicking the currently-visible workspace) AND no
+  drag-to-move-window. Hyprspace fixes both. Bind is `Super+grave →
+  overview:toggle`. Config in `dot_config/hypr/post-plugins.d/hyprspace.conf`.
 - **TPM2 PCR re-enrolment hook** — covered in the Hibernate section above.
   Required for kernel/UKI/limine updates on a hibernate-enabled system.
 

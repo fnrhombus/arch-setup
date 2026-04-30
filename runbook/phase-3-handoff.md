@@ -274,7 +274,7 @@ Everything listed below is installed automatically by the phase-2 + phase-3 scri
 - libfprint-goodix-53xc (Goodix 538C fingerprint blob — built on libfprint-tod-git with `!lto` workaround)
 
 ### Hyprland plugins (via `hyprpm`, phase-3 postinstall.sh §13)
-- hyprexpo (Mission-Control workspace overview, bound to Super+grave)
+- Hyprspace (interactive workspace overview with drag-to-move-window, bound to Super+grave)
 - hyprgrass (touch gesture engine for the 2-in-1)
 
 ### Via mise (tool version manager, phase-3 postinstall.sh)

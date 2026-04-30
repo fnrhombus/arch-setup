@@ -266,7 +266,7 @@ and accepted on the "clean-slate, no bias" principle. See
   - `input.conf` — keyboard layout, touchpad behavior, libinput tuning
   - `decoration.conf` — rounding, blur, shadows
   - `animations.conf` — bezier curves + per-event animation timings
-  - `plugins.conf` — hyprexpo + hyprgrass (loaded via hyprpm)
+  - `plugins.conf` — Hyprspace + hyprgrass (loaded via hyprpm)
   - `exec.conf` — `exec-once` daemons (waybar, swaync, hypridle, awww-daemon, iio-hyprland, …)
   - `binds.conf` — ~85 keybindings; validated on every chezmoi apply
 - **Helper binaries** at `~/.local/bin/` (chezmoi-managed):
