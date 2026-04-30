@@ -1491,8 +1491,15 @@ if command -v hyprpm >/dev/null; then
         else
             log "  hyprgrass already added — skipping."
         fi
+        log "  hyprpm add hyprscroller (scrolling layout)..."
+        if ! hyprpm list 2>/dev/null | grep -qi scroller; then
+            hyprpm add https://github.com/dawsers/hyprscroller \
+                || warn "hyprscroller build failed — Super+Alt+S will fail with 'unknown layout' until you re-run 'hyprpm add https://github.com/dawsers/hyprscroller' manually."
+        else
+            log "  hyprscroller already added — skipping."
+        fi
     fi
-    # Hyprspace TODO — see comment above. Don't reintroduce blindly.
+    # Hyprspace TODO — see plugins.conf in rhombu5/dots. Don't reintroduce blindly.
 fi
 
 # Ghostty config is matugen-themed via the rhombu5/dots chezmoi tree (§13).
