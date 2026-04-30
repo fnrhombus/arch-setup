@@ -117,17 +117,17 @@ phase-3.5-hardware/
 - The 17" 7786 is **capacitive-only**, no AES digitizer. Skip this script. Only the 13"/15" 7000-series 2-in-1s (7386, 7586) shipped active pens.
 
 **60 — Tablet mode**
-- The 7786 does NOT have a `SW_TABLET_MODE` hinge sensor. Tablet-mode comes from ACPI `intel-vbtn` synthesizing the event on a virtual input device named `Intel HID events`. `evtest /dev/input/event*` against that device, fold the screen — should see `SW_TABLET_MODE` value 1 ↔ 0 transitions.
+- The 7786 surfaces `SW_TABLET_MODE` via `intel_hid` (NOT `intel_vbtn`), which dynamically creates an input device named `Intel HID switches` the first time the screen folds back. See [docs/tablet-mode-investigation.md](../docs/tablet-mode-investigation.md) for the full hardware capture.
 - **Wired in postinstall.sh §1d (already installed):**
-  - udev rule `/etc/udev/rules.d/99-tablet-mode.rules` watches `ATTRS{name}=="Intel HID events"` and writes `SW_TABLET_MODE` to `/run/tablet-mode/state` on each `change` event.
+  - udev rule `/etc/udev/rules.d/99-tablet-mode.rules` watches `ATTRS{name}=="Intel HID switches"` (matches both `add` — first fold creates the device — and `change` — every later transition) and writes `SW_TABLET_MODE` to `/run/tablet-mode/state`.
   - User-level `~/.config/systemd/user/tablet-mode-watch.path` notices the write and triggers `tablet-mode.service`, which runs `~/.local/bin/tablet-mode-toggle --detect`.
   - `tablet-mode-toggle` queries `hyprctl devices -j` to discover the actual kbd (`at-translated-set-2-keyboard`) + touchpad (`dell0896:00-04f3:30b6-touchpad`) names, then `hyprctl keyword device:NAME:enabled false/true` to toggle them. On tablet entry it also `setsid -f wvkbd-mobintl --hidden` (kills it on exit).
   - Manual override binding: `SUPER+ALT+K` → `tablet-mode-toggle --toggle` (forces a flip if auto-detect misfires).
-- **First test on real hardware** (priority — never validated):
-  1. `lsmod | grep intel_vbtn` — must show the module loaded. If absent, `sudo modprobe intel_vbtn`.
-  2. `sudo evtest` → pick the `Intel HID events` device → fold the screen. Expect `SW_TABLET_MODE` value transitions.
-  3. `sudo udevadm monitor --environment --subsystem-match=input` while folding — expect `ACTION=change` events with `SW_TABLET_MODE=1` (or 0).
-  4. `cat /run/tablet-mode/state` after a fold — expect `1`.
+- **First test on real hardware**:
+  1. `lsmod | grep intel_hid` — must show the module loaded (it auto-loads via the INT33D5 ACPI match).
+  2. Fold the screen back once. Then `cat /sys/class/input/input*/name | grep 'Intel HID switches'` — expect a hit (the device only exists after the first fold).
+  3. `sudo udevadm monitor --environment --subsystem-match=input` while folding — expect `ACTION=add` (first fold) or `ACTION=change` (later) with `NAME="Intel HID switches"` and `SW_TABLET_MODE=1` / `=0`.
+  4. `cat /run/tablet-mode/state` after a fold — expect `1`; after unfolding, `0`.
   5. `systemctl --user status tablet-mode.service` — expect a recent activation; check journalctl for `[tablet-mode]` lines.
   6. `hyprctl devices` — confirm the actual kbd+touchpad names. If they don't match the discover_devices() heuristic in `tablet-mode-toggle`, tweak the jq filter.
 - **Still TODO** (out of scope for this commit, part of issue #6):
