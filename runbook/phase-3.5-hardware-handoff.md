@@ -35,7 +35,7 @@ postinstall.sh §1 + §3 already pacman/yay-installed the relevant packages. The
 
 From `decisions.md` Requirements (checkboxes still `[ ]`):
 
-- [ ] Tablet-mode detection. The 7786 does NOT have a dedicated `SW_TABLET_MODE` hinge sensor — Dell 2-in-1s of this era use ACPI events from `intel-vbtn` (codes 0xCC enter / 0xCD exit), which the kernel synthesizes into `SW_TABLET_MODE` on a virtual `Intel HID events` input device. Verify with `evtest` on `/dev/input/event*` for that name post-install. Then disable physical kbd, autostart `wvkbd-mobintl`, reflow waybar.
+- [x] Tablet-mode detection — implemented as an angle-polling user daemon (`tablet-mode-watcher.service` from rhombu5/dots). See §60 below for the wiring and [docs/tablet-mode-investigation.md](../docs/tablet-mode-investigation.md) for why the obvious udev / `SW_TABLET_MODE` design doesn't work on this hardware.
 - [ ] Pen pressure curve / button mapping for the **external Wacom Intuos** (when plugged in).
 - [ ] Three-finger swipe / pinch gesture bindings via `hyprgrass`.
 
@@ -60,7 +60,7 @@ Expected to find:
 - **ELAN touchscreen** on the i2c bus (NOT USB), exposed as `ELAN2097:00 04F3:2666` (or similar — the 04F3 vendor is ELAN). Bound by `i2c-hid-acpi` → `hid-multitouch`. **NOT Goodix** — that's the fingerprint reader (`27c6:538c`); the Goodix-on-the-touchscreen claim in older versions of this doc was wrong. **NOT IPTS** either — IPTS is Surface-line only; do not install `iptsd`.
 - **Accelerometer** as `/sys/bus/iio/devices/iio:deviceN` — `iio-sensor-proxy` already installed; needs `systemctl enable --now iio-sensor-proxy.service` if not yet enabled.
 - **External Wacom Intuos** on USB — appears as a Wacom device node, handled natively by libinput on Wayland.
-- **Tablet-mode signaling** via ACPI `intel-vbtn` (NOT a dedicated `SW_TABLET_MODE` hinge sensor). The driver synthesizes a virtual input device named `Intel HID events`; that's where `SW_TABLET_MODE` events fire when you fold the screen. `evtest` on that device with the screen folding will confirm.
+- **Tablet-mode signal**: the firmware-level `SW_TABLET_MODE` bit on this 7786 is unworkable as a wiring path (not emitted via udev `change` events on the input device, and the firmware threshold is ~360° not 180°). The implemented design instead polls the HID sensor hub's `hinge` IIO channel directly — see §60 below and [docs/tablet-mode-investigation.md](../docs/tablet-mode-investigation.md).
 
 > The 7786 has **capacitive touch only** — no built-in active pen / AES digitizer. Don't waste time looking for a stylus device beyond the second `ELAN2097 ... UNKNOWN` channel (which is unused on this hardware).
 
@@ -80,7 +80,7 @@ phase-3.5-hardware/
   30-touch-gestures.sh         # hyprgrass gesture bindings (already loaded via hyprpm)
   40-wacom-external.sh         # libinput tuning for the Intuos (pressure curve, button binds)
   50-wacom-builtin-pen.sh      # built-in active pen calibration (if present)
-  60-tablet-mode.sh            # SW_TABLET_MODE listener → disable kbd, autostart wvkbd, flip rotation lock
+  # 60-tablet-mode.sh — already implemented, see §60 below (angle-polling watcher daemon)
 ```
 
 **Rules:**
@@ -117,19 +117,18 @@ phase-3.5-hardware/
 - The 17" 7786 is **capacitive-only**, no AES digitizer. Skip this script. Only the 13"/15" 7000-series 2-in-1s (7386, 7586) shipped active pens.
 
 **60 — Tablet mode**
-- The 7786 surfaces `SW_TABLET_MODE` via `intel_hid` (NOT `intel_vbtn`), which dynamically creates an input device named `Intel HID switches` the first time the screen folds back. See [docs/tablet-mode-investigation.md](../docs/tablet-mode-investigation.md) for the full hardware capture.
-- **Wired in postinstall.sh §1d (already installed):**
-  - udev rule `/etc/udev/rules.d/99-tablet-mode.rules` watches `ATTRS{name}=="Intel HID switches"` (matches both `add` — first fold creates the device — and `change` — every later transition) and writes `SW_TABLET_MODE` to `/run/tablet-mode/state`.
-  - User-level `~/.config/systemd/user/tablet-mode-watch.path` notices the write and triggers `tablet-mode.service`, which runs `~/.local/bin/tablet-mode-toggle --detect`.
-  - `tablet-mode-toggle` queries `hyprctl devices -j` to discover the actual kbd (`at-translated-set-2-keyboard`) + touchpad (`dell0896:00-04f3:30b6-touchpad`) names, then `hyprctl keyword device:NAME:enabled false/true` to toggle them. On tablet entry it also `setsid -f wvkbd-mobintl --hidden` (kills it on exit).
-  - Manual override binding: `SUPER+ALT+K` → `tablet-mode-toggle --toggle` (forces a flip if auto-detect misfires).
+- Implemented as a user-level systemd service (`tablet-mode-watcher.service` from rhombu5/dots) running an angle-polling daemon. Threshold is 180° with ±10° hysteresis (`>190°` → tablet, `<170°` → laptop). The udev / SW_TABLET_MODE path was attempted first and abandoned — see [docs/tablet-mode-investigation.md](../docs/tablet-mode-investigation.md) for the full hardware trace and why udev is wrong for this signal.
+- **Wired (chezmoi-applied + postinstall §1d / §13a):**
+  - `~/.local/bin/tablet-mode-watcher` — Python daemon polling `/sys/bus/iio/devices/iio:device8/in_angl0_raw` (the channel labelled `hinge`) at 10 Hz, applying hysteresis around 180°, and shelling out to `~/.local/bin/tablet-mode-toggle <0|1>` on each transition.
+  - `~/.config/systemd/user/tablet-mode-watcher.service` — `WantedBy=graphical-session.target`, restarts on failure.
+  - `~/.local/bin/tablet-mode-toggle` — actuates kbd+touchpad disable/enable (queries `hyprctl devices -j` for `at-translated-set-2-keyboard` and `dell0896:00-04f3:30b6-touchpad`) and `setsid -f wvkbd-mobintl --hidden` for the on-screen keyboard.
+  - Manual override binding: `SUPER+ALT+K` → `tablet-mode-toggle --toggle`.
 - **First test on real hardware**:
-  1. `lsmod | grep intel_hid` — must show the module loaded (it auto-loads via the INT33D5 ACPI match).
-  2. Fold the screen back once. Then `cat /sys/class/input/input*/name | grep 'Intel HID switches'` — expect a hit (the device only exists after the first fold).
-  3. `sudo udevadm monitor --environment --subsystem-match=input` while folding — expect `ACTION=add` (first fold) or `ACTION=change` (later) with `NAME="Intel HID switches"` and `SW_TABLET_MODE=1` / `=0`.
-  4. `cat /run/tablet-mode/state` after a fold — expect `1`; after unfolding, `0`.
-  5. `systemctl --user status tablet-mode.service` — expect a recent activation; check journalctl for `[tablet-mode]` lines.
-  6. `hyprctl devices` — confirm the actual kbd+touchpad names. If they don't match the discover_devices() heuristic in `tablet-mode-toggle`, tweak the jq filter.
+  1. `systemctl --user status tablet-mode-watcher.service` — expect `active (running)`.
+  2. `journalctl --user -u tablet-mode-watcher -n 20 -f` then fold the screen — expect `[tablet-mode-watcher] applying state=1` when angle crosses 190°, `=0` when it drops below 170°.
+  3. `cat /sys/bus/iio/devices/iio:device8/in_angl0_raw` while at rest at various angles — expect mostly real values, occasional 0 (round-robin sentinel; the daemon filters those).
+  4. `hyprctl devices` — confirm the actual kbd+touchpad names. If they don't match the discover_devices() heuristic in `tablet-mode-toggle`, tweak the jq filter.
+  5. **Known caveat**: the `hinge` IIO channel only updates on motion (firmware behaviour). On rapid folds the daemon may lag a few seconds catching the 180° crossing — once entered, hysteresis keeps it stable. Acceptable on this hardware; if the lag bites, fold slower or drop the daemon's hysteresis window.
 - **Still TODO** (out of scope for this commit, part of issue #6):
   - Touchscreen palm rejection while typing in laptop mode (libinput `disable-while-typing` covers the touchpad but not the touchscreen — needs a `quirks` override or a userspace daemon).
   - Pen pressure curve / button mapping (no built-in pen on the 7786, only external Wacom Intuos when plugged in — handled in §40 of this doc).

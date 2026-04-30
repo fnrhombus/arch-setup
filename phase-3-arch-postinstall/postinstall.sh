@@ -326,40 +326,21 @@ else
 fi
 
 # ---------- 1d. tablet-mode auto-detection (Inspiron 7786 2-in-1) ----------
-# Hardware reality on the 7786 (empirically traced 2026-04-29 — see
-# docs/tablet-mode-investigation.md):
-#   - INT33D5 ACPI device, claimed by `intel_hid` (NOT `intel_vbtn`,
-#     which matches INT33D6 only and never loads here).
-#   - intel_hid's static "Intel HID events" device has capabilities/sw=0
-#     — it does NOT advertise SW_TABLET_MODE. The first time the
-#     screen folds back, the kernel **dynamically creates** a separate
-#     input device named "Intel HID switches" with EV=0x21 (SYN+SW)
-#     and SW=0x2 (bit 1 = SW_TABLET_MODE). It persists for the rest
-#     of the boot.
+# Implemented as a user-level systemd service running an angle-polling
+# daemon — see rhombu5/dots:
+#   dot_local/bin/executable_tablet-mode-watcher
+#   dot_config/systemd/user/tablet-mode-watcher.service
+# The daemon polls the HID sensor hub's `hinge` IIO channel at 10 Hz,
+# applies ±10° hysteresis around 180° (>190° → tablet, <170° → laptop), shells out
+# to ~/.local/bin/tablet-mode-toggle on each transition. No udev rule
+# is needed (and one wouldn't work — empirically the kernel doesn't
+# emit udev events for EV_SW value changes on existing input devices,
+# and the firmware-set SW_TABLET_MODE threshold is ~360° not 180°).
+# See docs/tablet-mode-investigation.md for the trace.
 #
-# The udev rule (system-files/udev/99-tablet-mode.rules) keys on
-# `Intel HID switches` and matches both ACTION=add (first fold creates
-# it) and ACTION=change (every later transition), writing the new bit
-# to /run/tablet-mode/state. A user-level systemd path unit (shipped
-# via chezmoi at ~/.config/systemd/user/tablet-mode-watch.path)
-# notices the write and triggers tablet-mode.service, which runs
-# ~/.local/bin/tablet-mode-toggle to disable kbd+touchpad and launch
-# wvkbd-mobintl. See docs/decisions.md §Q9 +
-# runbook/phase-3.5-hardware-handoff.md §60.
-#
-# Idempotent across re-runs: the udev install is `install -m 0644`,
-# the rules-reload is harmless, and the user-unit enable is gated on
-# the unit file being present.
-log "Installing tablet-mode udev rule..."
-sudo install -D -m 0644 \
-    "$SCRIPT_DIR/system-files/udev/99-tablet-mode.rules" \
-    /etc/udev/rules.d/99-tablet-mode.rules
-sudo udevadm control --reload-rules
-
-# Enable the user-level path watcher. chezmoi (§13 below) writes the unit
-# files to ~/.config/systemd/user/, but the enable has to happen
-# explicitly — chezmoi doesn't run `systemctl --user enable` for us.
-# Defer the actual enable to after chezmoi apply (§13a).
+# Nothing to install at this point in postinstall — chezmoi (§13) lays
+# down both the script and the unit file. The service enable lives in
+# §13a, after chezmoi apply.
 
 # ---------- 2. yay bootstrap ----------
 if ! command -v yay >/dev/null; then
@@ -1361,15 +1342,15 @@ if [[ -f "$HOME/.config/systemd/user/wallpaper-rotate.timer" ]]; then
         || warn "wallpaper-rotate.timer enable failed — re-run inside a graphical session."
 fi
 
-# Enable user-level tablet-mode path watcher (paired with §1d's udev rule).
-# The path unit watches /run/tablet-mode/state for writes; the service it
-# triggers calls ~/.local/bin/tablet-mode-toggle --detect inside the
-# user session so hyprctl picks up WAYLAND_DISPLAY + the Hyprland sig.
-if [[ -f "$HOME/.config/systemd/user/tablet-mode-watch.path" ]]; then
-    log "Enabling tablet-mode-watch.path..."
+# Enable user-level tablet-mode-watcher (the angle-polling daemon — see §1d).
+# Shipped via chezmoi from rhombu5/dots:
+#   dot_local/bin/executable_tablet-mode-watcher
+#   dot_config/systemd/user/tablet-mode-watcher.service
+if [[ -f "$HOME/.config/systemd/user/tablet-mode-watcher.service" ]]; then
+    log "Enabling tablet-mode-watcher.service..."
     systemctl --user daemon-reload
-    systemctl --user enable --now tablet-mode-watch.path 2>/dev/null \
-        || warn "tablet-mode-watch.path enable failed — re-run inside a graphical session (or systemctl --user enable --now tablet-mode-watch.path manually)."
+    systemctl --user enable --now tablet-mode-watcher.service 2>/dev/null \
+        || warn "tablet-mode-watcher.service enable failed — re-run inside a graphical session (or systemctl --user enable --now tablet-mode-watcher.service manually)."
 fi
 
 # Hyprland plugins via hyprpm. Hyprspace + hyprgrass per desktop-requirements.md.
@@ -1576,10 +1557,9 @@ check "wvkbd (touch OSK)"   "command -v wvkbd-mobintl"
 check "libwacom"            "pacman -Q libwacom"
 check "hyprgrass plugin"    "hyprpm list 2>/dev/null | grep -q hyprgrass"
 check "Hyprspace plugin"    "hyprpm list 2>/dev/null | grep -qi hyprspace"
-check "tablet-mode udev"    "test -f /etc/udev/rules.d/99-tablet-mode.rules"
 check "tablet-mode-toggle"  "test -x $HOME/.local/bin/tablet-mode-toggle"
-check "tablet-mode unit"    "test -f $HOME/.config/systemd/user/tablet-mode.service"
-check "tablet-mode path"    "test -f $HOME/.config/systemd/user/tablet-mode-watch.path"
+check "tablet-mode-watcher" "test -x $HOME/.local/bin/tablet-mode-watcher"
+check "tablet-mode-watcher.service" "test -f $HOME/.config/systemd/user/tablet-mode-watcher.service"
 
 echo "-- session / login / display --"
 check "NetworkManager"      "systemctl is-enabled NetworkManager"

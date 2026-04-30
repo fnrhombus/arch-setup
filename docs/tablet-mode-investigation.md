@@ -6,13 +6,30 @@ work from chasing the wrong device.
 
 ## TL;DR
 
-The `SW_TABLET_MODE` signal on this 7786 lives on a **dynamically
-materialized** input device named `Intel HID switches`, NOT on the
-obvious-looking, statically present `Intel HID events`. The kernel
-creates the switches device the first time the screen folds back; it
-persists for the rest of the boot. Any udev rule or daemon that keys
-on `Intel HID events` and waits for `SW_TABLET_MODE` will silently
-never fire.
+Two separate hardware findings push the implementation away from the
+obvious "udev rule on `SW_TABLET_MODE`" design:
+
+1. **udev is the wrong layer.** The kernel does **not** emit udev
+   events for `EV_SW` value changes on an existing input device — udev
+   only sees device add/remove. So no rule of the form
+   `ENV{SW_TABLET_MODE}=="?*"` can fire on a fold transition. (And the
+   add events that udev *does* see don't carry the value anyway.)
+2. **`SW_TABLET_MODE` doesn't fire at 180°.** Empirically the firmware
+   on this 7786 sets the bit at the fully-folded threshold (~360°), not
+   when the screen passes 180°. The user wants ~180° to be the
+   kbd/touchpad disable point, so `SW_TABLET_MODE` is too coarse on
+   its own.
+
+Both pushed the design to a user-level **angle-polling daemon** that
+reads the HID sensor hub's `hinge` IIO channel directly. The
+implementation lives in `rhombu5/dots`:
+- `dot_local/bin/executable_tablet-mode-watcher`
+- `dot_config/systemd/user/tablet-mode-watcher.service`
+
+The rest of this doc preserves the reasoning trace — the dead-end
+device discovery (`Intel HID events` vs `Intel HID switches` vs
+`Dell tablet mode switch`) is still useful background if anyone tries
+to revive a switch-based design later.
 
 ## Hardware enumeration
 
@@ -144,6 +161,53 @@ consumes `net.hadess.SensorProxy.AccelerometerOrientation` from
 `iio-sensor-proxy` and rotates the Hyprland output as the laptop is
 turned. Only the `SW_TABLET_MODE` signal path needed re-tracing — the
 rest of the IIO sensor hub is healthy on this hardware.
+
+## Hinge-angle characterisation (2026-04-30)
+
+After the udev/`SW_TABLET_MODE` path was abandoned (see why above),
+the design pivoted to angle polling. The `iio:device8` hinge sensor
+exposes three labelled `in_angl{0,1,2}` channels: `hinge`, `screen`,
+`keyboard`. Slow-fold characterisation showed:
+
+- **`angl0` (hinge) is the right channel.** It reports the relative
+  angle between the two halves; `screen` and `keyboard` report
+  half-orientation relative to gravity and disagree with `hinge` by
+  tens of degrees during motion.
+- **The driver round-robins active samples across the three channels.**
+  At any given read, exactly one channel returns a fresh value; the
+  other two return `0`. So a `0` is "no fresh sample on this channel
+  this tick" — filter it and keep the last real value.
+- **Updates are sparse and event-driven.** During a slow open the
+  hinge channel reported `160°` then `182°` (the 180° crossing was
+  caught) then jumped to `296°` ten seconds later, missing
+  intermediate values. On the descent, `360°` jumped to `103°` after
+  motion completed — the 180° crossing on the way down was *not*
+  captured at-rate. With ±10° hysteresis this is acceptable: once
+  tablet mode engages, it stays engaged until the angle drops below
+  170°, which the kernel will eventually report.
+- **Sampling frequency from the sensor**: `in_angl_sampling_frequency
+  = 10 Hz`, `in_angl_hysteresis = 1°`. We poll at 10 Hz to match.
+- **Buffered IIO reads via `/dev/iio:device8`** would give continuous
+  data but require root (the device node is `crw------- root`). We
+  stay with sysfs polling to keep the daemon user-only.
+
+### Implementation summary (in rhombu5/dots)
+
+- **`tablet-mode-watcher`** — a Python daemon. Discovers the hinge
+  channel by reading `/sys/bus/iio/devices/iio:device*/name` and
+  `in_angl{N}_label`. Polls `in_angl{N}_raw` at 10 Hz, ignoring 0
+  reads. Applies hysteresis (`>190°` → tablet, `<170°` → laptop) and
+  shells out to `~/.local/bin/tablet-mode-toggle <0|1>` on each
+  transition.
+- **`tablet-mode-watcher.service`** — user-level systemd unit,
+  `WantedBy=graphical-session.target`, `ConditionEnvironment=WAYLAND_DISPLAY`,
+  `Restart=on-failure`. Enabled by `postinstall.sh` §13a after
+  `chezmoi apply`.
+- **`tablet-mode-toggle`** — unchanged actuator: `hyprctl keyword
+  device:NAME:enabled false/true` against the keyboard + touchpad
+  discovered via `hyprctl devices -j`, plus `setsid -f wvkbd-mobintl
+  --hidden` for the on-screen keyboard. Still callable manually
+  (`SUPER+ALT+K` → `--toggle`).
 
 ## Reproducing this investigation
 
