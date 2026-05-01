@@ -327,3 +327,50 @@ Once this plan has been executed and verified silent, update:
 The "one-prompt" sequence those docs describe is correct as a *fallback*
 (it works, you just eat one prompt) — but the zero-prompt plan in this doc
 is the canonical procedure.
+
+## Open commitments (resolve before the fresh reinstall)
+
+These were agreed in conversation on 2026-05-01 and aren't yet reflected
+in the scripts or the doc body. Pick them up after running the test on
+the current system, before kicking off the fresh reinstall.
+
+1. **Capture the AMI 5.13 menu path on the Inspiron 7786** for clearing
+   PK / entering Setup Mode. The Phase B body currently lists best-guess
+   verbiage ("Boot → Secure Boot → Custom → Custom Secure Boot Options
+   → Delete all Secure Boot variables", or under "System Configuration").
+   After the test reveals the real menu, replace the speculation with the
+   actual path so the next Claude session coaching this on the fresh
+   install has ground truth.
+
+2. **Fold the cost-free OS-side prep into the install scripts.** Add to
+   `phase-3-arch-postinstall/postinstall.sh` (or `phase-2-arch-install/chroot.sh`,
+   wherever fits the existing structure better):
+
+   ```sh
+   # Idempotent — no-op once keys exist.
+   sbctl create-keys
+
+   # Idempotent — no-op once each file is signed and tracked.
+   for f in /boot/EFI/BOOT/BOOTX64.EFI \
+            /usr/share/limine/BOOTX64.EFI \
+            /boot/EFI/Linux/arch-linux.efi \
+            /boot/EFI/Linux/arch-linux-lts.efi
+   do
+       sbctl sign -s "$f"
+   done
+   ```
+
+   Both are no-ops with SB off (firmware doesn't validate). Both shrink
+   the post-install dance to: "drop PCR 7, firmware visit 1, enroll-keys,
+   firmware visit 2, reseal" — five steps instead of seven, and the only
+   sbctl call left in the dance is `enroll-keys -m`.
+
+   The PCR-7 wiggle (A.4 / D.1) stays manual — it's the one piece that
+   has to be coordinated with the firmware visits, and `postinstall.sh`
+   has no way to know whether you're about to enable SB or not.
+
+3. **Optional, not committed:** consider whether `tpm2-reseal-luks`
+   should grow a `--no-pcr7` flag (or `RESEAL_DROP_PCR7=1` env var) so
+   step A.4 becomes one helper call instead of two `systemd-cryptenroll`
+   invocations. Not worth doing speculatively, but if the dance ever
+   gets run a third time, the cost/benefit might tip.
