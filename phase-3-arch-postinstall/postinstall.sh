@@ -186,7 +186,7 @@ sudo pacman -Syu --noconfirm --needed \
     mission-center \
     remmina freerdp \
     ufw \
-    azure-cli certbot python-pipx \
+    azure-cli lego \
     memtest86+ memtest86+-efi \
     smartmontools \
     sbctl \
@@ -549,52 +549,66 @@ if pacman -Q microsoft-edge-stable-bin >/dev/null 2>&1; then
 EDGEPOLICYEOF
 fi
 
-# ---------- 3a. certbot-dns-azure plugin (pipx — not packaged for Arch) ----------
-# certbot-dns-azure is PyPI-only: not in extra, not in AUR, not community-
-# repackaged. Arch's system python blocks `pip install` via PEP 668, so we
-# install certbot + the plugin into an isolated pipx venv at /opt/pipx, then
-# override certbot-renew.service to run the pipx binary so renewals see the
-# plugin. The pacman certbot package stays installed (it ships the systemd
-# units we override). /usr/local/bin/certbot wins PATH precedence over
-# /usr/bin/certbot so the interactive `sudo certbot certonly ...` call from
-# runbook §3e-ter picks up the plugin-equipped binary.
-log "Installing certbot-dns-azure plugin via pipx (not packaged for Arch)..."
-if ! sudo test -x /opt/pipx/bin/certbot; then
-    sudo install -d -m 755 /opt/pipx
-    retry sudo env PIPX_HOME=/opt/pipx PIPX_BIN_DIR=/opt/pipx/bin \
-        pipx install certbot
-fi
-# certbot-dns-azure plugin AND josepy>=2.2.0:
-#   - certbot-dns-azure is the actual plugin we need.
-#   - josepy>=2.2.0 is forced because Arch's default python is now 3.14
-#     and PEP 749 (deferred annotations) broke josepy 1.15's metaclass-
-#     based JSONObjectWithFields field discovery — every certbot
-#     invocation died at import time with:
-#       "Field `alg` in JSONObject `Header` has no type annotation."
-#     josepy 2.2.0 reads __annotations__ correctly under 3.14. Pin
-#     here so a fresh install on Python 3.14 doesn't ship a broken
-#     certbot. Drop the explicit pin once certbot ≥ 4.x bumps its
-#     josepy floor past 2.2.0 (currently certbot 3.3.0 still allows 1.15).
-if ! sudo test -d /opt/pipx/venvs/certbot/lib/python*/site-packages/certbot_dns_azure; then
-    retry sudo env PIPX_HOME=/opt/pipx PIPX_BIN_DIR=/opt/pipx/bin \
-        pipx inject certbot certbot-dns-azure 'josepy>=2.2.0' 'azure-mgmt-dns<9.0.0'
-else
-    # Already installed — make sure pinned deps are current (idempotent on re-runs).
-    # azure-mgmt-dns<9 because 9.0.0 changed DnsManagementClient.__init__ signature
-    # and certbot-dns-azure 2.6.1 still calls the 8.x form, raising:
-    #   TypeError: DnsManagementClient.__init__() takes from 3 to 4 positional
-    #              arguments but 5 were given
-    sudo /opt/pipx/venvs/certbot/bin/python -m pip install --quiet --upgrade 'josepy>=2.2.0' 'azure-mgmt-dns<9.0.0' || \
-        warn "certbot dep refresh failed — certbot may fail at runtime. Run: sudo /opt/pipx/venvs/certbot/bin/python -m pip install --upgrade 'josepy>=2.2.0' 'azure-mgmt-dns<9.0.0'"
-fi
-sudo ln -sf /opt/pipx/bin/certbot /usr/local/bin/certbot
-sudo install -d /etc/systemd/system/certbot-renew.service.d
-sudo tee /etc/systemd/system/certbot-renew.service.d/override.conf >/dev/null <<'CBOVEREOF'
+# ---------- 3a. lego (Let's Encrypt cert issuance via Azure DNS) ----------
+# certbot was the original plan. It died on Python 3.14 — josepy 1.15's
+# metaclass-based JSONObjectWithFields broke under PEP 749 (deferred
+# annotations), and the upgrade path (josepy 2.x) removed
+# `ComparableX509`, which certbot 3.3.0 still calls. Beyond that,
+# `certbot-dns-azure` is PyPI-only and required a pipx-managed venv
+# with a pinned `azure-mgmt-dns<9` because the plugin hadn't migrated
+# to the 9.x DnsManagementClient signature. Total of ~40 lines of
+# dependency wrangling on top of certbot's own complexity.
+#
+# `lego` (extra/lego) is a single static Go binary with first-class
+# Azure DNS support — no Python in the loop, no plugin venvs, no
+# version pins. Installed via pacman in §1; here we wire up the
+# renewal pipeline. The cert itself is issued during setup-azure-ddns
+# (after `az login`); this block only sets up the systemd-driven
+# renewal so a fresh install has the timer ready when the user
+# eventually issues their first cert.
+log "Setting up lego renewal pipeline..."
+sudo install -d -m 750 -o root -g root /etc/lego
+# /etc/lego/lego.env is written by setup-azure-ddns.sh — service starts
+# disabled until that file exists.
+LEGO_EMAIL="${LEGO_EMAIL:-goliyth@gmail.com}"
+LEGO_DOMAINS="${LEGO_DOMAINS:-metis.rhombus.rocks}"
+
+sudo tee /etc/systemd/system/lego-renew.service >/dev/null <<LEGOSVC
+[Unit]
+Description=Renew Let's Encrypt certs via lego (Azure DNS)
+After=network-online.target azure-ddns.service
+Wants=network-online.target
+ConditionPathExists=/etc/lego/lego.env
+
 [Service]
-ExecStart=
-ExecStart=/opt/pipx/bin/certbot -q renew
-CBOVEREOF
+Type=oneshot
+EnvironmentFile=/etc/lego/lego.env
+ExecStart=/usr/bin/lego --accept-tos \\
+    --email ${LEGO_EMAIL} \\
+    --domains ${LEGO_DOMAINS} \\
+    --dns azuredns \\
+    --path /etc/lego \\
+    renew --days 30
+# Reload nginx/whatever after a successful renewal. No-op if the unit
+# isn't installed.
+ExecStartPost=-/bin/systemctl reload nginx.service
+LEGOSVC
+
+sudo tee /etc/systemd/system/lego-renew.timer >/dev/null <<'LEGOTMR'
+[Unit]
+Description=Daily Let's Encrypt cert renewal check via lego
+
+[Timer]
+OnCalendar=daily
+RandomizedDelaySec=12h
+Persistent=true
+
+[Install]
+WantedBy=timers.target
+LEGOTMR
+
 sudo systemctl daemon-reload
+sudo systemctl enable lego-renew.timer >/dev/null 2>&1 || true
 
 # ---------- 4. (no local SSH keygen — Bitwarden SSH agent holds keys) ----------
 # Keys live in the Bitwarden vault as "SSH key" items and surface via
