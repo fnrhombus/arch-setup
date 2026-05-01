@@ -442,10 +442,9 @@ AUR_PACKAGES=(
     bibata-cursor-theme
     pacseek
     limine-snapper-sync
-    # azure-ddns intentionally NOT here — see §3-azure-ddns below.
-    # We build it from upstream HEAD (github.com/fnrhombus/azure-ddns) so
-    # commits to main are picked up immediately, instead of waiting on the
-    # AUR PKGBUILD bumps which lag behind.
+    # azure-ddns intentionally NOT here — see §4d below. We build the
+    # versioned aur/azure-ddns/PKGBUILD from the source tree (no yay
+    # cache hop) so the install is hermetic to the repo checkout.
     # NVIDIA compute-only stack for the MX250 (Pascal, compute capability 6.1).
     # Display modules are blacklisted in chroot.sh; these pull in the kernel
     # driver + nvidia-smi/CUDA runtime libs. Apps like Meshroom or COLMAP can
@@ -665,13 +664,13 @@ sudo systemctl enable --now ufw.service
 sudo systemctl disable --now keyd.service 2>/dev/null || true
 sudo rm -f /etc/keyd/default.conf
 
-# ---------- 4d. azure-ddns: build from upstream HEAD + enable timer ----------
+# ---------- 4d. azure-ddns: build versioned package + enable timer ----------
 # Keeps metis.rhombus.rocks A+AAAA records pointed at this host's current
-# public IPv4/IPv6. We want HEAD (the AUR `azure-ddns` package lags upstream
-# commits), so build the `-git` PKGBUILD that's checked into the repo at
-# `aur/azure-ddns-git/PKGBUILD`. That PKGBUILD's `pkgver()` derives the
-# version from `git describe`, producing values like 0.2.1.r1.g24ef3db
-# that vercmp orders correctly above the AUR's tagged 0.2.1.
+# public IPv4/IPv6. Build the versioned `aur/azure-ddns/PKGBUILD` checked
+# into the repo (matches the AUR's published copy of `azure-ddns`). The
+# `-git` flavor at `aur/azure-ddns-git/PKGBUILD` is kept around for users
+# who want HEAD-tracking, but our default is the tagged release so
+# install-time output is reproducible and `pacman -Q` shows a real version.
 #
 # The package ships:
 #   /usr/bin/azure-ddns
@@ -683,18 +682,18 @@ sudo rm -f /etc/keyd/default.conf
 # provisioning + writes real values into /etc/azure-ddns.env. We just
 # enable the timer here; first tick no-op-fails until creds are filled in,
 # which is fine — we just don't want a FAILED state screaming at first boot.
-log "Building azure-ddns from HEAD via aur/azure-ddns-git..."
+log "Building azure-ddns from aur/azure-ddns/PKGBUILD..."
 AZDDNS_BUILD=$(mktemp -d)
 trap "rm -rf '$AZDDNS_BUILD'" RETURN 2>/dev/null || true
 if retry git clone --depth 1 https://github.com/fnrhombus/azure-ddns "$AZDDNS_BUILD/azure-ddns"; then
-    pkgdir="$AZDDNS_BUILD/azure-ddns/aur/azure-ddns-git"
+    pkgdir="$AZDDNS_BUILD/azure-ddns/aur/azure-ddns"
     if [[ -f "$pkgdir/PKGBUILD" ]]; then
         pushd "$pkgdir" >/dev/null
         # -f forces overwrite of any existing built tarball; -i installs;
         # --noconfirm avoids prompts. --needed is intentionally OMITTED so
         # we always rebuild against latest source.
         if ! makepkg -si --noconfirm --force; then
-            warn "azure-ddns-git: makepkg -si failed; falling back to AUR's stable azure-ddns (lags HEAD)."
+            warn "azure-ddns: makepkg -si failed; falling back to AUR's published azure-ddns."
             popd >/dev/null
             retry_soft yay -S --noconfirm --rebuild --noprovides azure-ddns || \
                 warn "azure-ddns: AUR fallback also failed. Run setup-azure-ddns.sh anyway — it'll surface the missing pieces."
@@ -702,7 +701,7 @@ if retry git clone --depth 1 https://github.com/fnrhombus/azure-ddns "$AZDDNS_BU
             popd >/dev/null
         fi
     else
-        warn "azure-ddns: aur/azure-ddns-git/PKGBUILD missing in repo checkout; falling back to AUR."
+        warn "azure-ddns: aur/azure-ddns/PKGBUILD missing in repo checkout; falling back to AUR."
         retry_soft yay -S --noconfirm --rebuild --noprovides azure-ddns || true
     fi
 else
