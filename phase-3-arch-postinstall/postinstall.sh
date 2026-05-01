@@ -667,10 +667,11 @@ sudo rm -f /etc/keyd/default.conf
 
 # ---------- 4d. azure-ddns: build from upstream HEAD + enable timer ----------
 # Keeps metis.rhombus.rocks A+AAAA records pointed at this host's current
-# public IPv4/IPv6. Built from upstream HEAD at github.com/fnrhombus/azure-ddns
-# (NOT from the AUR — the AUR PKGBUILD lags behind upstream commits, and
-# we want the latest fix the moment it lands on main). The repo ships its
-# own PKGBUILD at the root, so makepkg builds it directly.
+# public IPv4/IPv6. We want HEAD (the AUR `azure-ddns` package lags upstream
+# commits), so build the `-git` PKGBUILD that's checked into the repo at
+# `aur/azure-ddns-git/PKGBUILD`. That PKGBUILD's `pkgver()` derives the
+# version from `git describe`, producing values like 0.2.1.r1.g24ef3db
+# that vercmp orders correctly above the AUR's tagged 0.2.1.
 #
 # The package ships:
 #   /usr/bin/azure-ddns
@@ -682,17 +683,18 @@ sudo rm -f /etc/keyd/default.conf
 # provisioning + writes real values into /etc/azure-ddns.env. We just
 # enable the timer here; first tick no-op-fails until creds are filled in,
 # which is fine — we just don't want a FAILED state screaming at first boot.
-log "Building azure-ddns from upstream HEAD (github.com/fnrhombus/azure-ddns)..."
+log "Building azure-ddns from HEAD via aur/azure-ddns-git..."
 AZDDNS_BUILD=$(mktemp -d)
 trap "rm -rf '$AZDDNS_BUILD'" RETURN 2>/dev/null || true
 if retry git clone --depth 1 https://github.com/fnrhombus/azure-ddns "$AZDDNS_BUILD/azure-ddns"; then
-    pushd "$AZDDNS_BUILD/azure-ddns" >/dev/null
-    if [[ -f PKGBUILD ]]; then
+    pkgdir="$AZDDNS_BUILD/azure-ddns/aur/azure-ddns-git"
+    if [[ -f "$pkgdir/PKGBUILD" ]]; then
+        pushd "$pkgdir" >/dev/null
         # -f forces overwrite of any existing built tarball; -i installs;
         # --noconfirm avoids prompts. --needed is intentionally OMITTED so
         # we always rebuild against latest source.
         if ! makepkg -si --noconfirm --force; then
-            warn "azure-ddns: makepkg -si failed; falling back to AUR build."
+            warn "azure-ddns-git: makepkg -si failed; falling back to AUR's stable azure-ddns (lags HEAD)."
             popd >/dev/null
             retry_soft yay -S --noconfirm --rebuild --noprovides azure-ddns || \
                 warn "azure-ddns: AUR fallback also failed. Run setup-azure-ddns.sh anyway — it'll surface the missing pieces."
@@ -700,8 +702,8 @@ if retry git clone --depth 1 https://github.com/fnrhombus/azure-ddns "$AZDDNS_BU
             popd >/dev/null
         fi
     else
-        warn "azure-ddns repo has no PKGBUILD at root; skipping HEAD build."
-        popd >/dev/null
+        warn "azure-ddns: aur/azure-ddns-git/PKGBUILD missing in repo checkout; falling back to AUR."
+        retry_soft yay -S --noconfirm --rebuild --noprovides azure-ddns || true
     fi
 else
     warn "azure-ddns: git clone failed; falling back to AUR."
