@@ -1498,21 +1498,33 @@ _POSTINSTALL_NONINTERACTIVE=1 zsh -i -c 'echo zgenom warmup complete' 2>/dev/nul
 # applies in one step. Idempotent: a second run is a no-op when source
 # matches dest. Requires network — we assume it's up by §13 (the user
 # connected via iwctl in §0, and pacman/yay in earlier sections proved it).
-DOTS_REPO="https://github.com/rhombu5/dots.git"
+#
+# Clone over HTTPS so the bootstrap doesn't depend on Bitwarden being
+# unlocked yet (postinstall runs from a TTY before Hyprland comes up;
+# bitwarden-desktop and its ssh-agent socket aren't available). Once the
+# repo is on disk, rewrite the remote to SSH so future pushes/pulls (made
+# from a logged-in Hyprland session with Bitwarden unlocked) just work.
+DOTS_REPO_HTTPS="https://github.com/rhombu5/dots.git"
+DOTS_REPO_SSH="git@github.com:rhombu5/dots.git"
+DOTS_SRC="$HOME/.local/share/chezmoi"
 
 if ! command -v chezmoi >/dev/null; then
     warn "chezmoi not installed — was it dropped from §1 pacman list?"
     warn "  Skipping dotfile apply — Hyprland will start with empty config."
-elif [[ -d "$HOME/.local/share/chezmoi/.git" ]]; then
+elif [[ -d "$DOTS_SRC/.git" ]]; then
     log "chezmoi source already present at ~/.local/share/chezmoi — pulling + applying..."
-    git -C "$HOME/.local/share/chezmoi" pull --ff-only \
+    git -C "$DOTS_SRC" remote set-url origin "$DOTS_REPO_SSH"
+    git -C "$DOTS_SRC" pull --ff-only \
         || warn "git pull on chezmoi source failed — applying current checkout."
     chezmoi apply --force \
         || warn "chezmoi apply reported issues — check 'chezmoi status' and 'chezmoi diff'."
 else
     log "Cloning rhombu5/dots into ~/.local/share/chezmoi and applying..."
-    chezmoi init --apply "$DOTS_REPO" \
-        || warn "chezmoi init --apply failed — Hyprland will start with empty config. Re-run 'chezmoi init --apply $DOTS_REPO' once network is up."
+    if chezmoi init --apply "$DOTS_REPO_HTTPS"; then
+        git -C "$DOTS_SRC" remote set-url origin "$DOTS_REPO_SSH"
+    else
+        warn "chezmoi init --apply failed — Hyprland will start with empty config. Re-run 'chezmoi init --apply $DOTS_REPO_HTTPS' once network is up."
+    fi
 fi
 
 # Initial wallpaper render: chezmoi's run_once script downloads from callisto;
