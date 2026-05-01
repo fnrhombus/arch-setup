@@ -535,7 +535,7 @@ if pacman -Q microsoft-edge-stable-bin >/dev/null 2>&1; then
     sudo tee /etc/opt/edge/policies/managed/arch-setup.json >/dev/null <<'EDGEPOLICYEOF'
 {
     "HideFirstRunExperience": true,
-    "DefaultBrowserSettingEnabled": false,
+    "DefaultBrowserSettingEnabled": true,
     "BrowserSignin": 1,
     "RestoreOnStartup": 1,
     "SyncDisabled": false,
