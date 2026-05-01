@@ -45,24 +45,21 @@ trap 'shred -u /root/.pw /root/.luks 2>/dev/null || rm -f /root/.pw /root/.luks'
 # ---------- timezone + clock ----------
 log "Timezone → America/New_York (adjust in /etc/localtime if wrong)..."
 ln -sf /usr/share/zoneinfo/America/New_York /etc/localtime
-# Dual-boot clock handling:
-#   - Windows keeps the RTC in LOCAL time by default.
-#   - Linux (Arch default) reads RTC as UTC.
-#   - If Arch writes its UTC system-time back to RTC (`hwclock --systohc`),
-#     Windows's next boot reads that UTC value, applies the timezone offset,
-#     and the Windows clock jumps forward by 5 hours.
-# Fix: tell Arch the RTC is local time by setting /etc/adjtime's mode line
-# to LOCAL. NTP will still keep the system clock on UTC internally; only the
-# RTC interpretation changes, so Windows stays correct and Arch stays correct.
-# Do NOT call `hwclock --systohc` — it would overwrite the RTC with the chroot
-# UTC system-time (which is what breaks Windows).
-# (An alternative is to teach Windows about UTC via the RealTimeIsUniversal
-# registry key — see autounattend-oobe-patch.md if you prefer that route.)
+# Single-OS Arch (Windows dual-boot was dropped 2026-04-27 per CLAUDE.md),
+# so RTC stays in UTC — the Linux default. The OLD chroot.sh wrote LOCAL
+# here as a Windows-dualboot accommodation; carrying it forward into the
+# single-OS world produced a 4-hour clock skew that propagated through
+# every JWT signed against Azure (cert auth's `nbf` claim landed in the
+# future from the IdP's perspective), among other woes.
 cat > /etc/adjtime <<'EOF'
 0.0 0 0.0
 0
-LOCAL
+UTC
 EOF
+# Enable network time sync so the system clock self-corrects on first
+# boot — RTC drift over months in a powered-off laptop is real.
+log "Enabling systemd-timesyncd..."
+systemctl enable systemd-timesyncd.service
 
 # ---------- locale ----------
 log "Locale → en_US.UTF-8..."
