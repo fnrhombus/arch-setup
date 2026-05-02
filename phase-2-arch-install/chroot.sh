@@ -108,15 +108,19 @@ blacklist nvidia_modeset
 EOF
 
 # ---------- lid-close policy (decisions.md Requirements) ----------
-# HandleLidSwitch=hibernate is dead code today (battery is dead) but live
-# the moment a battery returns — no reconfiguration needed. AC remains
-# clamshell-friendly via External=ignore. See docs/decisions.md "Battery"
-# bullet for full reasoning.
-log "Lid-close: ignore on AC, hibernate on battery..."
+# All lid handling is owned by ~/.local/bin/lid-handler from the user's
+# Hyprland session (wired via `binddl` on `Lid Switch` — see rhombu5/dots
+# `dot_config/hypr/binds.conf`). Rule: hibernate on close, unless on AC
+# with an external monitor attached (then disable eDP-1). Logind needs to
+# stay out of the way across the board — defaults are `suspend`, which
+# we override to `ignore` everywhere so Hyprland's bindl is the only
+# actor. Side effect: at the greeter / TTY (no Hyprland) lid close is a
+# no-op, which is fine — those states only exist with the laptop open.
+log "Lid-close: hand off to user-session lid-handler (logind ignores)..."
 mkdir -p /etc/systemd/logind.conf.d
 cat > /etc/systemd/logind.conf.d/10-lid.conf <<EOF
 [Login]
-HandleLidSwitch=hibernate
+HandleLidSwitch=ignore
 HandleLidSwitchExternalPower=ignore
 HandleLidSwitchDocked=ignore
 EOF

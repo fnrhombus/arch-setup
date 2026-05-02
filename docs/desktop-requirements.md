@@ -248,18 +248,17 @@ popup on every dispatched bind, so an unbound key is visually obvious
 
 ## Power policy
 
-- **systemd-logind drop-in** at `/etc/systemd/logind.conf.d/10-lid.conf` (written by phase-2 `chroot.sh`):
-  - `HandleLidSwitch=hibernate`           # battery — dead code today, live when battery returns
-  - `HandleLidSwitchExternalPower=ignore` # AC — handed off to ~/.local/bin/lid-handler
-  - `HandleLidSwitchDocked=ignore`        # external monitor present — same handoff
-- **AC lid handler** (`~/.local/bin/lid-handler`, in [rhombu5/dots](https://github.com/rhombu5/dots)) — wired
+- **systemd-logind drop-in** at `/etc/systemd/logind.conf.d/10-lid.conf` (written by phase-2 `chroot.sh`) defers all lid handling to the user-session script:
+  - `HandleLidSwitch=ignore`
+  - `HandleLidSwitchExternalPower=ignore`
+  - `HandleLidSwitchDocked=ignore`
+- **Lid handler** (`~/.local/bin/lid-handler`, in [rhombu5/dots](https://github.com/rhombu5/dots)) — wired
   from `~/.config/hypr/binds.conf` via two `binddl` entries on `switch:on:Lid Switch` /
-  `switch:off:Lid Switch`. Bails on battery so logind owns that branch unilaterally.
-  On AC, lid close:
-  - external monitor attached → `hyprctl keyword monitor "eDP-1,disable"`
-  - no external monitor → `systemctl hibernate`
-  
-  On lid open: re-enables `eDP-1` at its `monitors.conf` position (`preferred,0x1440,1`).
+  `switch:off:Lid Switch`. Owns *all* lid behavior. Rule: hibernate on close, unless
+  on AC AND external monitor attached → then `hyprctl keyword monitor "eDP-1,disable"`.
+  On open: re-enables `eDP-1` at its `monitors.conf` position (`preferred,0x1440,1`).
+  Side effect of the all-`ignore` logind config: at the greeter / TTY (no Hyprland) lid
+  close is a no-op — fine, since those states only exist with the laptop physically open.
 - **hypridle** — DPMS-off at **28 min** idle, screen lock at **30 min**.
   No idle-hibernate timer — the user explicitly does not want hibernation
   triggered while on AC regardless of activity.
@@ -280,11 +279,9 @@ hotkey:
 - Same action exposed in the fuzzel control-panel script (Power → Hibernate)
 - Optional waybar power button (custom module) for click-to-hibernate
 
-The logind config above is intentionally future-correct: the `HandleLidSwitch`
-branch fires only on battery state and is harmless dead code without one.
-When the user swaps in a new battery, lid-close-on-battery starts firing
-hibernate automatically — no reconfiguration required, and the AC lid-handler
-keeps no-op'ing on battery so the two never race.
+The lid-handler is unconditionally hibernate-on-battery, so the moment a
+new battery is swapped in, "close the lid and walk away" starts working on
+battery too — no reconfiguration required.
 
 ### Hibernate, not suspend
 
@@ -343,8 +340,8 @@ No slot exhaustion risk for any planned sealing.
 
 Hyprland monitor config needs `workspace=N,monitor:DP-1` fallbacks for any
 workspace currently bound to eDP-1, so workspaces migrate to the external
-display when the AC lid-handler disables `eDP-1` (lid close + external monitor
-attached) rather than orphaning. The fallbacks live in `dot_config/hypr/workspaces.conf`
+display when the lid-handler disables `eDP-1` (lid close + AC + external
+monitor) rather than orphaning. The fallbacks live in `dot_config/hypr/workspaces.conf`
 in [rhombu5/dots](https://github.com/rhombu5/dots).
 
 ## Carry-forwards (completed 2026-04-23)

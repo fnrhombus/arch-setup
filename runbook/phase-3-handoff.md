@@ -43,7 +43,7 @@ This document is meant to be fed to Claude Code once you're inside Arch Linux. I
   - How to use the scratch workspace (Super+0)
   - How to configure monitors — `nwg-displays` GUI writes `~/.config/hypr/monitors.conf` (sourced by `hyprland.conf`)
   - Touch gestures: `gesture = 3, horizontal, workspace` (modern Hyprland gestures API); long-press / edge swipes via the **hyprgrass** plugin
-  - Lid behaviour: on **AC**, `~/.local/bin/lid-handler` hibernates if no external monitor is attached, otherwise disables `eDP-1` (re-enabled on lid open). On **battery** (when one returns), logind hibernates directly. Manual hibernate: Super+Shift+H
+  - Lid behaviour: `~/.local/bin/lid-handler` owns all lid handling — hibernate on close, unless on AC with an external monitor (then disable `eDP-1`, re-enabled on open). Battery is unconditional hibernate. Manual hibernate: Super+Shift+H
 
 ### Ghostty (Terminal Emulator)
 - **What it is**: GPU-accelerated terminal — where zsh/tmux/helix run
@@ -173,11 +173,11 @@ This document is meant to be fed to Claude Code once you're inside Arch Linux. I
 ## System Configuration
 
 ### Lid + Idle Behavior
-- **AC**: Owned by `~/.local/bin/lid-handler` (wired via Hyprland `binddl` on `Lid Switch`). Logind ignores AC lid events (`HandleLidSwitchExternalPower=ignore`, `HandleLidSwitchDocked=ignore`) so the script gets the call. On lid close: hibernates if no external monitor is attached; otherwise disables `eDP-1`. On lid open: re-enables `eDP-1` at its `monitors.conf` position.
-- **Battery** (when one is installed): Lid close hibernates via logind (`HandleLidSwitch=hibernate`). Currently dead code (battery dead/disconnected per decisions.md `Battery` bullet) — flips to live the moment a battery returns, no reconfig. The lid-handler script no-ops on battery so the two paths don't race.
+- **Lid close**: `~/.local/bin/lid-handler` owns everything (wired via Hyprland `binddl` on `Lid Switch`). Logind defers across the board (`HandleLidSwitch=ignore`, `HandleLidSwitchExternalPower=ignore`, `HandleLidSwitchDocked=ignore`). Rule: hibernate, unless on AC with an external monitor attached → then disable `eDP-1`. On lid open: re-enable `eDP-1` at its `monitors.conf` position. Battery (when one returns) is unconditional hibernate — no reconfig.
 - **Idle** (hypridle): display off at 28 min, screen lock at 30 min. No idle-hibernate.
 - **Manual hibernate**: Super+Shift+H. Until the battery is replaced, AC removal is still an instant hard-cut, so this remains the way to hibernate without closing the lid.
-- Config: `/etc/systemd/logind.conf.d/10-lid.conf` (logind), `~/.local/bin/lid-handler` (AC script, in [rhombu5/dots](https://github.com/rhombu5/dots)), `~/.config/hypr/binds.conf` (`binddl` wiring), `~/.config/hypr/hypridle.conf` (idle daemon).
+- **Greeter / TTY caveat**: with no Hyprland session, the bindl doesn't exist and lid close is a no-op (logind ignores too). Acceptable since those states only exist with the laptop physically open.
+- Config: `/etc/systemd/logind.conf.d/10-lid.conf` (logind), `~/.local/bin/lid-handler` (handler, in [rhombu5/dots](https://github.com/rhombu5/dots)), `~/.config/hypr/binds.conf` (`binddl` wiring), `~/.config/hypr/hypridle.conf` (idle daemon).
 
 ### NVIDIA
 - MX250 is blacklisted (incompatible with Wayland/Hyprland — nvidia-470xx lacks GBM)
@@ -320,7 +320,7 @@ Everything listed below is installed automatically by the phase-2 + phase-3 scri
 - **Bibata + Papirus → Quickshell-based shell** (DankMaterialShell, qsbar, etc.): The 2026 trend is full-stack shell replacements. They'd subsume waybar+swaync+fuzzel+hyprlock together — not a drop-in. Reconsider if you want a more cohesive look at the cost of less per-component flexibility.
 - **fuzzel → walker / anyrun**: Other Wayland launchers if fuzzel turns out limiting (it hasn't so far for any documented user).
 - **Single channel → Dual channel RAM**: Add matching 16GB DDR4-2400 SODIMM stick.
-- **Replace dead battery**: Lid-close hibernate flips from dead-code to active automatically (logind config is forward-compat).
+- **Replace dead battery**: Lid-close-on-battery hibernate is already wired (lid-handler is unconditional-hibernate on battery) — flips live the moment the battery is back, no reconfig.
 - **Secure Boot via sbctl**: Currently disabled. The reinstall pre-installs `sbctl` (postinstall §1) and the `95-limine-redeploy.hook` is already SB-aware (`/usr/local/sbin/limine-redeploy` calls `sbctl sign -s` after copy if SB is enrolled, no-op otherwise). To enable end-to-end:
   1. **Reboot, BIOS, set Secure Boot to "Setup Mode"** (clears stored keys, lets sbctl enroll custom ones).
   2. **From Arch**, enroll our own keys (and optionally Microsoft's, in case you ever want to UEFI-boot a vendor-signed binary):
