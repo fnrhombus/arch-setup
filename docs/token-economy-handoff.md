@@ -142,3 +142,120 @@ Status as of this commit:
   refactor, limine, TPM2 PCR, install.sh source-path, phase-1-iso
   bake) is captured in `docs/desktop-requirements.md` "Implementation
   notes" section.
+
+---
+
+# Follow-up post-mortem — 2026-05-02 ("uber-session" continuation)
+
+Written at the end of another long Opus 4.7 (1M context) session that
+covered ~15 atomic commits across two repos (arch-setup, dots) plus a
+release cycle on a third (azure-ddns v0.2.2 + v0.2.3). Topics: wpws
+daemon autostart, Hyprspace plugin re-load, azure-ddns AUR publish,
+azure-ddns AF_NETLINK fix, tray icon wiring, Edge `DefaultBrowser`
+policy, sudo-fingerprint cue discovery.
+
+## What was actioned from the previous post-mortem (above): none
+
+This session re-confirmed every recommendation from the 2026-04-23
+post-mortem and applied **zero** of them up front:
+
+| Prior recommendation | Status this session |
+|---|---|
+| Sourcegraph / LSP MCP before more `postinstall.sh` work | Not installed; postinstall.sh re-read in chunks across multiple turns again |
+| File-backed subagent reports (`/tmp/agent-X.md` + abstract) | Did not do — 4 subagents returned ~12-15k tokens of full-fat reports |
+| Custom agents in `~/.claude/agents/` (`repo-syntax-validator`, `web-research-cited`) | Never defined |
+| Use `Explore` agent for codebase searches | Used `grep` + `Bash` instead, repeatedly |
+| `TaskCreate` for tracked work | Used inline status lists |
+
+Root cause: this doc lives in `docs/` of the arch-setup repo, with no
+memory pointer. Session-start context doesn't surface it.
+
+## What burned tokens this session, beyond the prior list
+
+1. **Sudo-fingerprint cue discovery cycle (~3k tokens).** Sudo timed
+   out → retry → bell test (silent in Ghostty) → notify-send test
+   (worked) → memory write. The end state — the user's `sudonf`
+   wrapper, with critical-urgency notify + auto-dismiss — already
+   existed in `~/.local/bin/` but was undocumented in Claude memory.
+   The session paid the full discovery cost.
+2. **Inline diagnosis when subagent was the right call.** Two arcs
+   that should have been delegated:
+   - "no public IP" diagnosis on azure-ddns (~5 Bash + Read of
+     binary + jq pipeline) → ~4k tokens inline that a subagent could
+     have returned as a 1k summary.
+   - Tray icon investigation (12+ tool calls, intersected with
+     unrelated user questions) → another ~3-4k tokens that didn't
+     need to live in main context.
+3. **One-shot gotchas not memorized after discovery.** Three this
+   session, each costing ~1.5-2k tokens to rediscover:
+   - Hyprland exec-once silently no-ops bare command names
+     (Hyprland inherits PATH from greetd, which lacks `~/.local/bin`).
+   - `hyprpm enable` is a no-op when the plugin is already enabled;
+     loading the `.so` requires `hyprpm reload`.
+   - azure-ddns systemd unit's `RestrictAddressFamilies` was missing
+     `AF_NETLINK`, breaking `ip(8)` address enumeration.
+4. **Bash micro-consolidation misses.** ~10 cases where two-three
+   sequential calls (`rfkill unblock` → `sleep` → `bluetoothctl
+   power on`; `ip link` then `ethtool -P`; etc.) could have been one
+   chained call. ~50 tokens each, ~500 tokens total.
+5. **Subagent prompt overhead.** Each of the 4 subagent prompts I
+   wrote was ~1-1.5k tokens (necessary because the agent has no
+   prior context). For repeatable patterns this should compress
+   into a slash-command + custom-agent definition.
+
+## Updated highest-leverage actions for the next fresh session
+
+In strict descending ROI:
+
+1. **Write a memory pointer to this doc.** It's the single fix that
+   makes every other recommendation surfaceable at session start.
+   `MEMORY.md` entry: one line, link + 80-char hook.
+2. **Add the file-backed-report instruction to every subagent
+   prompt.** This is a copy-paste line. No tooling to install, just
+   discipline:
+   > "Write your full report to `/tmp/agent-<descriptor>.md`.
+   > Return only a 200-word abstract + that file path."
+3. **Memorize one-shot gotchas the moment they're solved.** A
+   2-line memory ("Hyprland exec-once needs full path; greetd's
+   inherited PATH lacks `~/.local/bin`") prevents the next
+   investigation. Cost: 30 seconds. Savings: 1-2k tokens per
+   recurrence.
+4. **Surface user-installed tooling in memory.** If the user has
+   wrappers like `sudonf` in `~/.local/bin`, those should be
+   memorized so Claude reaches for them instead of building from
+   scratch. Suggest: a `tools_installed.md` memory listing the
+   non-obvious wrappers + their purpose.
+5. **Sourcegraph MCP** — still the highest-tooling-ROI item from
+   the prior post-mortem, still unactioned. Until it's installed,
+   `postinstall.sh` (~1500 lines now) will continue to absorb
+   ~5-10k tokens per session that touches it.
+6. **Use `Explore` for cross-codebase finds.** Two specific moments
+   this session would have benefited: finding `pick_ipv6` in the
+   azure-ddns binary, and locating section boundaries in
+   postinstall.sh. (The Explore agent is built-in; no install
+   step.)
+
+## What worked well
+
+- **Subagent delegation for multi-step bug fixes** — 4 subagents
+  collectively did ~30 minutes of work and freed my main context
+  from their tool noise. This pattern should be the default for
+  any investigation deeper than 3 Bash calls.
+- **Atomic commits across repos.** The user's CLAUDE.md guidance to
+  commit per logical change was straightforward to follow with
+  small `git diff` checks before each commit.
+- **Parallel reads / status checks** at the start of each
+  investigation. The few times I batched diagnostic calls, results
+  came back fast and consolidated.
+
+## Specific memory entries to write before next session
+
+1. `feedback_subagent_file_backed_reports.md` — every subagent
+   prompt must include the file-backed-report directive.
+2. `reference_token_economy_handoff.md` — pointer to this doc with
+   summary of high-leverage actions.
+3. `reference_user_tooling.md` — `sudonf`, `bwu`, `wpws`, etc.
+   The wrappers the user expects Claude to know about.
+4. `feedback_memorize_gotchas.md` — when a non-obvious bug is
+   solved, immediately write a 2-line feedback memory before
+   moving on.
