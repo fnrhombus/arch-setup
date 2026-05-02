@@ -248,10 +248,18 @@ popup on every dispatched bind, so an unbound key is visually obvious
 
 ## Power policy
 
-- **systemd-logind drop-in** at `/etc/systemd/logind.conf.d/00-arch-setup.conf`:
+- **systemd-logind drop-in** at `/etc/systemd/logind.conf.d/10-lid.conf` (written by phase-2 `chroot.sh`):
   - `HandleLidSwitch=hibernate`           # battery — dead code today, live when battery returns
-  - `HandleLidSwitchExternalPower=ignore` # AC, clamshell under desk
-  - `HandleLidSwitchDocked=ignore`
+  - `HandleLidSwitchExternalPower=ignore` # AC — handed off to ~/.local/bin/lid-handler
+  - `HandleLidSwitchDocked=ignore`        # external monitor present — same handoff
+- **AC lid handler** (`~/.local/bin/lid-handler`, in [rhombu5/dots](https://github.com/rhombu5/dots)) — wired
+  from `~/.config/hypr/binds.conf` via two `binddl` entries on `switch:on:Lid Switch` /
+  `switch:off:Lid Switch`. Bails on battery so logind owns that branch unilaterally.
+  On AC, lid close:
+  - external monitor attached → `hyprctl keyword monitor "eDP-1,disable"`
+  - no external monitor → `systemctl hibernate`
+  
+  On lid open: re-enables `eDP-1` at its `monitors.conf` position (`preferred,0x1440,1`).
 - **hypridle** — DPMS-off at **28 min** idle, screen lock at **30 min**.
   No idle-hibernate timer — the user explicitly does not want hibernation
   triggered while on AC regardless of activity.
@@ -264,8 +272,9 @@ popup on every dispatched bind, so an unbound key is visually obvious
 
 The internal battery is dead/disconnected (`decisions.md:13`), so when AC
 unplugs the laptop hard-cuts instantly — no graceful hibernate is possible
-on lid-close-then-unplug. Until a battery is swapped in, hibernate must be
-**user-invoked** before unplugging:
+without warning. The lid-handler covers the "close the lid and walk away"
+case on AC; for "I'm about to unplug" the user still wants an explicit
+hotkey:
 
 - Hotkey: `Super+Shift+H` → `systemctl hibernate`
 - Same action exposed in the fuzzel control-panel script (Power → Hibernate)
@@ -274,7 +283,8 @@ on lid-close-then-unplug. Until a battery is swapped in, hibernate must be
 The logind config above is intentionally future-correct: the `HandleLidSwitch`
 branch fires only on battery state and is harmless dead code without one.
 When the user swaps in a new battery, lid-close-on-battery starts firing
-hibernate automatically — no reconfiguration required.
+hibernate automatically — no reconfiguration required, and the AC lid-handler
+keeps no-op'ing on battery so the two never race.
 
 ### Hibernate, not suspend
 
@@ -333,7 +343,9 @@ No slot exhaustion risk for any planned sealing.
 
 Hyprland monitor config needs `workspace=N,monitor:DP-1` fallbacks for any
 workspace currently bound to eDP-1, so workspaces migrate to the external
-display when the lid closes rather than orphaning.
+display when the AC lid-handler disables `eDP-1` (lid close + external monitor
+attached) rather than orphaning. The fallbacks live in `dot_config/hypr/workspaces.conf`
+in [rhombu5/dots](https://github.com/rhombu5/dots).
 
 ## Carry-forwards (completed 2026-04-23)
 

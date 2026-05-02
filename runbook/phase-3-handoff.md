@@ -43,7 +43,7 @@ This document is meant to be fed to Claude Code once you're inside Arch Linux. I
   - How to use the scratch workspace (Super+0)
   - How to configure monitors — `nwg-displays` GUI writes `~/.config/hypr/monitors.conf` (sourced by `hyprland.conf`)
   - Touch gestures: `gesture = 3, horizontal, workspace` (modern Hyprland gestures API); long-press / edge swipes via the **hyprgrass** plugin
-  - Lid behaviour: lid-close hibernates (when battery returns); on AC always ignored. Manual hibernate: Super+Shift+H
+  - Lid behaviour: on **AC**, `~/.local/bin/lid-handler` hibernates if no external monitor is attached, otherwise disables `eDP-1` (re-enabled on lid open). On **battery** (when one returns), logind hibernates directly. Manual hibernate: Super+Shift+H
 
 ### Ghostty (Terminal Emulator)
 - **What it is**: GPU-accelerated terminal — where zsh/tmux/helix run
@@ -173,11 +173,11 @@ This document is meant to be fed to Claude Code once you're inside Arch Linux. I
 ## System Configuration
 
 ### Lid + Idle Behavior
-- **AC**: Lid close ignored (`HandleLidSwitchExternalPower=ignore`).
-- **Battery** (when one is installed): Lid close hibernates (`HandleLidSwitch=hibernate`). Currently dead code (battery dead/disconnected per decisions.md `Battery` bullet) — flips to live the moment a battery returns, no reconfig.
+- **AC**: Owned by `~/.local/bin/lid-handler` (wired via Hyprland `binddl` on `Lid Switch`). Logind ignores AC lid events (`HandleLidSwitchExternalPower=ignore`, `HandleLidSwitchDocked=ignore`) so the script gets the call. On lid close: hibernates if no external monitor is attached; otherwise disables `eDP-1`. On lid open: re-enables `eDP-1` at its `monitors.conf` position.
+- **Battery** (when one is installed): Lid close hibernates via logind (`HandleLidSwitch=hibernate`). Currently dead code (battery dead/disconnected per decisions.md `Battery` bullet) — flips to live the moment a battery returns, no reconfig. The lid-handler script no-ops on battery so the two paths don't race.
 - **Idle** (hypridle): display off at 28 min, screen lock at 30 min. No idle-hibernate.
-- **Manual hibernate**: Super+Shift+H (only graceful path until battery is replaced — AC removal is an instant hard-cut).
-- Config: `/etc/systemd/logind.conf.d/10-lid.conf` (logind) + `~/.config/hypr/hypridle.conf` (idle daemon).
+- **Manual hibernate**: Super+Shift+H. Until the battery is replaced, AC removal is still an instant hard-cut, so this remains the way to hibernate without closing the lid.
+- Config: `/etc/systemd/logind.conf.d/10-lid.conf` (logind), `~/.local/bin/lid-handler` (AC script, in [rhombu5/dots](https://github.com/rhombu5/dots)), `~/.config/hypr/binds.conf` (`binddl` wiring), `~/.config/hypr/hypridle.conf` (idle daemon).
 
 ### NVIDIA
 - MX250 is blacklisted (incompatible with Wayland/Hyprland — nvidia-470xx lacks GBM)
