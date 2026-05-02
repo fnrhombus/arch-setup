@@ -178,7 +178,7 @@ sudo pacman -Syu --noconfirm --needed \
     hyprland hyprlock hypridle hyprpolkitagent hyprpicker uwsm \
     waybar swaync swayosd \
     xdg-desktop-portal-gtk xdg-desktop-portal-hyprland \
-    network-manager-applet pavucontrol blueman udiskie \
+    network-manager-applet pavucontrol hyprpwcenter ttf-material-symbols-variable blueman udiskie \
     nwg-look nwg-displays \
     qt5ct qt6ct papirus-icon-theme \
     imv zathura zathura-pdf-poppler \
@@ -439,6 +439,7 @@ AUR_PACKAGES=(
     matugen-bin
     overskride
     wleave
+    hyprshutdown
     bibata-cursor-theme
     pacseek
     limine-snapper-sync
