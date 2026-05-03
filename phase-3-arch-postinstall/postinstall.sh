@@ -320,17 +320,42 @@ volumes:
   windows_data:
 DOCKUREOF
 
-# OEM first-boot script. dockur/windows copies the /oem mount into
-# C:\OEM in the guest and SetupComplete.cmd executes any *.bat there
-# during Windows OOBE finalization. We use it to install Visual Studio
-# 2022 Enterprise via winget unattended.
+# OEM first-boot scripts. dockur/windows copies the /oem mount into
+# C:\OEM in the guest and SetupComplete.cmd executes any *.bat / *.cmd
+# files there during Windows OOBE finalization. We ship four files,
+# adapted from the pre-2026-04-27 autounattend.xml that targeted a
+# bare-metal Windows install (since dropped — see git log). Bare-metal-
+# specific bits (Samsung-by-size disk detection, BitLocker handoff,
+# diskpart partitioning, Wi-Fi profile injection, $WinPEDriver$ handling)
+# are dropped; only the OS-config tweaks survive:
+#
+#   install.bat   — winget-installs Visual Studio 2022 Enterprise (IDE
+#                   only — workloads picked via VS Installer GUI later
+#                   to avoid multi-GB downloads on every reinstall).
+#   setup.cmd     — HKLM machine tweaks (power, RDP, long paths, Edge
+#                   policy, privacy/consumer-features off, Defender
+#                   fully disabled — services + Group Policy + scheduled
+#                   tasks + SmartScreen + Set-MpPreference), HKU\.DEFAULT
+#                   sticky keys off, CapsLock disabled, Default-user-hive
+#                   defaults (so accounts created from Default inherit
+#                   them), RunOnce registration for UserOnce.ps1.
+#   debloat.ps1   — invoked by setup.cmd; removes consumer AppX
+#                   provisioned packages (Bing/Maps/Xbox/etc.),
+#                   Print.Fax.Scan capability, and Recall feature
+#                   (Win11 24H2 screenshot-everything).
+#   UserOnce.ps1  — fires once at first logon (HKLM\...\RunOnce),
+#                   modifies HKCU (Explorer LaunchTo=ThisPC, hide
+#                   taskbar searchbox, restart explorer.exe).
 #
 # VS Enterprise requires a Visual Studio subscription license. The bare
-# IDE installs without one, but on first launch you sign in with your
-# MSDN/VS subscription account to activate. Workloads (C++, .NET, etc.)
-# are NOT installed here — pick them via the VS Installer GUI after
-# first launch so you don't pay the multi-GB workload download cost on
-# every reinstall.
+# IDE installs without one; sign in with your MSDN/VS subscription on
+# first launch to activate.
+#
+# Defender disabled is appropriate here: VM is local-only, host is
+# LUKS-encrypted, the threat model is "dev sandbox" not "internet-facing
+# server." If you ever change that posture, edit setup.cmd to drop the
+# whole "----- Defender: full disable -----" block (it's clearly fenced
+# with REM banners) and re-run dockur from a fresh volume.
 sudo tee /etc/dockur-windows/oem/install.bat >/dev/null <<'OEMEOF'
 @echo off
 REM Wait for winget to register (Win11 ships winget but registration
@@ -348,7 +373,225 @@ winget install --exact --id Microsoft.VisualStudio.2022.Enterprise ^
     --accept-source-agreements ^
     --silent
 OEMEOF
-sudo chmod 644 /etc/dockur-windows/compose.yaml /etc/dockur-windows/oem/install.bat
+
+sudo tee /etc/dockur-windows/oem/setup.cmd >/dev/null <<'SETUPEOF'
+@echo off
+REM ============================================================================
+REM Adapted from the pre-2026-04-27 autounattend.xml's Specialize.ps1 +
+REM DefaultUser.ps1 blocks. Runs once at SetupComplete via dockur's /oem mount.
+REM ============================================================================
+
+REM ----- Power: hibernation + Fast Startup off (no point on a VM) -----
+powercfg.exe /hibernate off
+reg.exe add "HKLM\SYSTEM\CurrentControlSet\Control\Session Manager\Power" /v HiberbootEnabled /t REG_DWORD /d 0 /f
+
+REM ----- Filesystem: long paths + skip lastAccess timestamps (perf) -----
+reg.exe add "HKLM\SYSTEM\CurrentControlSet\Control\FileSystem" /v LongPathsEnabled /t REG_DWORD /d 1 /f
+fsutil.exe behavior set disableLastAccess 1
+
+REM ----- RDP: enable + open firewall (belt-and-suspenders for WinApps) -----
+reg.exe add "HKLM\SYSTEM\CurrentControlSet\Control\Terminal Server" /v fDenyTSConnections /t REG_DWORD /d 0 /f
+netsh.exe advfirewall firewall set rule group="@FirewallAPI.dll,-28752" new enable=Yes
+
+REM ----- Privacy / consumer-features off -----
+reg.exe add "HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\OOBE" /v DisablePrivacyExperience /t REG_DWORD /d 1 /f
+reg.exe add "HKLM\SOFTWARE\Policies\Microsoft\Dsh" /v AllowNewsAndInterests /t REG_DWORD /d 0 /f
+reg.exe add "HKLM\Software\Policies\Microsoft\Windows\CloudContent" /v DisableWindowsConsumerFeatures /t REG_DWORD /d 1 /f
+
+REM ----- Edge: skip first-run, no background service, no startup boost -----
+reg.exe add "HKLM\Software\Policies\Microsoft\Edge" /v HideFirstRunExperience /t REG_DWORD /d 1 /f
+reg.exe add "HKLM\Software\Policies\Microsoft\Edge\Recommended" /v BackgroundModeEnabled /t REG_DWORD /d 0 /f
+reg.exe add "HKLM\Software\Policies\Microsoft\Edge\Recommended" /v StartupBoostEnabled /t REG_DWORD /d 0 /f
+
+REM ----- Defender: full disable -----
+REM Tamper Protection caveat: Win11 24H2+ enables TP shortly after first user
+REM interaction. SetupComplete runs BEFORE that, so the writes below stick on
+REM the install we're doing. If a future Windows ISO ever enables TP earlier,
+REM real-time monitoring may revert on reboot — manual workaround is Settings
+REM > Privacy > Windows Security > Virus & threat protection > Manage settings
+REM > Tamper Protection > Off, then re-run this script.
+
+REM Group Policy registry (deprecated by MS for consumer 2022+, still honoured
+REM on Enterprise/Server SKUs and as a belt-and-suspenders signal):
+reg.exe add "HKLM\SOFTWARE\Policies\Microsoft\Windows Defender" /v DisableAntiSpyware /t REG_DWORD /d 1 /f
+reg.exe add "HKLM\SOFTWARE\Policies\Microsoft\Windows Defender" /v DisableAntiVirus /t REG_DWORD /d 1 /f
+reg.exe add "HKLM\SOFTWARE\Policies\Microsoft\Windows Defender\Real-Time Protection" /v DisableBehaviorMonitoring /t REG_DWORD /d 1 /f
+reg.exe add "HKLM\SOFTWARE\Policies\Microsoft\Windows Defender\Real-Time Protection" /v DisableOnAccessProtection /t REG_DWORD /d 1 /f
+reg.exe add "HKLM\SOFTWARE\Policies\Microsoft\Windows Defender\Real-Time Protection" /v DisableScanOnRealtimeEnable /t REG_DWORD /d 1 /f
+reg.exe add "HKLM\SOFTWARE\Policies\Microsoft\Windows Defender\Real-Time Protection" /v DisableIOAVProtection /t REG_DWORD /d 1 /f
+reg.exe add "HKLM\SOFTWARE\Policies\Microsoft\Windows Defender\Spynet" /v DisableBlockAtFirstSeen /t REG_DWORD /d 1 /f
+reg.exe add "HKLM\SOFTWARE\Policies\Microsoft\Windows Defender\Spynet" /v SpynetReporting /t REG_DWORD /d 0 /f
+reg.exe add "HKLM\SOFTWARE\Policies\Microsoft\Windows Defender\Spynet" /v SubmitSamplesConsent /t REG_DWORD /d 2 /f
+
+REM SmartScreen (file/URL reputation prompts) off
+reg.exe add "HKLM\SOFTWARE\Policies\Microsoft\Windows\System" /v EnableSmartScreen /t REG_DWORD /d 0 /f
+reg.exe add "HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\Explorer" /v SmartScreenEnabled /t REG_SZ /d "Off" /f
+
+REM Notification spam from the Security Center
+reg.exe add "HKLM\SOFTWARE\Policies\Microsoft\Windows Defender Security Center\Notifications" /v DisableNotifications /t REG_DWORD /d 1 /f
+
+REM Service start types (4 = Disabled). Sense = MDE telemetry; SecurityHealthService
+REM = the tray icon / notification surface; the Wd* + WinDefend ones are the actual
+REM scanning engine pieces.
+for %%s in (Sense WdBoot WdFilter WdNisDrv WdNisSvc WinDefend SecurityHealthService) do reg.exe add "HKLM\SYSTEM\CurrentControlSet\Services\%%s" /v Start /t REG_DWORD /d 4 /f
+
+REM Disable Defender's own scheduled-task cron jobs
+schtasks.exe /Change /TN "\Microsoft\Windows\Windows Defender\Windows Defender Cache Maintenance" /Disable >nul 2>&1
+schtasks.exe /Change /TN "\Microsoft\Windows\Windows Defender\Windows Defender Cleanup" /Disable >nul 2>&1
+schtasks.exe /Change /TN "\Microsoft\Windows\Windows Defender\Windows Defender Scheduled Scan" /Disable >nul 2>&1
+schtasks.exe /Change /TN "\Microsoft\Windows\Windows Defender\Windows Defender Verification" /Disable >nul 2>&1
+
+REM Final belt-and-suspenders: ask Defender itself to turn off (only sticks if
+REM Tamper Protection isn't enforcing — fine on our SetupComplete-time pass).
+powershell.exe -NoProfile -Command "Set-MpPreference -DisableRealtimeMonitoring $true -ErrorAction SilentlyContinue"
+powershell.exe -NoProfile -Command "Set-MpPreference -DisableIOAVProtection $true -ErrorAction SilentlyContinue"
+
+REM ----- PowerShell exec policy + non-expiring local password (throwaway VM creds) -----
+powershell.exe -NoProfile -Command "Set-ExecutionPolicy -Scope LocalMachine -ExecutionPolicy RemoteSigned -Force"
+net.exe accounts /maxpwage:UNLIMITED
+
+REM ----- Sticky keys off (HKU\.DEFAULT applies to LocalSystem + Default profile template) -----
+reg.exe add "HKU\.DEFAULT\Control Panel\Accessibility\StickyKeys" /v Flags /t REG_SZ /d 10 /f
+
+REM ----- Drop "Authenticated Users" write access from C:\ root (single-user VM hardening) -----
+icacls.exe C:\ /remove:g "*S-1-5-11"
+
+REM ----- Disable CapsLock (scancode map: map CapsLock -> nothing) -----
+reg.exe add "HKLM\SYSTEM\CurrentControlSet\Control\Keyboard Layout" /v "Scancode Map" /t REG_BINARY /d "00000000000000000200000000003A0000000000" /f
+
+REM ============================================================================
+REM Default user hive — defaults inherited by accounts created from Default.
+REM Mount C:\Users\Default\NTUSER.DAT into HKU\DefaultUser; write; unmount.
+REM ============================================================================
+reg.exe load "HKU\DefaultUser" "C:\Users\Default\NTUSER.DAT"
+
+REM Game DVR off (perf in VM)
+reg.exe add "HKU\DefaultUser\Software\Microsoft\Windows\CurrentVersion\GameDVR" /v AppCaptureEnabled /t REG_DWORD /d 0 /f
+
+REM Explorer: show extensions, show hidden, hide TaskView button, taskbar align left
+reg.exe add "HKU\DefaultUser\Software\Microsoft\Windows\CurrentVersion\Explorer\Advanced" /v HideFileExt /t REG_DWORD /d 0 /f
+reg.exe add "HKU\DefaultUser\Software\Microsoft\Windows\CurrentVersion\Explorer\Advanced" /v Hidden /t REG_DWORD /d 1 /f
+reg.exe add "HKU\DefaultUser\Software\Microsoft\Windows\CurrentVersion\Explorer\Advanced" /v ShowTaskViewButton /t REG_DWORD /d 0 /f
+reg.exe add "HKU\DefaultUser\Software\Microsoft\Windows\CurrentVersion\Explorer\Advanced" /v TaskbarAl /t REG_DWORD /d 0 /f
+
+REM Developer: Task Manager 'End task' on right-click in taskbar
+reg.exe add "HKU\DefaultUser\Software\Microsoft\Windows\CurrentVersion\Explorer\Advanced\TaskbarDeveloperSettings" /v TaskbarEndTask /t REG_DWORD /d 1 /f
+
+REM No web-suggestions in start-menu search
+reg.exe add "HKU\DefaultUser\Software\Policies\Microsoft\Windows\Explorer" /v DisableSearchBoxSuggestions /t REG_DWORD /d 1 /f
+
+REM Sticky keys off (also under HKU\DefaultUser for new account inheritance)
+reg.exe add "HKU\DefaultUser\Control Panel\Accessibility\StickyKeys" /v Flags /t REG_SZ /d 10 /f
+
+REM NumLock on at logon
+reg.exe add "HKU\DefaultUser\Control Panel\Keyboard" /v InitialKeyboardIndicators /t REG_SZ /d 2 /f
+
+REM Mouse acceleration off (predictable cursor)
+reg.exe add "HKU\DefaultUser\Control Panel\Mouse" /v MouseSpeed /t REG_SZ /d 0 /f
+reg.exe add "HKU\DefaultUser\Control Panel\Mouse" /v MouseThreshold1 /t REG_SZ /d 0 /f
+reg.exe add "HKU\DefaultUser\Control Panel\Mouse" /v MouseThreshold2 /t REG_SZ /d 0 /f
+
+REM Suggested-app / promo spam off
+for %%n in (ContentDeliveryAllowed FeatureManagementEnabled OEMPreInstalledAppsEnabled PreInstalledAppsEnabled PreInstalledAppsEverEnabled SilentInstalledAppsEnabled SoftLandingEnabled SubscribedContentEnabled SystemPaneSuggestionsEnabled) do reg.exe add "HKU\DefaultUser\Software\Microsoft\Windows\CurrentVersion\ContentDeliveryManager" /v %%n /t REG_DWORD /d 0 /f
+
+reg.exe unload "HKU\DefaultUser"
+
+REM ============================================================================
+REM Copy UserOnce.ps1 to a path that survives /oem cleanup, register RunOnce.
+REM HKLM\...\RunOnce fires once at next logon (regardless of which user) — the
+REM Docker user from compose USERNAME is the only account, so this lands in
+REM their HKCU.
+REM ============================================================================
+if not exist "C:\Windows\Setup\Scripts" mkdir "C:\Windows\Setup\Scripts"
+copy /y "C:\OEM\UserOnce.ps1" "C:\Windows\Setup\Scripts\UserOnce.ps1"
+reg.exe add "HKLM\Software\Microsoft\Windows\CurrentVersion\RunOnce" /v "UnattendedUserOnce" /t REG_SZ /d "powershell.exe -NoProfile -ExecutionPolicy Bypass -File \"C:\Windows\Setup\Scripts\UserOnce.ps1\"" /f
+
+REM ============================================================================
+REM Debloat: AppX consumer apps + Print.Fax.Scan capability + Recall feature.
+REM ============================================================================
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File "C:\OEM\debloat.ps1"
+SETUPEOF
+
+sudo tee /etc/dockur-windows/oem/debloat.ps1 >/dev/null <<'DEBLOATEOF'
+# Adapted from RemovePackages.ps1 + RemoveCapabilities.ps1 + RemoveFeatures.ps1
+# of the pre-2026-04-27 autounattend.xml. Removes consumer AppX (Bing/Maps/Xbox
+# etc.), Print.Fax.Scan capability, and the Recall feature (Win11 24H2's
+# screenshot-everything thing). All non-VS-Enterprise-load-bearing.
+
+$packages = @(
+    'Microsoft.BingSearch'
+    'MicrosoftCorporationII.MicrosoftFamily'
+    'Microsoft.WindowsFeedbackHub'
+    'Microsoft.Edge.GameAssist'
+    'Microsoft.GetHelp'
+    'Microsoft.Getstarted'
+    'Microsoft.WindowsMaps'
+    'Microsoft.MixedReality.Portal'
+    'Microsoft.BingNews'
+    'Microsoft.MicrosoftOfficeHub'
+    'Microsoft.Office.OneNote'
+    'Microsoft.OutlookForWindows'
+    'Microsoft.People'
+    'Microsoft.MicrosoftSolitaireCollection'
+    'Microsoft.MicrosoftStickyNotes'
+    'Microsoft.Todos'
+    'Microsoft.Wallet'
+    'Microsoft.BingWeather'
+    'Microsoft.Xbox.TCUI'
+    'Microsoft.XboxApp'
+    'Microsoft.XboxGameOverlay'
+    'Microsoft.XboxGamingOverlay'
+    'Microsoft.XboxIdentityProvider'
+    'Microsoft.XboxSpeechToTextOverlay'
+    'Microsoft.GamingApp'
+    'Microsoft.ZuneVideo'
+)
+$installed = Get-AppxProvisionedPackage -Online
+foreach ($pkg in $packages) {
+    $found = $installed | Where-Object DisplayName -EQ $pkg
+    if ($found) {
+        $found | Remove-AppxProvisionedPackage -AllUsers -Online -ErrorAction Continue
+    }
+}
+
+# Capabilities
+Get-WindowsCapability -Online | Where-Object {
+    ($_.Name -split '~')[0] -eq 'Print.Fax.Scan' -and $_.State -ne 'NotPresent'
+} | Remove-WindowsCapability -Online -ErrorAction Continue
+
+# Optional features (Recall on Win11 24H2)
+Get-WindowsOptionalFeature -Online | Where-Object {
+    $_.FeatureName -eq 'Recall' -and $_.State -notin @('Disabled', 'DisabledWithPayloadRemoved')
+} | Disable-WindowsOptionalFeature -Online -Remove -NoRestart -ErrorAction Continue
+DEBLOATEOF
+
+sudo tee /etc/dockur-windows/oem/UserOnce.ps1 >/dev/null <<'USERONCEEOF'
+# Adapted from UserOnce.ps1 of the pre-2026-04-27 autounattend.xml. Fires at
+# first logon via HKLM\...\RunOnce (registered by setup.cmd). HKCU tweaks that
+# need an interactive user context — Default-hive equivalents wouldn't fire
+# until profile creation, but RunOnce gives us the actual logged-in HKCU.
+
+# Open File Explorer to "This PC" by default
+Set-ItemProperty -LiteralPath 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\Advanced' -Name 'LaunchTo' -Type DWord -Value 1
+
+# Hide the taskbar search box (small icon only)
+Set-ItemProperty -LiteralPath 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Search' -Name 'SearchboxTaskbarMode' -Type DWord -Value 0
+
+# Remove Edge desktop shortcut (created by Edge installer despite policies)
+Remove-Item -LiteralPath "$env:USERPROFILE\Desktop\Microsoft Edge.lnk" -ErrorAction SilentlyContinue
+
+# Restart explorer.exe to apply the taskbar / explorer changes immediately
+Get-Process -Name 'explorer' -ErrorAction SilentlyContinue | Where-Object {
+    $_.SessionId -eq (Get-Process -Id $PID).SessionId
+} | Stop-Process -Force
+USERONCEEOF
+
+sudo chmod 644 \
+    /etc/dockur-windows/compose.yaml \
+    /etc/dockur-windows/oem/install.bat \
+    /etc/dockur-windows/oem/setup.cmd \
+    /etc/dockur-windows/oem/debloat.ps1 \
+    /etc/dockur-windows/oem/UserOnce.ps1
 
 # ---------- 1a-tss. TPM access for tom (needed by pinutil) ----------
 # /dev/tpmrm0 is mode 660 root:tss, so tom needs to be in the `tss`
@@ -2000,7 +2243,10 @@ echo "-- VM stack (dockur/windows + WinApps) --"
 check "docker enabled"       "systemctl is-enabled docker.service"
 check "tom in docker grp"    "id -nG tom | grep -qw docker"
 check "dockur compose file"  "sudo test -f /etc/dockur-windows/compose.yaml"
-check "dockur OEM script"    "sudo test -f /etc/dockur-windows/oem/install.bat"
+check "dockur OEM install.bat"   "sudo test -f /etc/dockur-windows/oem/install.bat"
+check "dockur OEM setup.cmd"     "sudo test -f /etc/dockur-windows/oem/setup.cmd"
+check "dockur OEM debloat.ps1"   "sudo test -f /etc/dockur-windows/oem/debloat.ps1"
+check "dockur OEM UserOnce.ps1"  "sudo test -f /etc/dockur-windows/oem/UserOnce.ps1"
 check "winapps source"       "test -d /opt/winapps/.git"
 check "winapps-setup PATH"   "command -v winapps-setup"
 check "winapps.conf docker"  "grep -q '^WAFLAVOR=\"docker\"' $HOME/.config/winapps/winapps.conf"
@@ -2210,8 +2456,24 @@ cat <<'POSTINSTALL_OUTRO'
         - Docker installed + enabled, tom in docker group
         - dockur/windows compose at /etc/dockur-windows/compose.yaml
           (Win11, RAM 8G, 4 vCPU, 128G disk, RDP on 127.0.0.1:3389)
-        - OEM first-boot script at /etc/dockur-windows/oem/install.bat
-          installs Visual Studio 2022 Enterprise (IDE only, no workloads)
+        - OEM first-boot scripts at /etc/dockur-windows/oem/, all adapted
+          from the pre-2026-04-27 autounattend.xml minus the bare-metal
+          bits (disk detection, BitLocker, Wi-Fi):
+            install.bat   — winget-installs VS 2022 Enterprise IDE
+            setup.cmd     — power off, long paths, RDP enabled, privacy/
+                            consumer-features off, Edge OOBE skipped,
+                            Defender fully disabled (services + Group
+                            Policy + scheduled tasks + SmartScreen +
+                            Set-MpPreference), sticky keys off, CapsLock
+                            disabled, Default-user-hive defaults (show
+                            file ext, hide TaskView, taskbar align left,
+                            NumLock on, mouse accel off, no Content-
+                            DeliveryManager promos), RunOnce registered
+                            for UserOnce.ps1
+            debloat.ps1   — removes consumer AppX (Bing/Maps/Xbox/etc.),
+                            Print.Fax.Scan, and Recall feature
+            UserOnce.ps1  — fires at first logon: Explorer→ThisPC, hide
+                            taskbar searchbox, restart explorer.exe
         - WinApps cloned to /opt/winapps; winapps-setup on PATH
         - ~/.config/winapps/winapps.conf set to WAFLAVOR=docker, RDP
           creds Docker/Docker, RDP_IP=127.0.0.1
