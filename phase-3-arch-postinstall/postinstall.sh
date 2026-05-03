@@ -1108,10 +1108,17 @@ account     include     system-auth
 session     include     system-auth
 LIDPAMEOF
 
-for pam_file in sudo hyprlock polkit-1 login; do
+# /etc/pam.d/login NEEDS system-local-login (NOT system-auth) so pam_systemd
+# is chained via system-login. pam_systemd is what sets XDG_RUNTIME_DIR for
+# the tty1 → `exec Hyprland` flow from .zprofile; without it Hyprland dies
+# on launch and tty1 loops back to login. The other three (sudo/hyprlock/
+# polkit-1) auth inside an existing session, so system-auth is sufficient.
+for pam_file in sudo hyprlock polkit-1; do
     log "  /etc/pam.d/${pam_file}"
     printf '%s\n' "$LID_AWARE_STACK" | sudo tee "/etc/pam.d/${pam_file}" >/dev/null
 done
+log "  /etc/pam.d/login"
+printf '%s\n' "$LID_AWARE_STACK" | sed 's/system-auth/system-local-login/g' | sudo tee /etc/pam.d/login >/dev/null
 
 # ---------- 7.5 LUKS TPM2 autounlock — VERIFY-ONLY (FDE per decisions.md §Q11) ----------
 # install.sh §5b is now the single source of truth for TPM2 enrollment:
