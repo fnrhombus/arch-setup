@@ -186,7 +186,7 @@ sudo pacman -Syu --noconfirm --needed \
     mission-center \
     remmina freerdp \
     ufw \
-    azure-cli lego \
+    azure-cli lego rclone \
     memtest86+ memtest86+-efi \
     smartmontools \
     sbctl \
@@ -430,6 +430,12 @@ AUR_PACKAGES=(
     visual-studio-code-bin
     microsoft-edge-stable-bin
     claude-desktop-native
+    # dropbox: official Dropbox Linux daemon. Tray icon under Wayland is
+    # degraded (post-May-2025 AppIndicator mandate), but sync still works.
+    # `dropbox-cli` is a separate AUR pkg providing the `dropbox` Python CLI
+    # for status/control from the terminal — pairs with the daemon.
+    dropbox
+    dropbox-cli
     pinpam-git
     sesh-bin
     wvkbd
@@ -1736,6 +1742,9 @@ check "remmina (RDP)"       "command -v remmina"
 check "freerdp"             "command -v xfreerdp || command -v xfreerdp3"
 check "nautilus"            "command -v nautilus"
 check "yazi"                "command -v yazi"
+check "dropbox (daemon)"    "command -v dropbox"
+check "dropbox-cli"         "pacman -Q dropbox-cli"
+check "rclone"              "command -v rclone"
 
 echo "-- terminal stack --"
 check "ghostty"             "command -v ghostty"
@@ -1850,6 +1859,7 @@ check "udev usb-serial"     "test -f /etc/udev/rules.d/99-usb-serial.rules"
 check "bootstrap dispatcher (dots)"   "test -f $HOME/.zshrc.d/arch-bootstrap-runner.zsh"
 check "gh-auth bootstrap or done"     "test -f $HOME/.local/share/arch-setup-bootstraps/first-login.sh || test -f $HOME/.gitconfig.local"
 check "ssh-signing bootstrap or done" "test -f $HOME/.local/share/arch-setup-bootstraps/ssh-signing.sh || grep -q allowedSignersFile $HOME/.gitconfig.local 2>/dev/null"
+check "cloud-storage bootstrap or done" "test -f $HOME/.local/share/arch-setup-bootstraps/cloud-storage-auth.sh || (test -f $HOME/.dropbox/info.json && test -f $HOME/.local/state/rclone-bisync-initialized)"
 check "fnpostinstall fn"    "test -f $HOME/.zshrc.d/arch-postinstall.zsh"
 
 # Summary panel
