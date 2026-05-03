@@ -14,11 +14,6 @@
 # Claude Code worktrees (per-session sandboxes, not source)
 /.claude/worktrees/
 
-# Claude auto-memory — kept local because some entries embed tenant /
-# subscription IDs and other identifiers that don't belong in a public
-# repo. Memory is symlinked here from ~/.claude/projects/<encoded>/memory.
-/.claude/memory/
-
 # Temp working files
 .tmp-*
 

@@ -1,0 +1,5 @@
+- [notify-send before sudo](feedback_sudo_fingerprint_announce.md) — `notify-send -u critical 'sudo' '<msg>'; sudo <cmd>` — terminal bell didn't work in user's setup.
+- [Azure DDNS config](project_azure_ddns.md) — IDs live in `phase-3-arch-postinstall/setup-azure-ddns.sh` §1; non-default tenant, hardcoded `--tenant` flag.
+- [bw CLI libsecret integration](feedback_bw_cli_libsecret.md) — bwu/bw shell functions; one-time master-password seed → silent forever; same trust model as desktop "Unlock with system authentication".
+- [/etc/adjtime must be UTC](project_rtc_must_be_utc.md) — single-OS, no Windows. LOCAL setting from old dual-boot plan caused 4-hour skew that broke JWT/Azure/cert flows on 2026-04-30.
+- [wpws (per-workspace wallpaper + accent)](project_wpws.md) — Python daemon in dots, designed for extraction to its own repo. Slow path = matugen; fast path = wpws's own PIL extractor.
