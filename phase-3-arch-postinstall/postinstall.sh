@@ -1224,19 +1224,10 @@ EOF
     chmod 600 "$HOME/.ssh/config"
 fi
 
-# ~/.ssh/config's IdentityAgent directive is consulted by `ssh(1)` only — NOT
-# by `ssh-add(1)`. The SSH-signing planter (below) calls `ssh-add -L` to
-# discover the Bitwarden-surfaced pubkey, which requires $SSH_AUTH_SOCK to
-# point at the Bitwarden socket. Export it for every shell session via a
-# .zshrc.d drop-in. We only set it when the socket actually exists so nothing
-# breaks on a fresh boot before Bitwarden desktop has started.
-mkdir -p "$HOME/.zshrc.d"
-cat > "$HOME/.zshrc.d/bitwarden-ssh-agent.zsh" <<'EOF'
-# Route ssh-add / ssh to the Bitwarden SSH agent socket, if present.
-if [[ -S "$HOME/.bitwarden-ssh-agent.sock" ]]; then
-    export SSH_AUTH_SOCK="$HOME/.bitwarden-ssh-agent.sock"
-fi
-EOF
+# SSH_AUTH_SOCK export lives in chezmoi-managed ~/.zshenv (rhombu5/dots
+# `dot_zshenv`), not here — .zshenv is sourced by every zsh including
+# non-interactive (cron, systemd user units, captured shell-snapshots),
+# whereas .zshrc.d/* only fires for interactive zsh.
 
 # ---------- 9. GitHub identity (one-shot if gh already authed) ----------
 # The planter scripts that handle bw login / gh auth login / SSH-signing
