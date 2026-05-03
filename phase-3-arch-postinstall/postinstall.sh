@@ -199,7 +199,7 @@ sudo pacman -Syu --noconfirm --needed \
     smartmontools \
     sbctl \
     mise chezmoi github-cli \
-    docker docker-compose docker-buildx \
+    docker docker-compose docker-buildx nvidia-container-toolkit \
     snapper snap-pac \
     cmake cpio
 
@@ -242,6 +242,28 @@ sudo systemctl enable --now docker.service
 if ! id -nG tom | grep -qw docker; then
     sudo usermod -aG docker tom
     warn "Added tom to docker group — log out and back in for it to take effect."
+fi
+
+# ---------- 1a-nvctk. NVIDIA Container Toolkit: wire GPU into Docker ----------
+# nvidia-container-toolkit (§1) installs the runtime; `nvidia-ctk runtime
+# configure --runtime=docker` writes /etc/docker/daemon.json so containers
+# can `docker run --gpus all ...` against the host nvidia-470xx driver.
+# Idempotent: nvidia-ctk re-applies the same config block on re-runs;
+# docker.service is only restarted if the config actually changed.
+#
+# The host driver (nvidia-470xx-dkms + utils) is installed via §3 AUR;
+# this step only needs the toolkit binary in place, which is true after
+# the §1 pacman pass above.
+if command -v nvidia-ctk >/dev/null; then
+    log "Configuring NVIDIA Container Toolkit runtime for Docker..."
+    daemon_json=/etc/docker/daemon.json
+    pre_hash=$(sudo sha256sum "$daemon_json" 2>/dev/null | awk '{print $1}' || true)
+    sudo nvidia-ctk runtime configure --runtime=docker --quiet
+    post_hash=$(sudo sha256sum "$daemon_json" 2>/dev/null | awk '{print $1}' || true)
+    if [[ "$pre_hash" != "$post_hash" ]]; then
+        log "  daemon.json changed — restarting docker.service"
+        sudo systemctl restart docker.service
+    fi
 fi
 
 # ---------- 1a-dockur. Windows VM compose for dockur/windows + WinApps ----------
@@ -526,8 +548,12 @@ AUR_PACKAGES=(
     # cache hop) so the install is hermetic to the repo checkout.
     # NVIDIA compute-only stack for the MX250 (Pascal, compute capability 6.1).
     # Display modules are blacklisted in chroot.sh; these pull in the kernel
-    # driver + nvidia-smi/CUDA runtime libs. Apps like Meshroom or COLMAP can
-    # then use the dGPU for photogrammetry/ML without ever touching display.
+    # driver + nvidia-smi/CUDA runtime libs for bare-metal CUDA workloads
+    # (PyTorch, ffmpeg NVENC, etc.). nvidia-container-toolkit (§1) wires the
+    # runtime into Docker so containers can `docker run --gpus all ...`
+    # without an additional driver install in the image. Note: the MX250 is
+    # Pascal, so use container images with CUDA ≤11.x for actual GPU
+    # acceleration — newer CUDA-12 images compile-out Pascal kernels.
     nvidia-470xx-dkms
     nvidia-470xx-utils
     # WinApps is NOT on AUR (verified empty `winapps` search 2026-04-29). The
@@ -1964,6 +1990,12 @@ check "certbot"             "command -v certbot"
 check "certbot azure plugin" "sudo test -d /opt/pipx/venvs/certbot && sudo ls /opt/pipx/venvs/certbot/lib/python*/site-packages 2>/dev/null | grep -q certbot_dns_azure"
 check "LE cert (if issued)" "! test -d /etc/letsencrypt/live/metis.rhombus.rocks || sudo test -f /etc/letsencrypt/live/metis.rhombus.rocks/fullchain.pem"
 
+echo "-- GPU compute (NVIDIA + Docker) --"
+check "nvidia-470xx-dkms"     "pacman -Q nvidia-470xx-dkms"
+check "nvidia-470xx-utils"    "pacman -Q nvidia-470xx-utils"
+check "nvidia-container-toolkit" "pacman -Q nvidia-container-toolkit"
+check "docker daemon.json: nvidia runtime" "sudo grep -q '\"nvidia\"' /etc/docker/daemon.json"
+
 echo "-- VM stack (dockur/windows + WinApps) --"
 check "docker enabled"       "systemctl is-enabled docker.service"
 check "tom in docker grp"    "id -nG tom | grep -qw docker"
@@ -2218,23 +2250,27 @@ cat <<'POSTINSTALL_OUTRO'
 [8] NVIDIA MX250 for CUDA compute (no display):
 
       Prereqs done by postinstall:
-        - nvidia-470xx-dkms + nvidia-470xx-utils installed (AUR)
-        - Display modules (nvidia_drm, nvidia_modeset) blacklisted
-        - Compute modules (nvidia, nvidia_uvm) load on demand
+        - nvidia-470xx-dkms + nvidia-470xx-utils installed (AUR) — host
+          driver + nvidia-smi for the MX250 (Pascal, capability 6.1)
+        - Display modules (nvidia_drm, nvidia_modeset) blacklisted in
+          chroot.sh; compute modules (nvidia, nvidia_uvm) load on demand
+        - nvidia-container-toolkit installed; Docker runtime registered
+          via 'nvidia-ctk runtime configure --runtime=docker'
 
       Verify after first reboot:
         sudo modprobe nvidia
-        nvidia-smi                       # should show 'GeForce MX250'
+        nvidia-smi                                  # should show 'GeForce MX250'
+        docker run --rm --gpus all nvidia/cuda:11.8.0-base-ubuntu22.04 nvidia-smi
+                                                    # same output, from inside a container
 
-      Install CUDA toolkit when needed (e.g. for Meshroom or COLMAP):
-        sudo pacman -S cuda             # current 12.x — may have Pascal
-                                        # caveats; check Meshroom/COLMAP
-                                        # docs for the supported CUDA range
-                                        # before switching.
+      Pascal + CUDA-version note: the MX250 is Pascal, so containers must
+      ship CUDA ≤11.x for actual GPU acceleration. CUDA-12 images compile
+      out Pascal kernels and will run CPU-only. Pick container tags with
+      11.x bases (e.g. nvidia/cuda:11.8.0-*, pytorch/pytorch:1.13.x-cuda11.x).
 
-      Photogrammetry apps NOT installed by default — pick when ready:
-        Meshroom (AliceVision)  — yay -S meshroom
-        COLMAP                  — sudo pacman -S colmap
+      Bare-metal CUDA on the host (only if a Linux app needs it directly):
+        sudo pacman -S cuda                         # 12.x — Pascal-supported
+                                                    # but app-specific.
 
 ====================================================================
 POSTINSTALL_OUTRO
