@@ -590,6 +590,25 @@ sudo chmod 644 \
     /etc/dockur-windows/oem/debloat.ps1 \
     /etc/dockur-windows/oem/UserOnce.ps1
 
+# Kick off `docker compose up -d` NOW so the ~15-30 min Windows install runs
+# inside the container in parallel with the rest of postinstall (yay AUR
+# builds, fingerprint enrollment, chezmoi apply, etc.) instead of serially.
+# `up -d` itself returns in seconds — the install proceeds asynchronously
+# inside the dockur container. §15-windows below blocks at end-of-postinstall
+# until container health=healthy.
+#
+# We use sudo because tom was just added to the docker group in §1a and
+# group membership doesn't propagate to the current shell until logout/login.
+# The sudo keeper (top of script) keeps the credential cache warm.
+if (( SKIP_WINDOWS_INSTALL == 1 )); then
+    log "Skipping early dockur bring-up (--skip-windows-install). To start later:"
+    log "  sudo docker compose -f /etc/dockur-windows/compose.yaml up -d"
+else
+    log "Starting dockur/windows VM in background (install runs in parallel)..."
+    sudo docker compose -f /etc/dockur-windows/compose.yaml up -d \
+        || warn "docker compose up failed — see 'docker logs windows'."
+fi
+
 # ---------- 1a-tss. TPM access for tom (needed by pinutil) ----------
 # /dev/tpmrm0 is mode 660 root:tss, so tom needs to be in the `tss`
 # group to call pinutil without sudo. pinutil scopes the PIN to the
@@ -2028,35 +2047,35 @@ if [[ "$CURRENT_SHELL" != "$(which zsh)" ]]; then
     sudo usermod -s "$(which zsh)" "$USER"
 fi
 
-# ---------- 15-windows. dockur/windows: bring up VM + wait for Windows install ----------
-# Longest single step in postinstall (~15-30 min on first run, fast on
-# re-runs since the VM disk persists in the `windows_data` Docker volume).
-# Compose file written in §1a-dockur. Skip with --skip-windows-install
-# to finish postinstall fast and bring it up manually later.
-#
-# Placed AFTER §16 snapper so the baseline snapshot doesn't include the
-# 100GB+ VM disk image — rolling back to baseline = clean system minus
-# VM, which matches the "go back to fresh install" mental model.
+# ---------- 15-windows. dockur/windows: wait for Windows install to finish ----------
+# The container itself was started early in §1a-dockur so the ~15-30 min
+# Windows install runs in parallel with the rest of postinstall (yay AUR
+# builds, fingerprint enrollment, chezmoi apply, etc.). This block just
+# blocks on the install actually finishing before postinstall returns.
 #
 # Wait signal: container HEALTHCHECK transitions to `healthy` once Windows
 # is past OOBE and the dockur dashboard responds. RDP port opens at
 # container start (before Windows is up), so it's not a usable signal.
+#
+# Note re: snapper §16 baseline: snapper runs while the VM install may
+# still be in progress, so the baseline snapshot's view of /var/lib/docker/
+# volumes/windows_data is whatever's been written by then. btrfs CoW makes
+# the snapshot itself near-zero-cost, but a `snapper rollback` to baseline
+# would land in a half-installed VM state — recover by deleting the volume
+# and re-running `docker compose up`. Acceptable since rollback to baseline
+# is rare and "VM is user data not baseline state" still holds in spirit.
+#
+# sudo on docker calls: tom isn't in the docker group in this shell yet
+# (group adds don't propagate without re-login). sudo bypasses that.
 if (( SKIP_WINDOWS_INSTALL == 1 )); then
-    log "Skipping dockur/windows VM bring-up (--skip-windows-install). To start later:"
-    log "  docker compose -f /etc/dockur-windows/compose.yaml up -d"
-elif ! id -nG "$USER" | grep -qw docker; then
-    warn "$USER not yet in docker group (postinstall just added it). Log out + back in, then re-run to bring up the Windows VM."
+    log "Skipping Windows install wait (--skip-windows-install)."
 else
-    log "Bringing up dockur/windows VM..."
-    docker compose -f /etc/dockur-windows/compose.yaml up -d \
-        || warn "docker compose up failed — see 'docker logs windows'."
-
     log "Waiting for Windows install to finish (~15-30 min on first run; progress at http://127.0.0.1:8006/)..."
     deadline=$(( $(date +%s) + 45*60 ))
     health=""
     last_health=""
     while (( $(date +%s) < deadline )); do
-        health=$(docker inspect --format='{{if .State.Health}}{{.State.Health.Status}}{{else}}no-healthcheck{{end}}' windows 2>/dev/null || echo "missing")
+        health=$(sudo docker inspect --format='{{if .State.Health}}{{.State.Health.Status}}{{else}}no-healthcheck{{end}}' windows 2>/dev/null || echo "missing")
         if [[ "$health" == "healthy" ]]; then
             log "  Windows VM is up (container health=healthy)."
             break
@@ -2068,7 +2087,7 @@ else
         sleep 30
     done
     if [[ "$health" != "healthy" ]]; then
-        warn "Windows install did not reach 'healthy' within 45 min — check 'docker logs windows' or http://127.0.0.1:8006/"
+        warn "Windows install did not reach 'healthy' within 45 min — check 'sudo docker logs windows' or http://127.0.0.1:8006/"
     fi
 fi
 
@@ -2249,10 +2268,10 @@ check "dockur OEM UserOnce.ps1"  "sudo test -f /etc/dockur-windows/oem/UserOnce.
 check "winapps source"       "test -d /opt/winapps/.git"
 check "winapps-setup PATH"   "command -v winapps-setup"
 check "winapps.conf docker"  "grep -q '^WAFLAVOR=\"docker\"' $HOME/.config/winapps/winapps.conf"
-# Container may be absent if user passed --skip-windows-install or hasn't
-# logged out/in for docker group yet — pass if absent OR if it exists
-# and is healthy/running.
-check "windows VM (if present)" "! docker ps -a --format '{{.Names}}' 2>/dev/null | grep -q '^windows$' || docker ps --format '{{.Names}}' 2>/dev/null | grep -q '^windows$'"
+# Container may be absent if user passed --skip-windows-install — pass if
+# absent OR if it exists and is currently running. sudo because tom may
+# not be in the docker group yet in this shell.
+check "windows VM (if present)" "! sudo docker ps -a --format '{{.Names}}' 2>/dev/null | grep -q '^windows$' || sudo docker ps --format '{{.Names}}' 2>/dev/null | grep -q '^windows$'"
 
 echo "-- snapshots / udev / planters --"
 check "snapper config /"    "sudo test -f /etc/snapper/configs/root"
@@ -2479,8 +2498,11 @@ cat <<'POSTINSTALL_OUTRO'
         - ~/.config/winapps/winapps.conf set to WAFLAVOR=docker, RDP
           creds Docker/Docker, RDP_IP=127.0.0.1
         - Unless --skip-windows-install was passed: VM brought up via
-          'docker compose up -d' and waited on container health=healthy
-          (~15-30 min on first run; hands-off, fully unattended)
+          'sudo docker compose up -d' EARLY in postinstall (§1a-dockur),
+          so the ~15-30 min Windows install runs in parallel with the
+          rest of postinstall (yay AUR builds, fingerprint enrollment,
+          chezmoi apply, etc.). §15-windows blocks at end-of-postinstall
+          waiting on container health=healthy.
 
       Verify the VM is up:
         docker ps                       # 'windows' container, healthy
