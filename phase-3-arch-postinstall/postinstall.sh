@@ -97,16 +97,24 @@ export GIT_TEMPLATE_DIR=""
 
 # CLI flags. Order-independent, no-arg.
 SKIP_VERIFY=0
+SKIP_WINDOWS_INSTALL=0
 for arg in "$@"; do
     case "$arg" in
         --no-verify|--skip-verify) SKIP_VERIFY=1 ;;
+        --skip-windows-install) SKIP_WINDOWS_INSTALL=1 ;;
         -h|--help)
             cat <<USAGE
-Usage: postinstall.sh [--no-verify]
+Usage: postinstall.sh [--no-verify] [--skip-windows-install]
 
-  --no-verify    Skip the verify block at the end (faster re-runs when
-                 you've just touched one section and don't want to wait
-                 for ~70 checks to fan out).
+  --no-verify              Skip the verify block at the end (faster re-runs
+                           when you've just touched one section and don't
+                           want to wait for ~70 checks to fan out).
+
+  --skip-windows-install   Don't bring up the dockur/windows VM and don't
+                           wait for the ~30 min unattended Windows install.
+                           Use when you want postinstall to finish quickly
+                           and you'll run \`docker compose -f /etc/dockur-windows/compose.yaml up -d\`
+                           manually later.
 USAGE
             exit 0 ;;
         *)
@@ -193,8 +201,7 @@ sudo pacman -Syu --noconfirm --needed \
     mise chezmoi github-cli \
     docker docker-compose docker-buildx \
     snapper snap-pac \
-    cmake cpio \
-    qemu-full virt-manager libvirt edk2-ovmf swtpm dnsmasq iptables-nft
+    cmake cpio
 
 sudo pkgfile -u
 
@@ -237,25 +244,89 @@ if ! id -nG tom | grep -qw docker; then
     warn "Added tom to docker group — log out and back in for it to take effect."
 fi
 
-# ---------- 1a-virt. KVM/libvirt for Windows VM + WinApps ----------
-# qemu-full + virt-manager + libvirt + edk2-ovmf + swtpm + dnsmasq are
-# the standard "Windows-in-a-VM" stack on Arch. WinApps (AUR §3) talks
-# to a libvirt-managed Win11 VM via RDP to surface individual Windows
-# apps as Linux-native windows (Parallels-Coherence-equivalent).
+# ---------- 1a-dockur. Windows VM compose for dockur/windows + WinApps ----------
+# dockur/windows runs Win11 in QEMU under Docker, fully unattended on first
+# `docker compose up`. Replaces the prior libvirt+QEMU stack: smaller
+# footprint (no virt-manager / libvirt daemon), declarative compose-as-
+# code, fits the existing Docker-for-cloud-storage story. WinApps
+# (§3-winapps) bridges via FreeRDP to surface individual Windows apps
+# as Hyprland windows (Parallels-Coherence-equivalent).
 #
-# tom needs libvirt + kvm group membership to run virt-manager without
-# sudo. libvirtd.socket starts the daemon on demand when virt-manager /
-# WinApps connects.
-log "Enabling libvirtd socket and adding tom to libvirt + kvm groups..."
-sudo systemctl enable --now libvirtd.socket
-if ! id -nG tom | grep -qw libvirt; then
-    sudo usermod -aG libvirt tom
-    warn "Added tom to libvirt group — log out and back in for it to take effect."
-fi
-if ! id -nG tom | grep -qw kvm; then
-    sudo usermod -aG kvm tom
-    warn "Added tom to kvm group — log out and back in for it to take effect."
-fi
+# We write the compose file + OEM first-boot script here. The actual
+# `docker compose up -d` + 30-min wait happens in §15-windows below
+# (skippable via --skip-windows-install). Splitting the write from the
+# bring-up means the compose file lands even if the user skips the
+# install — they can run it manually later.
+log "Writing dockur/windows compose + OEM first-boot script..."
+sudo install -d -m 755 /etc/dockur-windows /etc/dockur-windows/oem
+sudo tee /etc/dockur-windows/compose.yaml >/dev/null <<'DOCKUREOF'
+# /etc/dockur-windows/compose.yaml — Win11 + VS Enterprise, exposed via
+# RDP on 127.0.0.1:3389 for WinApps. Web UI at http://127.0.0.1:8006/
+# during install / for direct VM display.
+#
+# Ports bind to 127.0.0.1 only — VM is not reachable from LAN. The host
+# is single-user + LUKS-encrypted, so the literal "Docker"/"Docker" RDP
+# credentials are fine here; threat model is local-only.
+name: windows
+services:
+  windows:
+    image: dockurr/windows
+    container_name: windows
+    environment:
+      VERSION: "11"
+      RAM_SIZE: "8G"
+      CPU_CORES: "4"
+      DISK_SIZE: "128G"
+      USERNAME: "Docker"
+      PASSWORD: "Docker"
+    devices:
+      - /dev/kvm
+      - /dev/net/tun
+    cap_add:
+      - NET_ADMIN
+    ports:
+      - "127.0.0.1:8006:8006"
+      - "127.0.0.1:3389:3389/tcp"
+      - "127.0.0.1:3389:3389/udp"
+    volumes:
+      - windows_data:/storage
+      - /etc/dockur-windows/oem:/oem
+    restart: unless-stopped
+    stop_grace_period: 2m
+
+volumes:
+  windows_data:
+DOCKUREOF
+
+# OEM first-boot script. dockur/windows copies the /oem mount into
+# C:\OEM in the guest and SetupComplete.cmd executes any *.bat there
+# during Windows OOBE finalization. We use it to install Visual Studio
+# 2022 Enterprise via winget unattended.
+#
+# VS Enterprise requires a Visual Studio subscription license. The bare
+# IDE installs without one, but on first launch you sign in with your
+# MSDN/VS subscription account to activate. Workloads (C++, .NET, etc.)
+# are NOT installed here — pick them via the VS Installer GUI after
+# first launch so you don't pay the multi-GB workload download cost on
+# every reinstall.
+sudo tee /etc/dockur-windows/oem/install.bat >/dev/null <<'OEMEOF'
+@echo off
+REM Wait for winget to register (Win11 ships winget but registration
+REM lags first boot by a minute or two on a fresh image).
+:wait_winget
+where winget >nul 2>&1
+if errorlevel 1 (
+    timeout /t 30 /nobreak >nul
+    goto wait_winget
+)
+
+REM VS 2022 Enterprise — IDE only, no workloads (pick via VS Installer GUI).
+winget install --exact --id Microsoft.VisualStudio.2022.Enterprise ^
+    --accept-package-agreements ^
+    --accept-source-agreements ^
+    --silent
+OEMEOF
+sudo chmod 644 /etc/dockur-windows/compose.yaml /etc/dockur-windows/oem/install.bat
 
 # ---------- 1a-tss. TPM access for tom (needed by pinutil) ----------
 # /dev/tpmrm0 is mode 660 root:tss, so tom needs to be in the `tss`
@@ -497,19 +568,19 @@ if (( ${#AUR_FAILED[@]} > 0 )); then
 fi
 
 # ---------- 3-winapps. WinApps from upstream (winapps-org/winapps) ----------
-# WinApps lets you launch Windows apps from a KVM/QEMU Win11 VM as native
-# Hyprland windows via RDP — the Parallels-Coherence equivalent. The KVM
-# stack (qemu-full, virt-manager, libvirt, edk2-ovmf, swtpm, dnsmasq) is
-# already in the pacman §1 list above.
+# WinApps lets you launch Windows apps from a Win11 VM as native Hyprland
+# windows via RDP — the Parallels-Coherence equivalent. The VM itself is
+# the dockur/windows container defined in §1a-dockur (compose at
+# /etc/dockur-windows/compose.yaml); WinApps just talks to its RDP port.
 #
 # WinApps is NOT on AUR (the prior `winapps-git` package referenced
 # Fmstrat/winapps which has migrated to winapps-org/winapps). We install
 # from upstream source: clone to /opt/winapps, symlink the setup script
-# onto PATH. Configuration (which requires a running Win11 VM) is deferred
-# to Phase 4 — see §22 for the runbook entry.
+# onto PATH, and write ~/.config/winapps/winapps.conf with WAFLAVOR=docker
+# so winapps-setup talks to the dockur container instead of libvirt.
 #
 # Idempotent: subsequent runs `git pull` to refresh; the symlink is
-# unconditional (ln -sf).
+# unconditional (ln -sf); the conf file is rewritten each run.
 log "Installing WinApps from upstream (winapps-org/winapps)..."
 if [[ ! -d /opt/winapps/.git ]]; then
     sudo git clone --depth 1 https://github.com/winapps-org/winapps.git /opt/winapps \
@@ -520,8 +591,22 @@ else
 fi
 if [[ -x /opt/winapps/setup.sh ]]; then
     sudo ln -sf /opt/winapps/setup.sh /usr/local/bin/winapps-setup
-    log "  WinApps installed. Run 'winapps-setup --user' once your Win11 VM is configured."
 fi
+
+# Write WinApps config pointing at the dockur container. RDP creds match
+# the compose USERNAME/PASSWORD; IP is loopback because compose binds
+# 3389 to 127.0.0.1 only.
+install -d -m 755 "$XDG_CONFIG_HOME/winapps"
+cat >"$XDG_CONFIG_HOME/winapps/winapps.conf" <<'WACONFEOF'
+# Auto-written by postinstall §3-winapps. Edit if you change the dockur
+# compose USERNAME/PASSWORD or the port bindings.
+RDP_USER="Docker"
+RDP_PASS="Docker"
+RDP_DOMAIN=""
+RDP_IP="127.0.0.1"
+WAFLAVOR="docker"
+WACONFEOF
+log "  WinApps installed (backend=docker). Run 'winapps-setup --user' once the dockur VM is up to wire desktop entries."
 
 # ---------- 3-edge. Microsoft Edge: suppress OOBE / welcome / sign-in nags ----------
 # Edge's default first-launch flow drops the user into a multi-page welcome
@@ -1607,7 +1692,7 @@ fi
 
 # Ghostty config is matugen-themed via the rhombu5/dots chezmoi tree (§13).
 # greetd-regreet system config is installed by install.sh from
-# phase-3-arch-postinstall/system-files/greetd/. No separate §14 / §15 needed.
+# phase-3-arch-postinstall/system-files/greetd/. No separate §14 needed.
 
 # ---------- 16. Snapper: baseline snapshot of / ----------
 # NOTE: install.sh already created the @snapshots subvolume and mounted it at
@@ -1673,6 +1758,50 @@ CURRENT_SHELL=$(getent passwd "$USER" | cut -d: -f7)
 if [[ "$CURRENT_SHELL" != "$(which zsh)" ]]; then
     log "Changing login shell to zsh (via usermod — avoids chsh PAM prompt)..."
     sudo usermod -s "$(which zsh)" "$USER"
+fi
+
+# ---------- 15-windows. dockur/windows: bring up VM + wait for Windows install ----------
+# Longest single step in postinstall (~15-30 min on first run, fast on
+# re-runs since the VM disk persists in the `windows_data` Docker volume).
+# Compose file written in §1a-dockur. Skip with --skip-windows-install
+# to finish postinstall fast and bring it up manually later.
+#
+# Placed AFTER §16 snapper so the baseline snapshot doesn't include the
+# 100GB+ VM disk image — rolling back to baseline = clean system minus
+# VM, which matches the "go back to fresh install" mental model.
+#
+# Wait signal: container HEALTHCHECK transitions to `healthy` once Windows
+# is past OOBE and the dockur dashboard responds. RDP port opens at
+# container start (before Windows is up), so it's not a usable signal.
+if (( SKIP_WINDOWS_INSTALL == 1 )); then
+    log "Skipping dockur/windows VM bring-up (--skip-windows-install). To start later:"
+    log "  docker compose -f /etc/dockur-windows/compose.yaml up -d"
+elif ! id -nG "$USER" | grep -qw docker; then
+    warn "$USER not yet in docker group (postinstall just added it). Log out + back in, then re-run to bring up the Windows VM."
+else
+    log "Bringing up dockur/windows VM..."
+    docker compose -f /etc/dockur-windows/compose.yaml up -d \
+        || warn "docker compose up failed — see 'docker logs windows'."
+
+    log "Waiting for Windows install to finish (~15-30 min on first run; progress at http://127.0.0.1:8006/)..."
+    deadline=$(( $(date +%s) + 45*60 ))
+    health=""
+    last_health=""
+    while (( $(date +%s) < deadline )); do
+        health=$(docker inspect --format='{{if .State.Health}}{{.State.Health.Status}}{{else}}no-healthcheck{{end}}' windows 2>/dev/null || echo "missing")
+        if [[ "$health" == "healthy" ]]; then
+            log "  Windows VM is up (container health=healthy)."
+            break
+        fi
+        if [[ "$health" != "$last_health" ]]; then
+            log "  ...container health: $health"
+            last_health="$health"
+        fi
+        sleep 30
+    done
+    if [[ "$health" != "healthy" ]]; then
+        warn "Windows install did not reach 'healthy' within 45 min — check 'docker logs windows' or http://127.0.0.1:8006/"
+    fi
 fi
 
 # ---------- 19. verify ----------
@@ -1835,14 +1964,18 @@ check "certbot"             "command -v certbot"
 check "certbot azure plugin" "sudo test -d /opt/pipx/venvs/certbot && sudo ls /opt/pipx/venvs/certbot/lib/python*/site-packages 2>/dev/null | grep -q certbot_dns_azure"
 check "LE cert (if issued)" "! test -d /etc/letsencrypt/live/metis.rhombus.rocks || sudo test -f /etc/letsencrypt/live/metis.rhombus.rocks/fullchain.pem"
 
-echo "-- VM stack (qemu/libvirt/winapps) --"
-check "qemu installed"       "pacman -Q qemu-full"
-check "virt-manager"         "command -v virt-manager"
-check "libvirtd.socket"      "systemctl is-enabled libvirtd.socket"
-check "tom in libvirt grp"   "id -nG tom | grep -qw libvirt"
-check "tom in kvm grp"       "id -nG tom | grep -qw kvm"
+echo "-- VM stack (dockur/windows + WinApps) --"
+check "docker enabled"       "systemctl is-enabled docker.service"
+check "tom in docker grp"    "id -nG tom | grep -qw docker"
+check "dockur compose file"  "sudo test -f /etc/dockur-windows/compose.yaml"
+check "dockur OEM script"    "sudo test -f /etc/dockur-windows/oem/install.bat"
 check "winapps source"       "test -d /opt/winapps/.git"
 check "winapps-setup PATH"   "command -v winapps-setup"
+check "winapps.conf docker"  "grep -q '^WAFLAVOR=\"docker\"' $HOME/.config/winapps/winapps.conf"
+# Container may be absent if user passed --skip-windows-install or hasn't
+# logged out/in for docker group yet — pass if absent OR if it exists
+# and is healthy/running.
+check "windows VM (if present)" "! docker ps -a --format '{{.Names}}' 2>/dev/null | grep -q '^windows$' || docker ps --format '{{.Names}}' 2>/dev/null | grep -q '^windows$'"
 
 echo "-- snapshots / udev / planters --"
 check "snapper config /"    "sudo test -f /etc/snapper/configs/root"
@@ -2042,31 +2175,45 @@ cat <<'POSTINSTALL_OUTRO'
 [7] Windows VM + WinApps (Parallels-Coherence-equivalent):
 
       Prereqs done by postinstall:
-        - qemu-full + virt-manager + libvirt + edk2-ovmf + swtpm + dnsmasq
-          installed
-        - libvirtd.socket enabled
-        - tom in libvirt + kvm groups (log out + back in to take effect)
-        - WinApps source cloned to /opt/winapps (winapps-org/winapps);
-          'winapps-setup' is on PATH. Run it once the VM is up.
+        - Docker installed + enabled, tom in docker group
+        - dockur/windows compose at /etc/dockur-windows/compose.yaml
+          (Win11, RAM 8G, 4 vCPU, 128G disk, RDP on 127.0.0.1:3389)
+        - OEM first-boot script at /etc/dockur-windows/oem/install.bat
+          installs Visual Studio 2022 Enterprise (IDE only, no workloads)
+        - WinApps cloned to /opt/winapps; winapps-setup on PATH
+        - ~/.config/winapps/winapps.conf set to WAFLAVOR=docker, RDP
+          creds Docker/Docker, RDP_IP=127.0.0.1
+        - Unless --skip-windows-install was passed: VM brought up via
+          'docker compose up -d' and waited on container health=healthy
+          (~15-30 min on first run; hands-off, fully unattended)
 
-      One-time Windows install via virt-manager:
-        1. Download a Win11 ISO (microsoft.com/software-download/windows11)
-           — install with virt-manager, name the VM 'RDPWindows' (matches
-           WinApps default).
-        2. Inside the VM: enable Remote Desktop, set a local user with a
-           password, install your Windows apps (3DF Zephyr, Office, etc.).
-        3. Snapshot the VM (virt-manager → Snapshots) before WinApps wires.
+      Verify the VM is up:
+        docker ps                       # 'windows' container, healthy
+        # OR open http://127.0.0.1:8006/ — direct VM display (noVNC).
 
-      Configure WinApps (one-time):
+      Configure WinApps (one-time, after VM is up):
         winapps-setup --user --setupAllOfficiallySupportedApps
-        # Non-interactive — auto-installs all officially supported app
-        # launchers WinApps can detect. For a guided run instead, just
-        # `winapps-setup --user` (wizard).
-        # Output: ~/.local/bin/winapps + ~/.local/share/applications/
-        # *.desktop entries that launch each Windows app as a Linux window.
+        # Non-interactive — auto-detects installed Windows apps and
+        # writes ~/.local/bin/winapps + ~/.local/share/applications/
+        # *.desktop entries. For a guided run instead, omit the
+        # --setupAllOfficiallySupportedApps flag for the wizard.
+
+      VS Enterprise activation:
+        On first launch of Visual Studio inside the VM, sign in with
+        your MSDN / Visual Studio subscription account to activate the
+        Enterprise license. Pick workloads via the VS Installer GUI
+        (the OEM script installs the bare IDE only — workloads are
+        multi-GB and best chosen interactively).
 
       Daily use: launch Windows apps from Fuzzel like any Linux app —
-      they run inside the VM but appear as standalone Hyprland windows.
+      they run inside the dockur container but appear as standalone
+      Hyprland windows via FreeRDP.
+
+      Stop / start the VM:
+        docker stop windows             # release ~8G RAM when not in use
+        docker start windows            # boots the existing Windows install
+        # `restart: unless-stopped` in the compose means it auto-starts
+        # at boot unless you manually stopped it.
 
 [8] NVIDIA MX250 for CUDA compute (no display):
 
