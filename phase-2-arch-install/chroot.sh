@@ -552,7 +552,7 @@ done
 log "Tuning pacman.conf (Color, ParallelDownloads=10, ILoveCandy)..."
 sed -i 's/^#Color$/Color/'                       /etc/pacman.conf
 sed -i 's/^#VerbosePkgLists$/VerbosePkgLists/'   /etc/pacman.conf
-sed -i 's/^#ParallelDownloads.*$/ParallelDownloads = 10/' /etc/pacman.conf
+sed -i -E 's/^#?ParallelDownloads.*$/ParallelDownloads = 10/' /etc/pacman.conf
 grep -q '^ILoveCandy' /etc/pacman.conf || sed -i '/^ParallelDownloads/a ILoveCandy' /etc/pacman.conf
 
 # ---------- journald: cap size (Netac /var is ~110 GB but log bloat is free to avoid) ----------
