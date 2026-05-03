@@ -21,11 +21,11 @@
 - [x] Lid close: hibernate, *unless* on AC with an external monitor attached — in that case disable `eDP-1` (re-enabled on lid open). On battery the rule is unconditional hibernate. All logic lives in `~/.local/bin/lid-handler` ([rhombu5/dots](https://github.com/rhombu5/dots)) wired via `binddl` on `Lid Switch` in `dot_config/hypr/binds.conf`. Logind defers entirely (`Handle*=ignore` everywhere, written by phase-2 `chroot.sh` to `/etc/systemd/logind.conf.d/10-lid.conf`); side effect at the greeter / TTY (no Hyprland) lid close is a no-op, which is fine since those states only exist with the laptop physically open.
 - [ ] **External** Wacom Intuos USB tablet support (only when plugged in — the 17" 7786 has NO built-in active digitizer, capacitive touch only). `libwacom` + the in-tree kernel `wacom` driver are both installed by `postinstall.sh`. Pressure/tilt work under Wayland via libinput; per-tablet pressure curves go in `dot_config/hypr/input.conf` `device:` blocks in [rhombu5/dots](https://github.com/rhombu5/dots).
 - [x] **Touchscreen** — ELAN i2c-hid (`ELAN2097:00 04F3:2666`), bound by the in-kernel `i2c-hid-acpi` → `hid-multitouch` chain. NOT Goodix — the `27c6:*` Goodix on this machine is the **fingerprint** reader. NOT IPTS either (Surface-only). Whiskey-Lake quirk: live ISO often doesn't autoload `i2c-hid-acpi` until userspace, so the touchscreen is invisible from the live ISO and visible from the installed system.
-- [ ] Touch gestures (touchpad + tablet mode):
+- [x] Touch gestures (touchpad + tablet mode):
   - Two-finger drag → scroll (libinput default, no config needed)
   - Three-finger tap → middle click (libinput default)
   - Three-finger left/right swipe → workspace switch (`gestures { workspace_swipe = true; workspace_swipe_fingers = 3 }` in `hyprland.conf` — wired by postinstall §13a)
-  - Single-finger long-press, edge swipes, OSK toggle → **hyprgrass** plugin (installed via `hyprpm` by postinstall)
+  - Hyprland's native touchscreen behavior is sufficient as of 2026-05-02 — no extra plugin installed by default. **`hyprgrass`** (Hyprland touch-gesture plugin: single-finger long-press, edge swipes, OSK toggle) remains an opt-in if richer touchscreen gestures are ever wanted: `hyprpm add https://github.com/horriblename/hyprgrass`.
   - On-screen keyboard: **wvkbd** (`wvkbd-mobintl`) — de-facto OSK for Hyprland as of 2026; maliit and squeekboard render poorly under Hyprland.
 - [ ] Auto-rotation (2-in-1 tablet mode): `iio-sensor-proxy` (pacman) +
   `iio-hyprland` (AUR) — iio-hyprland reads the IIO accelerometer and emits
@@ -266,7 +266,7 @@ and accepted on the "clean-slate, no bias" principle. See
   - `input.conf` — keyboard layout, touchpad behavior, libinput tuning
   - `decoration.conf` — rounding, blur, shadows
   - `animations.conf` — bezier curves + per-event animation timings
-  - `plugins.conf` — Hyprspace + hyprgrass (loaded via hyprpm)
+  - `plugins.conf` — Hyprspace (loaded via hyprpm; hyprgrass remains opt-in, see the Touch-gestures requirement at top of file)
   - `exec.conf` — `exec-once` daemons (waybar, swaync, hypridle, awww-daemon, iio-hyprland, …)
   - `binds.conf` — ~85 keybindings; validated on every chezmoi apply
 - **Helper binaries** at `~/.local/bin/` (chezmoi-managed):
@@ -310,7 +310,7 @@ present.
 - `iio-hyprland-git` (AUR) — bridges accelerometer → `hyprctl monitor` transforms; spawned via `exec-once`.
 - `libwacom` (pacman) — tablet metadata.
 - `wvkbd` (AUR) — `wvkbd-mobintl` on-screen keyboard.
-- `hyprgrass` (hyprpm plugin) — long-press, edge swipes, OSK-toggle gestures beyond Hyprland's built-in 3-finger workspace swipe.
+- `hyprgrass` (hyprpm plugin) — **opt-in, not installed by default.** Native Hyprland touchscreen behavior was deemed sufficient on 2026-05-02. Adds long-press, edge swipes, OSK-toggle gestures beyond Hyprland's built-in 3-finger workspace swipe. Install on demand with `hyprpm add https://github.com/horriblename/hyprgrass`.
 
 **Validator hook**: `.chezmoiscripts/run_before_validate-binds.sh.tmpl` in [rhombu5/dots](https://github.com/rhombu5/dots) runs `validate-hypr-binds` before every `chezmoi apply`. A keybind conflict or unknown dispatcher fails the validator → fails the apply, so a broken config can never reach `~/.config/hypr/`. The same validator runs in the dots repo's CI workflow.
 

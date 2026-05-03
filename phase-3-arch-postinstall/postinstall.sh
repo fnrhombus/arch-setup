@@ -33,7 +33,7 @@
 #     fragments), waybar, swaync, fuzzel, ghostty, yazi, helix, qt5/6ct,
 #     matugen pipeline + templates, helper scripts.
 #   - 2-in-1 touch: iio-sensor-proxy / iio-hyprland (rotation), wvkbd (OSK),
-#     hyprgrass plugin (touch gestures), libwacom (Wacom AES stylus)
+#     libwacom (Wacom AES stylus)
 #   - matugen Material You palette derived from wallpaper; rendered into
 #     waybar / swaync / fuzzel / ghostty / hypr-colors / etc.
 #   - Snapper baseline snapshot
@@ -1592,24 +1592,16 @@ if command -v hyprpm >/dev/null; then
     log "  hyprpm update (compiles headers against installed Hyprland)..."
     if ! hyprpm update; then
         warn "hyprpm update failed — Hyprland plugin DSOs are likely out-of-sync with installed Hyprland. Re-run after fixing the underlying header build, or run 'hyprpm update' manually from a logged-in shell."
-    else
-        log "  hyprpm add hyprgrass (touch gestures)..."
-        if ! hyprpm list 2>/dev/null | grep -qi hyprgrass; then
-            hyprpm add https://github.com/horriblename/hyprgrass \
-                || warn "hyprgrass build failed — touch gestures will be unavailable until you re-run 'hyprpm add https://github.com/horriblename/hyprgrass' manually."
-        else
-            log "  hyprgrass already added — skipping."
-        fi
-        # Scrolling layout is intentionally NOT installed as a plugin.
-        # Hyprland 0.54 absorbed it into core (algorithm/tiled/scrolling/
-        # ScrollingAlgorithm.cpp). Setting general:layout = scrolling
-        # works natively; bindings live in dot_config/hypr/scrolling.conf
-        # in rhombu5/dots, sourced from hyprland.conf. The journey:
-        #   - dawsers/hyprscroller — abandoned 2024 ("Last commit :-(", pinned at 0.48.1)
-        #   - hyprwm/hyprscrolling — also fails to build on 0.54.x
-        #     (#includes the obsolete IHyprLayout.hpp header)
-        #   - core scrolling layout — works since 0.54.0, no plugin needed
     fi
+    # Scrolling layout is intentionally NOT installed as a plugin.
+    # Hyprland 0.54 absorbed it into core (algorithm/tiled/scrolling/
+    # ScrollingAlgorithm.cpp). Setting general:layout = scrolling
+    # works natively; bindings live in dot_config/hypr/scrolling.conf
+    # in rhombu5/dots, sourced from hyprland.conf. The journey:
+    #   - dawsers/hyprscroller — abandoned 2024 ("Last commit :-(", pinned at 0.48.1)
+    #   - hyprwm/hyprscrolling — also fails to build on 0.54.x
+    #     (#includes the obsolete IHyprLayout.hpp header)
+    #   - core scrolling layout — works since 0.54.0, no plugin needed
     # Hyprspace TODO — see plugins.conf in rhombu5/dots. Don't reintroduce blindly.
 fi
 
@@ -1776,7 +1768,6 @@ check "iio-sensor-proxy"    "pacman -Q iio-sensor-proxy"
 check "iio-hyprland (AUR)"  "command -v iio-hyprland"
 check "wvkbd (touch OSK)"   "command -v wvkbd-mobintl"
 check "libwacom"            "pacman -Q libwacom"
-check "hyprgrass plugin"    "hyprpm list 2>/dev/null | grep -q hyprgrass"
 check "Hyprspace plugin"    "hyprpm list 2>/dev/null | grep -qi hyprspace"
 check "tablet-mode-toggle"  "test -x $HOME/.local/bin/tablet-mode-toggle"
 check "tablet-mode-watcher" "test -x $HOME/.local/bin/tablet-mode-watcher"
