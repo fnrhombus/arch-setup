@@ -21,7 +21,7 @@ comprehensive at any one time.
 # Compositor + core
 hyprland hypridle hyprlock hyprpolkitagent
 
-# Greeter
+# Greeter (installed but disabled — see "Login" section; bare TTY is active)
 greetd greetd-regreet
 
 # Bar, notifications, launcher
@@ -75,24 +75,29 @@ awww-bin matugen-bin             # AUR
 bibata-cursor-theme              # AUR — Xcursor format only
 ```
 
-## Greeter
+## Login
 
-**greetd + ReGreet** replaces the prior SDDM choice. greetd is a tiny daemon
-that handles "show login UI, then start session"; ReGreet is the GTK4 UI it
-displays. Together ~3 MB vs SDDM's ~21 MB.
+**Bare TTY → uwsm → Hyprland** is the active path. agetty on tty1 prompts
+for username + password; `/etc/pam.d/login` is the lid-aware stack
+(fprintd primary if lid open, libpinpam if closed, password fallback —
+see postinstall.sh §7a's design notes). On successful login, `~/.zprofile`
+checks for tty1 + no existing Wayland/X session, then execs
+`uwsm start hyprland-uwsm.desktop`. uwsm hands Hyprland a proper
+graphical-session.target lifecycle (env import, dependent-unit
+activation, clean shutdown on logout), which Hyprland itself flags as
+required for non-debug runs.
 
-Why switched:
-- Theme is plain GTK CSS — matugen output drops in directly. SDDM's Qt
-  theme was a separate maintenance surface (the `catppuccin-sddm-theme-mocha`
-  package goes away with this switch).
-- Wayland-native; no Qt/Xorg legacy paths.
-- Fingerprint at greeter still works via the same PAM stack — load-bearing
-  per `decisions.md:17` (no battery → no suspend cycles → greeter is the
-  one auth moment of the day).
+**greetd + ReGreet stay installed but disabled** as a recoverable
+fallback. The pacman packages remain on disk; `/etc/greetd/config.toml`,
+`/etc/greetd/regreet.css` (matugen template target), and `/etc/pam.d/greetd`
+are kept up-to-date by chroot.sh + postinstall.sh §7a. Re-enable with
+`sudo systemctl enable --now greetd.service` if the bare-TTY path ever
+fails to do its job.
 
-Config: `/etc/greetd/config.toml` with `command = "Hyprland"` for direct
-session launch. ReGreet's CSS lives at `/etc/greetd/regreet.css` (matugen
-template target).
+**Lineage**: SDDM → greetd + ReGreet (2026-04-22) → bare TTY (2026-04-30,
+postinstall.sh §1f). greetd's slow VT handoff, awkward GTK chrome on a
+17" panel, and opaque fprintd failure mode didn't earn its surface area
+on a single-user laptop. See `decisions.md` §D for the full rationale.
 
 ## Visual
 
@@ -350,7 +355,8 @@ The Catppuccin → matugen sweep across scripts and verify checks was
 completed in commits `5edfb04` + `2d52f61`. Surviving Catppuccin mentions
 are intentional history (`docs/decisions.md` §Q-K "Switched from",
 `runbook/GLOSSARY.md` "older fixed palette" entry). SDDM was replaced by
-greetd + ReGreet in the same pass.
+greetd + ReGreet in the same pass; greetd was subsequently disabled
+2026-04-30 in favour of bare TTY login (see "Login" section above).
 
 ## Carried 2-in-1 packages (still required)
 

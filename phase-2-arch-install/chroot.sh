@@ -470,10 +470,14 @@ if command -v tpm2_getcap >/dev/null 2>&1; then
     tpm2_getcap pcrs 2>/dev/null | grep -iE 'sha[0-9]+:' | head -4 || true
 fi
 
-# ---------- greetd + ReGreet system-files install ----------
-# greetd replaced SDDM (decisions.md §D). Source files live alongside
-# postinstall in phase-3/system-files/ and are installed here at
-# chroot-time so first boot comes up directly into greetd.
+# ---------- greetd + ReGreet system-files install (kept for fallback) ----------
+# greetd replaced SDDM 2026-04-22; subsequently disabled by postinstall §1f
+# (2026-04-30) in favour of bare TTY login → uwsm → Hyprland. We still
+# install + configure + enable here so:
+#   - first boot before postinstall has a graphical login surface,
+#   - the greeter is fully themed/PAM-wired if the user ever re-enables
+#     it as a fallback (decisions.md §D, desktop-requirements.md "Login").
+# Source files live alongside postinstall in phase-3/system-files/.
 log "Installing greetd + ReGreet config + PAM stack..."
 # `cage` is a minimal single-app Wayland compositor. ReGreet is a GTK
 # Wayland app with no compositor of its own — without cage underneath
@@ -492,9 +496,14 @@ else
     log "        Expected install.sh to bind /run/ventoy or /root/arch-setup."
 fi
 
-# ---------- PAM: gnome-keyring auto-unlock on greetd login ----------
-# Keyring unlock tied to greetd login password so Bitwarden's stored
-# master password becomes readable at session start without extra typing.
+# ---------- PAM: gnome-keyring auto-unlock on greetd login (fallback only) ----------
+# Wires pam_gnome_keyring into the greetd PAM stack so the keyring
+# auto-unlocks IF greetd is ever re-enabled. With the active bare-TTY
+# login (postinstall §1f), /etc/pam.d/login does NOT include
+# pam_gnome_keyring — the keyring stays locked until `bwu` (or anything
+# else that hits libsecret) triggers gnome-keyring's own unlock prompt.
+# Keeping this wiring here means the fallback path stays fully
+# functional without further setup.
 log "Wiring gnome-keyring into greetd PAM stack..."
 if [[ -f /etc/pam.d/greetd ]] && ! grep -q pam_gnome_keyring /etc/pam.d/greetd; then
     sed -i '/^auth.*include.*system-login/a auth       optional     pam_gnome_keyring.so' /etc/pam.d/greetd

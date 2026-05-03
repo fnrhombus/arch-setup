@@ -13,8 +13,9 @@ Organized by category so you can skim. Nothing here is install instructions — 
 - **Compositor** — The thing that draws windows on screen under Wayland. Hyprland is a compositor and window manager rolled into one.
 - **Hyprland** — The compositor we chose. Tiling, keyboard-driven, GPU-accelerated effects. You care: *every* GUI session you have will be running in Hyprland.
 - **bare-Hyprland (Claude-authored configs in chezmoi)** — Our dotfile approach. NOT a pre-built pack (no HyDE, no end-4, no Caelestia). Configs at `dot_config/hypr/*` in the [rhombu5/dots](https://github.com/rhombu5/dots) repo are split into fragments (monitors, workspaces, binds, decoration, animations, plugins, exec). You own every line; future "change X" is one prompt to Claude.
-- **greetd** — Tiny daemon that "shows a login UI, then starts the session." Replaces SDDM (~3 MB vs ~21 MB). The UI is delegated to a separate program — we use ReGreet.
-- **ReGreet** — GTK4-based greeter UI launched by greetd. Themed via plain GTK CSS so the matugen palette drops in directly. Fingerprint via the same PAM stack as before.
+- **greetd** — Tiny "show a login UI, then start the session" daemon. **Currently disabled** (postinstall.sh §1f, 2026-04-30) — login is bare TTY → uwsm → Hyprland via `~/.zprofile`. Packages + config stay on disk as a recoverable fallback; re-enable with `sudo systemctl enable --now greetd.service`. See `decisions.md` §D.
+- **ReGreet** — GTK4-based greeter UI that greetd launches. Same disabled-fallback status as greetd above.
+- **uwsm** (Universal Wayland Session Manager) — Wraps a Wayland compositor in a proper systemd `graphical-session.target` lifecycle (env import, dependent-unit activation, clean shutdown). Hyprland itself prints "highly discouraged unless debugging" when launched without a session manager. Invoked from `~/.zprofile` as `uwsm start hyprland-uwsm.desktop` on tty1 login.
 - **SDDM / GDM / LightDM** — Other display managers (KDE / GNOME / XFCE world). We don't use them; ignore.
 
 ## Wayland ecosystem utilities
@@ -131,11 +132,11 @@ Organized by category so you can skim. Nothing here is install instructions — 
 
 ## Authentication / secrets
 
-- **PAM** (Pluggable Authentication Modules) — Linux's auth stack. Login, sudo, greetd, hyprlock all go through `/etc/pam.d/*`. Sudo + hyprlock get PIN → fingerprint(5s) → password (per postinstall.sh §7a). Greeter excludes PIN per design (cold-boot wants full credential).
+- **PAM** (Pluggable Authentication Modules) — Linux's auth stack. TTY login, sudo, hyprlock all go through `/etc/pam.d/*` (greetd's stack is also kept current for the disabled-fallback case). The active user-facing stack is lid-aware: lid OPEN → fprintd primary, lid CLOSED → libpinpam primary, password is the unconditional final fallback (per postinstall.sh §7a).
 - **pinpam / libpinpam.so** — TPM-backed PIN auth module from the AUR `pinpam-git` package. The PAM module name is literally `libpinpam.so` (NOT `pam_pinpam.so`); referencing the wrong name silently dlopen-fails and PAM treats it as a faulty module. PIN itself is set up via `pinutil setup`.
 - **fprintd** / **libfprint** — Fingerprint daemon + library. `fprintd-enroll` to register a finger. Goodix 538C reader on this machine via the AUR `libfprint-goodix-53xc` package.
 - **matugen** — Material You palette generator. Reads a wallpaper, derives a full color palette, renders templates → waybar CSS, Hyprland color vars, Ghostty theme, GTK CSS, Qt color scheme, etc. Templates at `~/.config/matugen/templates/`. Theme switch (dark/light) via `theme-toggle` script.
-- **gnome-keyring** — Secret storage (SSH keys, passwords, browser credentials). Unlocked by your login password (greetd PAM stack auto-starts it).
+- **gnome-keyring** — Secret storage (SSH keys, passwords, browser credentials). Started lazily as a systemd user service / D-Bus activation. NOT auto-unlocked at TTY login (the bare-TTY `/etc/pam.d/login` doesn't include `pam_gnome_keyring.so`); first access — typically `bwu` reading the cached Bitwarden master password — triggers gnome-keyring's own unlock prompt, after which the keyring stays unlocked for the session.
 - **Bitwarden** — Password manager. We use a self-hosted instance. Desktop app can also act as an SSH agent.
 - **SSH agent** — Holds decrypted SSH keys in memory. Bitwarden desktop provides one at `~/.bitwarden-ssh-agent.sock`.
 

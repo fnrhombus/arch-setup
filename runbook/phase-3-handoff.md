@@ -166,7 +166,7 @@ This document is meant to be fed to Claude Code once you're inside Arch Linux. I
 - fprintd + libfprint
 - **Device**: Goodix `27c6:538c` — supported via AUR `libfprint-goodix-53xc` (older Dell OEM blob) on top of `libfprint-tod-git` built with `!lto`. See `docs/decisions.md` requirement list for the rationale. Do NOT swap to `libfprint-2-tod1-goodix` / `-v2` — those ship the 550A-only blob fork.
 - **Post-install**: 5 fingers pre-enrolled by `postinstall.sh` (right-index, left-index, right-middle, left-middle, right-thumb). Use `sudo fprintd-enroll -f <finger> tom` to add more (polkit denies unprivileged enroll from bare TTY).
-- Integrate with: login (greetd), sudo, screen lock (hyprlock)
+- Integrate with: TTY login (`/etc/pam.d/login` — lid-aware: fprintd if open, libpinpam if closed, password fallback), sudo, screen lock (hyprlock). greetd PAM template is also kept current for the disabled-fallback case.
 
 ---
 
@@ -210,7 +210,7 @@ This document is meant to be fed to Claude Code once you're inside Arch Linux. I
 - Cursor: Bibata-Modern-Classic in hyprcursor format (~6.6 MB) + the Xcursor build for Xwayland app fallback.
 - Icons: Papirus-Dark (best app coverage).
 - JetBrains Mono Nerd Font (default), FiraCode also installed.
-- Greeter (greetd + ReGreet): GTK CSS at `/etc/greetd/regreet.css`, rendered by matugen at install time. Live theme-following deferred — re-render manually via `sudo install -m 644 ~/.cache/matugen/regreet.css /etc/greetd/regreet.css && sudo systemctl restart greetd`.
+- Greeter: bare TTY (no display manager). greetd + ReGreet stay installed but disabled (postinstall.sh §1f); their CSS at `/etc/greetd/regreet.css` is still rendered by matugen at install time so the fallback is themed if re-enabled. Re-render after a wallpaper change with `sudo install -m 644 ~/.cache/matugen/regreet.css /etc/greetd/regreet.css`; takes effect next time greetd is enabled.
 
 ---
 
@@ -231,7 +231,7 @@ Everything listed below is installed automatically by the phase-2 + phase-3 scri
 - bluez, bluez-utils, fprintd
 - snapper
 
-(`sddm` removed — greeter is greetd, installed by chroot.sh)
+(`sddm` removed — login is bare TTY. greetd + greetd-regreet are installed by chroot.sh and disabled by postinstall.sh §1f; kept as a recoverable fallback.)
 
 ### Installed by chroot.sh (during arch-chroot)
 - limine, greetd, greetd-regreet, tpm2-tss, tpm2-tools, libsecret, gnome-keyring
@@ -306,7 +306,7 @@ Everything listed below is installed automatically by the phase-2 + phase-3 scri
 6. Git worktree workflow with Claude Code + tmux
 7. Dev environment (Docker, Node, .NET, Python, Jupyter)
 8. Touch gestures + Wacom tablet
-9. Fingerprint auth (greetd, sudo, hyprlock screen lock)
+9. Fingerprint auth (TTY login, sudo, hyprlock screen lock)
 10. Audio (PipeWire + Bluetooth)
 11. Auto-rotation for tablet mode
 12. Clipboard history (cliphist + fuzzel keybind)

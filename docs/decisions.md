@@ -170,11 +170,20 @@
   renders to `~/.config/ghostty/themes/matugen` and SIGUSR2's Ghostty on
   every wallpaper change for live-reload.
 
-#### D) Login screen: greetd + ReGreet
-- Wayland-native, themeable via plain GTK CSS (matugen drops in directly)
-- ~3 MB vs SDDM's ~21 MB; smaller surface area, no Qt
-- Fingerprint integration via the same PAM stack
-- **Switched from SDDM 2026-04-22**: bare-Hyprland reinstall doesn't need Plasma's greeter. SDDM's Qt theme was a separate maintenance surface; ReGreet aligns with the matugen pipeline used everywhere else.
+#### D) Login: bare TTY → uwsm → Hyprland (greetd kept disabled as fallback)
+- Active flow: agetty on tty1 → password/PIN/fingerprint via `/etc/pam.d/login`
+  (lid-aware: fprintd primary if lid open, libpinpam if closed, password
+  fallback) → `~/.zprofile` execs `uwsm start hyprland-uwsm.desktop`.
+- Hyprland gets a proper graphical-session.target lifecycle through uwsm
+  (env import, dependent-unit activation, clean shutdown on logout).
+- greetd + greetd-regreet stay installed and configured, just disabled.
+  Re-enable with `sudo systemctl enable --now greetd.service` if the
+  fallback is ever needed.
+- **Lineage**: SDDM → greetd + ReGreet (2026-04-22, replacing Plasma's
+  greeter to align with the matugen pipeline) → bare TTY (2026-04-30,
+  per postinstall.sh §1f). greetd's slow VT handoff, awkward GTK chrome
+  on a 17" panel, and opaque fprintd failure mode didn't earn the
+  surface area on a single-user laptop where TTY login is plenty.
 
 #### E) Notifications: swaync (SwayNotificationCenter)
 - Wayland-native popup daemon plus a pull-out panel for notification history + DND toggle.

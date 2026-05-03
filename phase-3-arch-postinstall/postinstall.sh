@@ -1958,7 +1958,9 @@ fi
 
 # Ghostty config is matugen-themed via the rhombu5/dots chezmoi tree (§13).
 # greetd-regreet system config is installed by install.sh from
-# phase-3-arch-postinstall/system-files/greetd/. No separate §14 needed.
+# phase-3-arch-postinstall/system-files/greetd/. greetd itself is
+# disabled by §1f — login is bare TTY — but the config + matugen-rendered
+# CSS stay current so the fallback is ready if re-enabled.
 
 # ---------- 16. Snapper: baseline snapshot of / ----------
 # NOTE: install.sh already created the @snapshots subvolume and mounted it at
@@ -2074,7 +2076,7 @@ fi
 if (( SKIP_VERIFY == 1 )); then
     log "Skipping verify (--no-verify). Re-run without the flag for the full sweep."
     echo
-    echo "Log out and back in (or reboot) to start Hyprland via greetd."
+    echo "Log out and back in (or reboot) — agetty on tty1 + ~/.zprofile auto-launches Hyprland via uwsm."
     exit 0
 fi
 echo
@@ -2397,7 +2399,10 @@ cat <<'POSTINSTALL_OUTRO'
   ONE-TIME ACTIONS (only matter the first time you run this)
 ====================================================================
 
-[1] Reboot or log out → log back in via greetd to start Hyprland.
+[1] Reboot or log out → log back in at tty1; ~/.zprofile auto-launches
+    Hyprland via `uwsm start hyprland-uwsm.desktop`. (greetd is installed
+    but disabled per §1f — re-enable with `sudo systemctl enable --now
+    greetd.service` if you want a graphical greeter back.)
 
 [2] Bitwarden first launch — server URL + tray + autostart-off pre-seeded.
     Hyprland's exec-once already started bitwarden-desktop. Log in once

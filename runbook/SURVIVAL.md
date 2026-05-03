@@ -1,6 +1,6 @@
 # SURVIVAL.md — if the desktop is broken
 
-**This is the "get back to Claude" card.** The normal plan is: Claude Code teaches you everything from inside a working Hyprland session. This doc is for the case where that session isn't there — greetd didn't come up, Hyprland crashed, a package broke the GUI, whatever.
+**This is the "get back to Claude" card.** The normal plan is: Claude Code teaches you everything from inside a working Hyprland session. This doc is for the case where that session isn't there — Hyprland didn't come up, the compositor crashed, a package broke the GUI, whatever.
 
 Goal: get to a shell, get online, start Claude, let Claude diagnose.
 
@@ -10,7 +10,7 @@ If you can't boot Arch at all, skip to **§6 — nuclear options**.
 
 ## 1. Get to a text console (TTY)
 
-If you see a black screen, a graphical boot loop, a frozen greetd login, or anything you can't type into:
+If you see a black screen, a graphical boot loop, a Hyprland session you can't get focus to, or anything you can't type into:
 
 - **Press `Ctrl + Alt + F3`** (try F2, F4, F5, F6 if F3 is blank).
 - You should get a plain login prompt:
@@ -116,27 +116,29 @@ Tell Claude what's wrong. It has `CLAUDE.md`, `docs/decisions.md`, `docs/desktop
 
 ## 5. If Claude needs a GUI (browser auth, screenshot, etc.)
 
-From the TTY you can try to restart the graphical stack:
+There's no display manager — login is bare-TTY agetty on tty1 and
+`~/.zprofile` execs `uwsm start hyprland-uwsm.desktop` from there.
+To restart the graphical stack: switch to tty1, log out (if a Hyprland
+session is wedged: `loginctl terminate-session $(loginctl list-sessions --no-legend | awk '$2==1000{print $1; exit}')`),
+then log back in. agetty respawns the login prompt automatically.
 
+To start Hyprland by hand from a different TTY (debugging, no auto-launch):
 ```bash
-sudo systemctl restart greetd       # the usual first try
+# From any TTY (not inside a failed Wayland session):
+uwsm start hyprland-uwsm.desktop    # preferred — proper systemd session
+# Or bare:
+Hyprland                             # works but uwsm warns it's "highly discouraged"
 ```
 
-If greetd won't come up:
+If Hyprland crashes or shows a black screen, read its log:
 ```bash
-journalctl -u greetd -b -n 50       # last 50 lines of greetd's journal this boot
-journalctl --user -u hyprland -b -n 50    # if Hyprland itself is the problem
+journalctl --user -t Hyprland -b -n 100      # uwsm-launched runs land here
+cat ~/.local/share/hyprland/hyprland.log | tail -100   # bare-launched fallback
 ```
 
-To bypass greetd entirely and start Hyprland by hand:
+If greetd was re-enabled at some point and is now in the way:
 ```bash
-# From a TTY, not from inside a failed Wayland session:
-Hyprland
-```
-
-If Hyprland crashes or shows a black screen, read its own log:
-```bash
-cat ~/.local/share/hyprland/hyprland.log | tail -100
+sudo systemctl disable --now greetd.service  # back to bare TTY
 ```
 
 ## 6. Nuclear options
@@ -206,7 +208,7 @@ You'll have these even from a naked TTY:
 | `nmcli` / `nmtui` | NetworkManager CLI + TUI — the primary way to manage Wi-Fi and Ethernet |
 | `iwctl`    | `iwd` client — fallback if NetworkManager is broken (stop NM first) |
 | `journalctl` | Read systemd logs |
-| `systemctl` | Start/stop/restart services (greetd, NetworkManager, etc.) |
+| `systemctl` | Start/stop/restart services (NetworkManager, bluetooth, etc.) |
 | `claude`   | Claude Code |
 | `helix` / `hx` | Terminal editor |
 | `tmux`     | Sessions / splits in a single TTY |
