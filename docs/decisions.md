@@ -68,7 +68,7 @@
 - **Hyprland** — eye-candy king, GPU-accelerated animations, blur, rounding.
 - **Dotfiles: bare Hyprland + Claude-authored configs in chezmoi.** No
   pre-built dotfile pack (HyDE, end-4/illogical-impulse, Caelestia, Omarchy
-  all rejected — see `docs/reinstall-planning.md` for the comparison).
+  all rejected).
   - Why not a pack: the user doesn't enjoy config tweaking, but is fine with
     Claude doing it. Once Claude becomes the editor, opinionated packs lose
     their value (saved-time argument evaporates) and add cost (you don't own
@@ -157,7 +157,7 @@
 - **Switched from systemd-boot 2026-04-22**: snapshot-rollback wasn't
   available without a chroot dance, and `limine-snapper-sync` is the cleanest
   way in. systemd-boot is the boring-but-fine fallback if limine ever proves
-  problematic — see `docs/reinstall-planning.md` for the swap rationale.
+  problematic.
 
 #### B) AUR helper: yay
 - Less strict about PKGBUILD review prompts, better fit for user who won't read them
@@ -205,7 +205,7 @@
 - Palette generated dynamically from the current wallpaper.
 - Templates render: Hyprland colors, waybar CSS, swaync CSS, ReGreet CSS, Ghostty, GTK (3 + 4 CSS), Qt (qt5ct/qt6ct), fuzzel, helix, hyprlock, yazi, zathura, tmux. See `dot_config/matugen/config.toml` in [rhombu5/dots](https://github.com/rhombu5/dots) for the full list.
 - Master dark/light switch via `~/.local/bin/theme-toggle` — three entry points: Super+Shift+T hotkey, waybar sun/moon icon, fuzzel control-panel entry.
-- **Switched from Catppuccin Mocha 2026-04-22**: Catppuccin was a default-of-the-day pick, never load-bearing. The user wanted dynamic accent from wallpaper + an easy dark/light master switch — matugen delivers both natively. The script-implementation pass was completed 2026-04-23: scripts, dotfiles, and verify checks no longer reference Catppuccin anywhere (legacy mentions in `runbook/GLOSSARY.md`, this document, and `docs/reinstall-planning.md` are intentional history).
+- **Switched from Catppuccin Mocha 2026-04-22**: Catppuccin was a default-of-the-day pick, never load-bearing. The user wanted dynamic accent from wallpaper + an easy dark/light master switch — matugen delivers both natively. The script-implementation pass was completed 2026-04-23: scripts, dotfiles, and verify checks no longer reference Catppuccin anywhere (legacy mentions in `runbook/GLOSSARY.md` and this document are intentional history).
 
 #### L) Dotfiles: chezmoi
 - Template-based, git-backed, Bitwarden integration for secrets (self-hosted Vaultwarden at `https://hass4150.duckdns.org:7277`).

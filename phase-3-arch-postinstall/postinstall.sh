@@ -967,8 +967,7 @@ else
 fi
 
 # ---------- 7a. PAM stacks for sudo / hyprlock / greetd ----------
-# Three surfaces — see docs/reinstall-planning.md §5.
-# greetd: PIN intentionally excluded (cold-boot wants full credential
+# Three surfaces. greetd: PIN intentionally excluded (cold-boot wants full credential
 # per the Windows Hello pattern). chroot.sh installs the canonical
 # template from phase-3-arch-postinstall/system-files/pam.d/greetd at
 # install time; we re-stomp it here on every postinstall run so any

@@ -255,7 +255,7 @@ mkinitcpio -P
 # limine chosen for: snapshot-rollback boot menu via limine-snapper-sync
 # (matches our btrfs+snapper setup), bootable-ISO-from-disk support
 # (Netac recovery partition becomes reachable), modern actively-developed
-# bootloader. Decision: docs/decisions.md §A + reinstall-planning.md §3.
+# bootloader. Decision: docs/decisions.md §A.
 #
 # Phase 2 installs limine itself; phase-3 postinstall installs the AUR
 # limine-snapper-sync package + enables its hook for auto-regenerating

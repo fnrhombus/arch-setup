@@ -349,8 +349,8 @@ in [rhombu5/dots](https://github.com/rhombu5/dots).
 The Catppuccin → matugen sweep across scripts and verify checks was
 completed in commits `5edfb04` + `2d52f61`. Surviving Catppuccin mentions
 are intentional history (`docs/decisions.md` §Q-K "Switched from",
-`runbook/GLOSSARY.md` "older fixed palette" entry, `docs/reinstall-planning.md`
-historical memo). SDDM was replaced by greetd + ReGreet in the same pass.
+`runbook/GLOSSARY.md` "older fixed palette" entry). SDDM was replaced by
+greetd + ReGreet in the same pass.
 
 ## Carried 2-in-1 packages (still required)
 
