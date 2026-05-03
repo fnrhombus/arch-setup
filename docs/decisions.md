@@ -92,10 +92,11 @@
 - DisplayLink video issues are display-only; hub/ethernet work natively on Linux
 
 ### Q5: NVIDIA
-- **Intel UHD 620 only** — blacklist NVIDIA + nouveau modules, effectively disabling the MX250.
-- **Why not use the MX250?** It only works with the legacy `nvidia-470xx` driver branch. That branch never gained GBM support, so no Wayland compositor (Hyprland included) can run on it; the newer `nvidia` branch dropped MX250 support entirely. Choosing Wayland ≡ choosing Intel-only.
+- **Display: Intel UHD 620 only** — `nvidia_drm` and `nvidia_modeset` are blacklisted in `chroot.sh`. The MX250 can't drive Wayland (legacy `nvidia-470xx` lacks GBM; newer `nvidia` branch dropped MX250 support). Hyprland and everything that composites runs on the iGPU.
+- **Compute: MX250 available on demand** — `nvidia` and `nvidia_uvm` kernel modules are NOT blacklisted; they autoload when something opens `/dev/nvidia*` (`nvidia-smi`, a CUDA app, or Docker via nvidia-container-toolkit). Postinstall §3 installs `nvidia-470xx-dkms` + `nvidia-470xx-utils`; §1a-nvctk wires it into Docker. See R) and S) below.
+- **nouveau**: blacklisted entirely (would conflict with `nvidia-470xx`).
 - **External monitor still works**: the laptop's HDMI port is wired to the Intel iGPU, not the NVIDIA chip — no Optimus render-bridge needed.
-- **Side benefits**: longer runtime (the MX250 idles at ~0.5 W but its driver keeps the chip awake), no DKMS / signed-module churn on kernel upgrades.
+- **Side benefits**: nvidia kernel module stays unloaded when nothing's using CUDA — the chip idles cold; no DKMS / signed-module churn on kernel upgrades for display.
 
 ### Q6: Editor & IDE
 - **VSCode** (`visual-studio-code-bin` from AUR) — primary IDE, familiar, productive day one
@@ -253,6 +254,26 @@ and accepted on the "clean-slate, no bias" principle. See
 #### P) Installer password handoff: pre-hashed via mode-600 file
 - `phase-2-arch-install/install.sh` reads the root + `tom` passwords once at the top of the run, hashes them immediately with `openssl passwd -6` (SHA-512), and hands the hashes to `chroot.sh` via a mode-600 file under `/mnt/tmp/`. The plaintext values never touch disk.
 - **Caveat**: while the installer is still running, the `openssl passwd` invocation does briefly appear in `ps` (as the process argument) on the live ISO. The live environment is single-user and ephemeral, so this is acceptable — but don't run the installer on a shared/networked machine. After chroot finishes, the hash file is deleted and only the hashed values remain in `/etc/shadow`.
+
+#### R) Windows VM: dockur/windows on Docker + WinApps
+- **Why a VM**: occasional Windows-only apps (primarily Visual Studio Enterprise) surfaced as Coherence-style native Hyprland windows via WinApps + FreeRDP — they feel like Linux apps in Fuzzel + the taskbar.
+- **Orchestrator: dockur/windows on Docker (chosen 2026-05-02)**. Reasons:
+  - Declarative `compose.yaml` reproduces the entire VM on reinstall — no virt-manager point-and-click recipe to remember.
+  - Unattended Windows install (~15-30 min hands-off, ISO downloaded from Microsoft, OEM `install.bat` winget-installs VS 2022 Enterprise IDE).
+  - Docker is already installed for cloud-storage sync, so the VM is a free rider rather than a new subsystem (libvirt would have added qemu-full + virt-manager + libvirt + edk2-ovmf + swtpm + dnsmasq + a daemon).
+- **Why not libvirt+QEMU**: it was the original pick when 3DF Zephyr photogrammetry was on the table (would need PCI passthrough into a Windows guest). Photogrammetry was dropped 2026-05-02; without it, libvirt's strengths (PCI passthrough, fine-grained QEMU control) don't pay off for a single VS-in-Coherence use case.
+- **Tradeoff accepted**: dockur/windows is a third-party orchestration project (one GitHub repo). If it goes dormant or breaks against a future Windows ISO, migration to libvirt is straightforward — the compose file translates directly into a libvirt domain XML.
+- **Implementation**:
+  - Compose at `/etc/dockur-windows/compose.yaml` (Win11, RAM 8G, 4 vCPU, 128G disk; RDP bound to 127.0.0.1:3389 only — not LAN-reachable; web UI for direct VM display at `http://127.0.0.1:8006/`).
+  - OEM at `/etc/dockur-windows/oem/install.bat` winget-installs VS 2022 Enterprise IDE on first boot. Workloads (C++, .NET, etc.) deliberately not auto-installed — pick via VS Installer GUI on first launch to avoid multi-GB downloads on every reinstall. Enterprise activation: MSDN/VS subscription sign-in on first launch.
+  - WinApps cloned to `/opt/winapps`, setup script symlinked onto PATH as `winapps-setup`, `WAFLAVOR=docker` written to `~/.config/winapps/winapps.conf`.
+  - Postinstall §15-windows blocks on `docker compose up -d` + `health=healthy` (~15-30 min on first run, fast on re-runs). Skippable via `--skip-windows-install`.
+
+#### S) NVIDIA Container Toolkit: GPU containers via Docker
+- **Why**: `nvidia-container-toolkit` (extra) wires the host nvidia-470xx driver into Docker so Linux containers can `docker run --gpus all ...` against the MX250 — useful for ML/CUDA experiments without polluting the host with version-pinned Python/CUDA stacks.
+- **Configured by**: `nvidia-ctk runtime configure --runtime=docker` in postinstall §1a-nvctk. Writes `/etc/docker/daemon.json` registering `"nvidia"` as a Docker runtime; daemon restart only fires when the file's hash actually changed (idempotent).
+- **Pascal/CUDA caveat**: the MX250 is Pascal (compute capability 6.1). CUDA-12 container images compile out Pascal kernels and run CPU-only — pick CUDA ≤11.x base images (e.g. `nvidia/cuda:11.8.0-*`, `pytorch/pytorch:1.13.x-cuda11.x`) for actual GPU acceleration.
+- **Doesn't help the Windows VM**: GPU containers are Linux-side. Giving the dockur Windows guest real NVIDIA access would need PCI passthrough (host GPU dedicated to guest), which Optimus laptops resist; deliberately not in scope.
 
 ### Q13: bare-Hyprland config layout
 
