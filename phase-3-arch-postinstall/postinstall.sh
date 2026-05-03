@@ -436,6 +436,7 @@ AUR_PACKAGES=(
     iio-hyprland-git
     powershell-bin
     awww-bin
+    hyprlax-bin
     matugen-bin
     overskride
     wleave
