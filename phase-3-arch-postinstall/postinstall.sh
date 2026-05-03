@@ -818,33 +818,20 @@ if [[ -z "${SKIP_FPRINT:-}" ]]; then
 fi
 
 # Pre-install correct driver for known-mapped Goodix PIDs so the enroll-below
-# succeeds first try. 538C → libfprint-goodix-53xc (older Dell blob via TOD).
-# libfprint-tod-git fails to build with LTO (strips ABI symbol versioning),
-# so we pre-build it with !lto before letting yay pull it as a dep.
+# succeeds first try. 538C → libfprint-goodix-53xc (older Dell blob via TOD),
+# which declares Depends On: libfprint-tod (the released AUR pkg, NOT -git —
+# an earlier revision of this script tried to pre-build libfprint-tod-git
+# from AUR, but that PKGBUILD has a chronic LTO / symbol-versioning failure
+# and the released libfprint-tod is what goodix-53xc actually wants). The
+# released libfprint-tod replaces stock libfprint, so we pull stock first
+# to keep yay from prompting under --noconfirm.
 if [[ -z "${SKIP_FPRINT:-}" ]] && command -v lsusb >/dev/null && lsusb | grep -qi '27c6:538c'; then
-    # Skip the libfprint-tod-git build path entirely if fingerprints are
-    # already enrolled — that means stock libfprint already supports the
-    # reader and we'd just be wasting cycles on a build that fails (the
-    # libfprint-tod-git PKGBUILD has a recurring 'no symbol version
-    # section for versioned symbol' linker error against current stock
-    # libfprint, and the fallback isn't needed when stock works).
     if command -v fprintd-list >/dev/null && sudo fprintd-list tom 2>/dev/null | grep -qi 'finger'; then
-        log "Goodix 538C detected, but fingerprints already enrolled via stock libfprint — skipping libfprint-tod-git fallback."
+        log "Goodix 538C detected, fingerprints already enrolled — skipping driver swap."
     else
-        log "Goodix 538C detected — installing libfprint-goodix-53xc (older Dell blob via TOD)..."
-        if ! pacman -Q libfprint-tod-git >/dev/null 2>&1; then
-            # libfprint-tod-git replaces stock libfprint; pull stock first.
-            if pacman -Q libfprint >/dev/null 2>&1; then
-                sudo pacman -Rdd --noconfirm libfprint || warn "Could not remove stock libfprint."
-            fi
-            tmpd=$(mktemp -d) && (
-                cd "$tmpd" \
-                && yay -G libfprint-tod-git \
-                && cd libfprint-tod-git \
-                && sed -i 's|^options=(|options=(!lto |' PKGBUILD \
-                && makepkg -si --noconfirm
-            ) || warn "libfprint-tod-git build failed — fingerprint will not work."
-            rm -rf "$tmpd"
+        log "Goodix 538C detected — installing libfprint-goodix-53xc (depends on libfprint-tod)..."
+        if pacman -Q libfprint >/dev/null 2>&1 && ! pacman -Q libfprint-tod >/dev/null 2>&1; then
+            sudo pacman -Rdd --noconfirm libfprint || warn "Could not remove stock libfprint."
         fi
         retry_soft yay -S --noconfirm --needed libfprint-goodix-53xc || \
             warn "libfprint-goodix-53xc install failed — see AUR comments."
@@ -894,10 +881,10 @@ if [[ -z "${SKIP_FPRINT:-}" ]]; then
             echo "Reader vendor unknown/unrecognized — stock libfprint may still work with a retry,"
             echo "or your reader may be newer than the packaged libfprint."
         fi
-        # If libfprint-tod-git is already in (e.g. 538C path above), libfprint-git
+        # If libfprint-tod is already in (e.g. 538C path above), libfprint-git
         # would conflict — skip the fallback and surface a manual diagnostic hint.
-        if pacman -Q libfprint-tod-git >/dev/null 2>&1; then
-            warn "libfprint-tod-git is installed (Goodix-specific path) — skipping libfprint-git fallback."
+        if pacman -Q libfprint-tod >/dev/null 2>&1; then
+            warn "libfprint-tod is installed (Goodix-specific path) — skipping libfprint-git fallback."
             warn "Check: journalctl -u fprintd -n 50; lsusb | grep 27c6; ls /usr/lib/libfprint-2/tod-1/"
         else
             log "Falling back to libfprint-git from AUR (covers newer PIDs for all vendors)..."
