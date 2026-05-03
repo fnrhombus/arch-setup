@@ -336,9 +336,9 @@ DOCKUREOF
 #                   policy, privacy/consumer-features off, Defender
 #                   fully disabled — services + Group Policy + scheduled
 #                   tasks + SmartScreen + Set-MpPreference), HKU\.DEFAULT
-#                   sticky keys off, CapsLock disabled, Default-user-hive
-#                   defaults (so accounts created from Default inherit
-#                   them), RunOnce registration for UserOnce.ps1.
+#                   sticky keys off, Default-user-hive defaults (so
+#                   accounts created from Default inherit them), RunOnce
+#                   registration for UserOnce.ps1.
 #   debloat.ps1   — invoked by setup.cmd; removes consumer AppX
 #                   provisioned packages (Bing/Maps/Xbox/etc.),
 #                   Print.Fax.Scan capability, and Recall feature
@@ -455,9 +455,6 @@ reg.exe add "HKU\.DEFAULT\Control Panel\Accessibility\StickyKeys" /v Flags /t RE
 
 REM ----- Drop "Authenticated Users" write access from C:\ root (single-user VM hardening) -----
 icacls.exe C:\ /remove:g "*S-1-5-11"
-
-REM ----- Disable CapsLock (scancode map: map CapsLock -> nothing) -----
-reg.exe add "HKLM\SYSTEM\CurrentControlSet\Control\Keyboard Layout" /v "Scancode Map" /t REG_BINARY /d "00000000000000000200000000003A0000000000" /f
 
 REM ============================================================================
 REM Default user hive — defaults inherited by accounts created from Default.
@@ -2464,12 +2461,11 @@ cat <<'POSTINSTALL_OUTRO'
                             consumer-features off, Edge OOBE skipped,
                             Defender fully disabled (services + Group
                             Policy + scheduled tasks + SmartScreen +
-                            Set-MpPreference), sticky keys off, CapsLock
-                            disabled, Default-user-hive defaults (show
-                            file ext, hide TaskView, taskbar align left,
-                            NumLock on, mouse accel off, no Content-
-                            DeliveryManager promos), RunOnce registered
-                            for UserOnce.ps1
+                            Set-MpPreference), sticky keys off, Default-
+                            user-hive defaults (show file ext, hide
+                            TaskView, taskbar align left, NumLock on,
+                            mouse accel off, no ContentDeliveryManager
+                            promos), RunOnce registered for UserOnce.ps1
             debloat.ps1   — removes consumer AppX (Bing/Maps/Xbox/etc.),
                             Print.Fax.Scan, and Recall feature
             UserOnce.ps1  — fires at first logon: Explorer→ThisPC, hide
