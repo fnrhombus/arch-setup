@@ -163,7 +163,7 @@ log "Installing pacman packages from official repos..."
 sudo pacman -Syu --noconfirm --needed \
     --overwrite '/boot/memtest86+/*' \
     base-devel git curl wget openssh \
-    inetutils \
+    inetutils bind \
     zsh tmux helix \
     bat fd ripgrep eza lsd btop jq fzf zoxide direnv \
     sd go-yq xh \
