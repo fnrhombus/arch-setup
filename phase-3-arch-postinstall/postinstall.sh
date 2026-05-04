@@ -29,8 +29,11 @@
 #     is authored by the user via `p10k configure` on first shell launch —
 #     no pre-shipped ~/.p10k.zsh.
 #   - chezmoi init --apply rhombu5/dots — clones the dots repo into
-#     ~/.local/share/chezmoi and writes the bare Hyprland configs (split
-#     fragments), waybar, swaync, fuzzel, ghostty, yazi, helix, qt5/6ct,
+#     ~/src/dots@rhombu5 (sourceDir override via
+#     ~/.config/chezmoi/chezmoi.toml; matches the user prefs convention
+#     of `{repo}@{user}` under ~/src/ for github clones the user
+#     edits) and writes the bare Hyprland configs (split fragments),
+#     waybar, swaync, fuzzel, ghostty, yazi, helix, qt5/6ct,
 #     matugen pipeline + templates, helper scripts.
 #   - 2-in-1 touch: iio-sensor-proxy / iio-hyprland (rotation), wvkbd (OSK),
 #     libwacom (Wacom AES stylus)
@@ -1871,10 +1874,15 @@ _POSTINSTALL_NONINTERACTIVE=1 zsh -i -c 'echo zgenom warmup complete' 2>/dev/nul
 # from a matugen-rendered template. See dot_config/matugen/config.toml in
 # the dots repo.
 #
-# `chezmoi init --apply` clones the repo into ~/.local/share/chezmoi and
-# applies in one step. Idempotent: a second run is a no-op when source
+# `chezmoi init --apply` clones the repo into the configured sourceDir
+# and applies in one step. Idempotent: a second run is a no-op when source
 # matches dest. Requires network — we assume it's up by §13 (the user
 # connected via iwctl in §0, and pacman/yay in earlier sections proved it).
+#
+# sourceDir override: chezmoi's default is ~/.local/share/chezmoi (XDG
+# data home). User prefs lock github clones at ~/src/{repo}@{user}, so
+# we write a chezmoi.toml that points sourceDir there BEFORE invoking
+# `chezmoi init` — chezmoi reads the config first, then clones.
 #
 # Clone over HTTPS so the bootstrap doesn't depend on Bitwarden being
 # unlocked yet (postinstall runs from a TTY before Hyprland comes up;
@@ -1883,20 +1891,27 @@ _POSTINSTALL_NONINTERACTIVE=1 zsh -i -c 'echo zgenom warmup complete' 2>/dev/nul
 # from a logged-in Hyprland session with Bitwarden unlocked) just work.
 DOTS_REPO_HTTPS="https://github.com/rhombu5/dots.git"
 DOTS_REPO_SSH="git@github.com:rhombu5/dots.git"
-DOTS_SRC="$HOME/.local/share/chezmoi"
+DOTS_SRC="$HOME/src/dots@rhombu5"
+
+# chezmoi.toml: pin sourceDir before any chezmoi invocation. Idempotent —
+# overwrites with the same content on re-run.
+mkdir -p "$HOME/.config/chezmoi" "$(dirname "$DOTS_SRC")"
+cat > "$HOME/.config/chezmoi/chezmoi.toml" <<EOF
+sourceDir = "$DOTS_SRC"
+EOF
 
 if ! command -v chezmoi >/dev/null; then
     warn "chezmoi not installed — was it dropped from §1 pacman list?"
     warn "  Skipping dotfile apply — Hyprland will start with empty config."
 elif [[ -d "$DOTS_SRC/.git" ]]; then
-    log "chezmoi source already present at ~/.local/share/chezmoi — pulling + applying..."
+    log "chezmoi source already present at $DOTS_SRC — pulling + applying..."
     git -C "$DOTS_SRC" remote set-url origin "$DOTS_REPO_SSH"
     git -C "$DOTS_SRC" pull --ff-only \
         || warn "git pull on chezmoi source failed — applying current checkout."
     chezmoi apply --force \
         || warn "chezmoi apply reported issues — check 'chezmoi status' and 'chezmoi diff'."
 else
-    log "Cloning rhombu5/dots into ~/.local/share/chezmoi and applying..."
+    log "Cloning rhombu5/dots into $DOTS_SRC and applying..."
     if chezmoi init --apply "$DOTS_REPO_HTTPS"; then
         git -C "$DOTS_SRC" remote set-url origin "$DOTS_REPO_SSH"
     else
