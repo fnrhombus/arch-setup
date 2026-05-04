@@ -3,3 +3,8 @@
 - [bw CLI libsecret integration](feedback_bw_cli_libsecret.md) — bwu/bw shell functions; one-time master-password seed → silent forever; same trust model as desktop "Unlock with system authentication".
 - [/etc/adjtime must be UTC](project_rtc_must_be_utc.md) — single-OS, no Windows. LOCAL setting from old dual-boot plan caused 4-hour skew that broke JWT/Azure/cert flows on 2026-04-30.
 - [wpws (per-workspace wallpaper + accent)](project_wpws.md) — Python daemon in dots, designed for extraction to its own repo. Slow path = matugen; fast path = wpws's own PIL extractor.
+- [Choice options need depth + hidden constraints](feedback_choice_options_depth.md) — AskUserQuestion: surface likely-hidden constraints (cost/license/maturity) and use `preview` for comparative depth on technical choices.
+- [No live "sanity checks" for action scripts](feedback_no_live_destructive_sanity_checks.md) — invoking a side-effecting script with real args IS the action; ask first or limit to `--help` / no-arg usage error.
+- [Revisit hard monitor-binding for workspaces 1-9](project_revisit_workspace_monitor_binding.md) — user dislikes hard DP-1/eDP-1 binding (2026-05-04); wait for them to bring it up, then surface free-roaming vs soft-bound vs preset options.
+- [Inspiron 7786 HDMI port doesn't wire CEC](project_inspiron_hdmi_cec_dead.md) — exhaustively tested 2026-05-04 with 5 cables; skip CEC, use network presence (TV at 192.168.1.98) instead.
+- [Atomic shared-lib install](feedback_shared_lib_install_atomic.md) — never `cp` over a live `/usr/lib/*.so`; use `install` or `mv` to get a new inode. Observed 2026-05-04 with aquamarine causing GPF in ld.so. Also: clean up `.bak` files in /usr/lib immediately, ldconfig will pick them up.
