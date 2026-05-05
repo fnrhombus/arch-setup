@@ -10,3 +10,4 @@
 - [Revisit hard monitor-binding for workspaces 1-9](project_revisit_workspace_monitor_binding.md) — user dislikes hard DP-1/eDP-1 binding (2026-05-04); wait for them to bring it up, then surface free-roaming vs soft-bound vs preset options.
 - [Inspiron 7786 HDMI port doesn't wire CEC](project_inspiron_hdmi_cec_dead.md) — exhaustively tested 2026-05-04 with 5 cables; skip CEC, use network presence (TV at 192.168.1.98) instead.
 - [Atomic shared-lib install](feedback_shared_lib_install_atomic.md) — never `cp` over a live `/usr/lib/*.so`; use `install` or `mv` to get a new inode. Observed 2026-05-04 with aquamarine causing GPF in ld.so. Also: clean up `.bak` files in /usr/lib immediately, ldconfig will pick them up.
+- [greetd is dead tech](project_greetd_not_in_use.md) — 2026-05-05: greetd no longer in use, not even as fallback. Don't reference in new design / docs / comments. Infra left inert until user asks for full purge.
