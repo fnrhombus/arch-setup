@@ -42,8 +42,11 @@ physical scanout pixels) as if they were logical:
 + viewport destination) and `glViewport` in `src/core/render_core.c`.
 At scale=1 the multiplications are no-ops, which is why the laptop
 display was fine. As a workaround we built a patched binary from our
-fork and dropped it at `~/.local/bin/hyprlax`, which PATH puts ahead
-of the AUR `hyprlax-bin` at `/usr/bin/hyprlax`.
+fork and dropped it at `/usr/local/bin/hyprlax`, which is on the
+systemd user-session PATH (~/.local/bin is NOT — Hyprland is launched
+under uwsm via a systemd user target, which doesn't inherit interactive
+shell PATH). `/usr/local/bin` resolves before `/usr/bin/hyprlax` so the
+patched build wins.
 
 **Upstream tracker.** [sandwichfarm/hyprlax#87](https://github.com/sandwichfarm/hyprlax/issues/87) (issue) and [sandwichfarm/hyprlax#88](https://github.com/sandwichfarm/hyprlax/pull/88) (PR from `fnrhombus/hyprlax fix/fractional-scale-overzoom`).
 
@@ -54,10 +57,14 @@ of the AUR `hyprlax-bin` at `/usr/bin/hyprlax`.
 > the merged fix. Also check that the merged commit's diff actually
 > matches what we shipped — they may have rewritten it. When the
 > fixed version is in AUR and installed, remove
-> `~/.local/bin/hyprlax` (so PATH falls through to the upstream
-> build) and `which hyprlax` should resolve to `/usr/bin/hyprlax`.
+> `/usr/local/bin/hyprlax` (so PATH falls through to the upstream
+> build) and `which hyprlax` should resolve to `/usr/bin/hyprlax`
+> under the systemd user PATH.
 > If still unmerged, ping me with a one-line status.
 
-**Files / paths to clean up when fixed:** `rm ~/.local/bin/hyprlax`,
-then `which hyprlax` should print `/usr/bin/hyprlax`. Also delete
-`~/src/hyprlax@fnrhombus` if you don't want the fork checkout around.
+**Files / paths to clean up when fixed:**
+`sudo rm /usr/local/bin/hyprlax`, then under the systemd user PATH
+`which hyprlax` should print `/usr/bin/hyprlax`. Also delete
+`~/.local/bin/hyprlax` if it's still around (an earlier install attempt
+dropped a copy there) and `~/src/hyprlax@fnrhombus` if you don't want
+the fork checkout around.
