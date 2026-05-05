@@ -68,3 +68,84 @@ patched build wins.
 `~/.local/bin/hyprlax` if it's still around (an earlier install attempt
 dropped a copy there) and `~/src/hyprlax@fnrhombus` if you don't want
 the fork checkout around.
+
+## 3. libpinpam fork (try_first_pass / use_first_pass) — file upstream PR
+
+**Background.** [RazeLighter777/pinpam](https://github.com/RazeLighter777/pinpam)'s
+`libpinpam.so` (AUR `pinpam-git`) ignores PAM module argv entirely and
+always prompts via the conv function. To slot it between
+`pam_fprintd_grosshack` and `pam_unix` in the concurrent fingerprint+PIN+
+password stack (postinstall.sh §7a), it must honor `try_first_pass` /
+`use_first_pass` so it reads `PAM_AUTHTOK` from the prior module
+instead of re-prompting. We carry an 84-line patch on the
+[`fnrhombus/pinpam@try-first-pass`](https://github.com/fnrhombus/pinpam/tree/try-first-pass)
+branch (commit `9b5f364`) and ship it as the `pinpam-fnrhombus`
+package built from
+`phase-3-arch-postinstall/aur-overrides/pinpam-fnrhombus/PKGBUILD`.
+
+**Upstream tracker.** PR not yet filed (we wanted to validate end-to-end
+on the live system first; confirmed working 2026-05-05). File at
+[RazeLighter777/pinpam](https://github.com/RazeLighter777/pinpam) when
+ready — branch from `dev` per their README. Upstream is active (last
+push 2026-03-02; recent third-party MRs merged within 2-4 days).
+
+**Schedule prompt to give Claude:**
+
+> `/schedule` a monthly agent: `gh pr list -R RazeLighter777/pinpam
+> --search "try_first_pass OR use_first_pass" --state all`. If a PR
+> with that subject is merged AND the merge commit is on `master` (or
+> the AUR `pinpam-git` PKGBUILD's `_commit` advances past the merge):
+> open a PR against arch-setup that deletes
+> `phase-3-arch-postinstall/aur-overrides/pinpam-fnrhombus/`, restores
+> `pinpam-git` to `AUR_PACKAGES` in postinstall.sh §3, removes the
+> `pinpam-fnrhombus` entry from the §3-overrides loop, updates the
+> verify checks (`pinpam-fnrhombus pkg` → `pinpam-git`), and updates
+> the GLOSSARY.md entry. Ping me with the PR link.
+
+**Files / paths to clean up when fixed:**
+- Delete `phase-3-arch-postinstall/aur-overrides/pinpam-fnrhombus/`
+- `phase-3-arch-postinstall/postinstall.sh` §3: replace the `pinpam-git`
+  comment block with the package re-added to `AUR_PACKAGES`; remove
+  `pinpam-fnrhombus` from the §3-overrides loop
+- `phase-3-arch-postinstall/postinstall.sh` verify: replace
+  `pinpam-fnrhombus pkg` check with `pinpam-git`
+- `runbook/GLOSSARY.md`: revert the pinpam entry to reference upstream
+- Delete `~/src/pinpam@fnrhombus` if you don't want the fork checkout
+- Delete this entry
+
+## 4. pam-fprint-grosshack fork (per-call SIGUSR1 reset) — carry indefinitely
+
+**Background.** [gitlab.com/mishakmak/pam-fprint-grosshack](https://gitlab.com/mishakmak/pam-fprint-grosshack)'s
+`pam_fprintd_grosshack.so` uses a static SIGUSR1 flag that's never
+reset between auth attempts. Within a single sudo process's retry
+loop, the second `pam_authenticate` call sees the leftover flag,
+`do_verify` shortcuts, the prompt-pthread is cancelled mid-`pam_prompt`,
+echo-off never engages, and partial typed input leaks (visibly) into
+the next stack module's prompt. We carry a 1-line sed patch in
+`phase-3-arch-postinstall/aur-overrides/pam-fprint-grosshack-fnrhombus/PKGBUILD`'s
+`prepare()` that inserts `has_recieved_sigusr1 = false;` before the
+`signal (SIGUSR1, ...)` call in `do_auth`, and ship the result as the
+`pam-fprint-grosshack-fnrhombus` package.
+
+**Upstream tracker.** Effectively abandoned: last commit 2022-07-27,
+last accepted MR same date, four open issues with no maintainer
+response since (most recent 2025-03-15). MR filing is a courtesy
+with near-zero merge probability.
+
+**Schedule prompt to give Claude:**
+
+> `/schedule` a yearly agent: query
+> `https://gitlab.com/api/v4/projects/mishakmak%2Fpam-fprint-grosshack/repository/commits?per_page=5`
+> and the merge requests endpoint. If activity is past 2026-05-05,
+> file an MR with the `has_recieved_sigusr1 = false;` reset patch
+> and ping me. If still abandoned, no action — just confirm status.
+
+**Files / paths to clean up when (unlikely) fixed:**
+- Delete `phase-3-arch-postinstall/aur-overrides/pam-fprint-grosshack-fnrhombus/`
+- `phase-3-arch-postinstall/postinstall.sh` §3: replace the
+  `pam-fprint-grosshack-fnrhombus` entry in §3-overrides with
+  `pam-fprint-grosshack` added to `AUR_PACKAGES`
+- `phase-3-arch-postinstall/postinstall.sh` verify: replace
+  `grosshack-fnrhombus pkg` check with `pam-fprint-grosshack`
+- `runbook/GLOSSARY.md`: revert the grosshack entry to reference upstream
+- Delete this entry
