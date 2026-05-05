@@ -171,10 +171,14 @@
   every wallpaper change for live-reload.
 
 #### D) Login: bare TTY → uwsm → Hyprland (greetd kept disabled as fallback)
-- Active flow: agetty on tty1 → password/PIN/fingerprint via `/etc/pam.d/login`
-  (concurrent stack: `pam_fprintd_grosshack` races finger vs typed input;
-  `libpinpam` tests typed value as PIN; `pam_unix` tests it as password)
-  → `~/.zprofile` execs `uwsm start hyprland-uwsm.desktop`.
+- Active flow: agetty on tty1 → fingerprint/password via `/etc/pam.d/login`
+  (cold-boot: `pam_fprintd_grosshack` races finger vs typed input;
+  `pam_unix` tests typed value as password; **PIN is NOT a login factor
+  by design** — `libpinpam` is excluded at this surface) → `~/.zprofile`
+  execs `uwsm start hyprland-uwsm.desktop`.
+- PIN is available at the in-session re-auth surfaces (sudo, hyprlock,
+  polkit-1) where the full concurrent stack runs (`pam_fprintd_grosshack`
+  + `libpinpam` + `pam_unix`).
 - Hyprland gets a proper graphical-session.target lifecycle through uwsm
   (env import, dependent-unit activation, clean shutdown on logout).
 - greetd + greetd-regreet stay installed and configured, just disabled.

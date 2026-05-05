@@ -1418,11 +1418,12 @@ fi
 #   Wrong typed     → libpinpam silent-fall-through; pam_unix tries and
 #                    fails → standard sudo 3-retry loop.
 #
-# Same stack across sudo / hyprlock / polkit-1 / login (any auth surface
-# the user hits day-to-day). Only greetd is different — it uses its own
-# template at system-files/pam.d/greetd because cold-boot wants password-
-# or-fingerprint without depending on TPM (per Windows Hello pattern).
-# greetd is currently disabled (§1f); template stays in case of revival.
+
+# Stack split across surfaces:
+#   sudo / hyprlock / polkit-1 — full concurrent stack (finger + PIN + password).
+#                                These are in-session re-auth; PIN is fine.
+#   login (TTY)                — finger + password ONLY; libpinpam excluded
+#                                by design. Cold-boot is not a PIN surface.
 #
 # Why not lid-aware: the fingerprint reader is on the keyboard deck and
 # IS physically blocked when the lid is closed. Earlier designs branched
@@ -1465,8 +1466,8 @@ sudo rm -f /usr/local/bin/lid-closed
 
 log "Writing PAM stacks (concurrent fingerprint+PIN+password)..."
 
-# The actual stack — emit once into a temp string, then tee to all four
-# files so they stay byte-identical.
+# In-session re-auth surfaces (sudo / hyprlock / polkit-1) — full concurrent
+# stack. Same body, written byte-identical to all three.
 read -r -d '' CONCURRENT_STACK <<'CONCEOF' || true
 #%PAM-1.0
 # arch-setup: concurrent fingerprint+PIN+password.
@@ -1482,17 +1483,29 @@ account     include     system-auth
 session     include     system-auth
 CONCEOF
 
-# /etc/pam.d/login NEEDS system-local-login (NOT system-auth) so pam_systemd
-# is chained via system-login. pam_systemd is what sets XDG_RUNTIME_DIR for
-# the tty1 → `exec Hyprland` flow from .zprofile; without it Hyprland dies
-# on launch and tty1 loops back to login. The other three (sudo/hyprlock/
-# polkit-1) auth inside an existing session, so system-auth is sufficient.
+# /etc/pam.d/login (cold-boot, TTY) — fingerprint + password ONLY.
+# libpinpam is intentionally excluded: PIN is not a cold-boot login factor
+# on this design. system-local-login (NOT system-auth) chains pam_systemd
+# via system-login, which sets XDG_RUNTIME_DIR for the tty1 → uwsm flow
+# from .zprofile (without it Hyprland dies on launch and tty1 loops back).
+read -r -d '' LOGIN_STACK <<'LOGINEOF' || true
+#%PAM-1.0
+# arch-setup: cold-boot TTY login — fingerprint or password (NO PIN).
+# PIN is intentionally excluded at this surface; available at sudo /
+# hyprlock / polkit-1 (in-session re-auth). See postinstall.sh §7a.
+auth        sufficient    pam_fprintd_grosshack.so
+auth        required      pam_unix.so try_first_pass nullok
+
+account     include     system-local-login
+session     include     system-local-login
+LOGINEOF
+
 for pam_file in sudo hyprlock polkit-1; do
     log "  /etc/pam.d/${pam_file}"
     printf '%s\n' "$CONCURRENT_STACK" | sudo tee "/etc/pam.d/${pam_file}" >/dev/null
 done
-log "  /etc/pam.d/login"
-printf '%s\n' "$CONCURRENT_STACK" | sed 's/system-auth/system-local-login/g' | sudo tee /etc/pam.d/login >/dev/null
+log "  /etc/pam.d/login (no PIN — cold-boot surface)"
+printf '%s\n' "$LOGIN_STACK" | sudo tee /etc/pam.d/login >/dev/null
 
 # ---------- 7.5 LUKS TPM2 autounlock — VERIFY-ONLY (FDE per decisions.md §Q11) ----------
 # install.sh §5b is now the single source of truth for TPM2 enrollment:
@@ -2254,11 +2267,14 @@ check "grosshack-fnrhombus pkg" "pacman -Q pam-fprint-grosshack-fnrhombus"
 check "grosshack .so present" "test -f /usr/lib/security/pam_fprintd_grosshack.so"
 check "PIN actually persisted" "! pinutil test < /dev/null 2>&1 | grep -q NoPinSet"
 check "lid-closed helper removed" "! test -e /usr/local/bin/lid-closed"
-# Concurrent fingerprint+PIN+password stack across sudo/hyprlock/polkit-1/login (per §7a, 2026-05-05 rewrite).
-for _f in sudo hyprlock polkit-1 login; do
+# Concurrent fingerprint+PIN+password stack across sudo/hyprlock/polkit-1
+# (per §7a, 2026-05-05 rewrite). login is checked separately below — it
+# excludes libpinpam by design (cold-boot is not a PIN surface).
+for _f in sudo hyprlock polkit-1; do
     check "concurrent PAM in /etc/pam.d/${_f}" "grep -q pam_fprintd_grosshack /etc/pam.d/${_f} && grep -q 'libpinpam.so use_first_pass' /etc/pam.d/${_f} && grep -q 'pam_unix.so try_first_pass' /etc/pam.d/${_f} && ! grep -q lid-closed /etc/pam.d/${_f}"
 done
 unset _f
+check "login PAM (no PIN, cold-boot)" "grep -q pam_fprintd_grosshack /etc/pam.d/login && grep -q 'pam_unix.so try_first_pass' /etc/pam.d/login && ! grep -q libpinpam /etc/pam.d/login && ! grep -q lid-closed /etc/pam.d/login"
 check "pam_unix in sys-auth" "grep -q pam_unix /etc/pam.d/system-auth"
 check "LUKS root TPM2"      "sudo systemd-cryptenroll /dev/disk/by-partlabel/ArchRoot 2>/dev/null | awk 'NR>1 && \$2==\"tpm2\"{f=1} END{exit !f}'"
 check "PCR signing keypair exists" "[[ -f /etc/systemd/tpm2-pcr-public.pem && -f /etc/systemd/tpm2-pcr-private.pem ]]"
