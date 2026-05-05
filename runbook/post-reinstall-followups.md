@@ -30,3 +30,34 @@ rhombu5/dots commit `fb96964` for the swap.
 **Files to revert when fixed:** `dot_config/waybar/config.jsonc` lines 20
 and ~89, both `pulseaudio` → `wireplumber`. The module block options are
 identical between the two backends, so it's a pure key rename.
+
+## 2. Hyprlax fractional-scale over-zoom — wait for upstream merge
+
+**Background.** On 2026-05-04 we hit a hyprlax 2.2.2 bug where any
+non-integer monitor scale (1.5, 1.6667, 1.75, …) renders the wallpaper
+1.5×-ish zoomed in. Root cause traced to two sites in upstream that
+both treat `monitor->width/height` (which come from `wl_output.mode` =
+physical scanout pixels) as if they were logical:
+`fractional_scale_preferred` in `src/platform/wayland.c` (EGL buffer
++ viewport destination) and `glViewport` in `src/core/render_core.c`.
+At scale=1 the multiplications are no-ops, which is why the laptop
+display was fine. As a workaround we built a patched binary from our
+fork and dropped it at `~/.local/bin/hyprlax`, which PATH puts ahead
+of the AUR `hyprlax-bin` at `/usr/bin/hyprlax`.
+
+**Upstream tracker.** [sandwichfarm/hyprlax#87](https://github.com/sandwichfarm/hyprlax/issues/87) (issue) and [sandwichfarm/hyprlax#88](https://github.com/sandwichfarm/hyprlax/pull/88) (PR from `fnrhombus/hyprlax fix/fractional-scale-overzoom`).
+
+**Schedule prompt to give Claude:**
+
+> `/schedule` a monthly agent: check sandwichfarm/hyprlax#87 for status,
+> and check `pacman -Si hyprlax-bin` against the version that includes
+> the merged fix. Also check that the merged commit's diff actually
+> matches what we shipped — they may have rewritten it. When the
+> fixed version is in AUR and installed, remove
+> `~/.local/bin/hyprlax` (so PATH falls through to the upstream
+> build) and `which hyprlax` should resolve to `/usr/bin/hyprlax`.
+> If still unmerged, ping me with a one-line status.
+
+**Files / paths to clean up when fixed:** `rm ~/.local/bin/hyprlax`,
+then `which hyprlax` should print `/usr/bin/hyprlax`. Also delete
+`~/src/hyprlax@fnrhombus` if you don't want the fork checkout around.
