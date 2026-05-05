@@ -107,6 +107,22 @@ blacklist nvidia_modeset
 # explicitly). nvidia stays idle when no compute workload is running.
 EOF
 
+# ---------- RTL8723BE Wi-Fi: disable ASPM (PCIe AER storm fix) ----------
+# This card (Realtek RTL8723BE [10ec:b723], behind Cannon Point root port
+# 8086:9db1 at 00:1d.0) flaps L0s/L1 ASPM transitions on the 7786, throwing
+# sustained correctable PCIe RxErrs at ~50-150k/sec. Every error fires the
+# aerdrv IRQ handler, which pins one CPU core for the entire session
+# (observed 2026-05-04: 425M IRQs / 46m of CPU burned in 1h42m of uptime).
+# aspm=0 in the module options disables ASPM driver-side and stops the storm
+# instantly (verified: setpci CAP_EXP+10.b=0:3 on both ends took rate from
+# 58k/sec to 0/sec, then aspm=0 made it persistent across module reload).
+# ant_sel=2 fwlps=N ips=N are commonly recommended for this card and kept
+# defensively, though they were not what fixed the AER storm.
+log "Configuring RTL8723BE Wi-Fi: aspm=0 to stop PCIe AER storm..."
+cat > /etc/modprobe.d/rtl8723be.conf <<EOF
+options rtl8723be aspm=0 ant_sel=2 fwlps=N ips=N
+EOF
+
 # ---------- lid-close policy (decisions.md Requirements) ----------
 # All lid handling is owned by ~/.local/bin/lid-handler from the user's
 # Hyprland session (wired via `binddl` on `Lid Switch` — see rhombu5/dots
