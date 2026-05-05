@@ -1459,6 +1459,15 @@ fi
 # TTY (Ctrl+Alt+F2 then `root` + install-time root password), then
 # edit /etc/pam.d/<broken-file>. Test with `sudo -k && sudo true`
 # from a fresh shell after every edit.
+#
+# Unattended-sudo escape hatch: for batch tasks where Claude can't
+# drive an interactive auth prompt, use `sudoa <cmd>` (defined in
+# rhombu5/dots dot_zsh_aliases) instead of `sudo <cmd>`. It uses
+# SUDO_ASKPASS=~/.local/bin/claude-askpass which pulls the local
+# password from Bitwarden silently. Pre-req: `bwu` once per fresh
+# login. See ~/.claude/CLAUDE.linux.md "Two sudo wrappers" for the
+# trust model. The helper script + alias are user-config-shaped so
+# they live in dots; this script just verifies their presence.
 
 # Scrub the old lid-aware helper from prior installs.
 log "Removing /usr/local/bin/lid-closed (lid-aware helper from prior installs)..."
@@ -2267,6 +2276,12 @@ check "grosshack-fnrhombus pkg" "pacman -Q pam-fprint-grosshack-fnrhombus"
 check "grosshack .so present" "test -f /usr/lib/security/pam_fprintd_grosshack.so"
 check "PIN actually persisted" "! pinutil test < /dev/null 2>&1 | grep -q NoPinSet"
 check "lid-closed helper removed" "! test -e /usr/local/bin/lid-closed"
+# Unattended-sudo escape hatch (claude-askpass + sudoa) — owned by
+# rhombu5/dots. Surfaces a missing chezmoi apply or a renamed Bitwarden
+# entry; doesn't gate install. See ~/.claude/CLAUDE.linux.md "Two sudo
+# wrappers" for the trust model + usage.
+check "claude-askpass present (dots)" "test -x /home/tom/.local/bin/claude-askpass"
+check "sudoa alias defined (dots)"     "grep -q '^sudoa' $HOME/.zsh_aliases"
 # Concurrent fingerprint+PIN+password stack across sudo/hyprlock/polkit-1
 # (per §7a, 2026-05-05 rewrite). login is checked separately below — it
 # excludes libpinpam by design (cold-boot is not a PIN surface).
