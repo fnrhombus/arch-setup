@@ -1,8 +1,10 @@
 - [notify-send before sudo](feedback_sudo_fingerprint_announce.md) — `notify-send -u critical 'sudo' '<msg>'; sudo <cmd>` — terminal bell didn't work in user's setup.
+- [Confirm before interactive sudo](feedback_confirm_before_interactive_sudo.md) — notify-send isn't enough — ask "ready?" + state which input (swipe / PIN / password) before each one.
 - [Azure DDNS config](project_azure_ddns.md) — IDs live in `phase-3-arch-postinstall/setup-azure-ddns.sh` §1; non-default tenant, hardcoded `--tenant` flag.
 - [bw CLI libsecret integration](feedback_bw_cli_libsecret.md) — bwu/bw shell functions; one-time master-password seed → silent forever; same trust model as desktop "Unlock with system authentication".
 - [/etc/adjtime must be UTC](project_rtc_must_be_utc.md) — single-OS, no Windows. LOCAL setting from old dual-boot plan caused 4-hour skew that broke JWT/Azure/cert flows on 2026-04-30.
 - [wpws (per-workspace wallpaper + accent)](project_wpws.md) — Python daemon in dots, designed for extraction to its own repo. Slow path = matugen; fast path = wpws's own PIL extractor.
+- [display-watchdog](project_display_watchdog.md) — Hyprland blackout-recovery daemon in dots, designed for extraction. Lid-aware: open → re-enable internal, closed → hibernate.
 - [Choice options need depth + hidden constraints](feedback_choice_options_depth.md) — AskUserQuestion: surface likely-hidden constraints (cost/license/maturity) and use `preview` for comparative depth on technical choices.
 - [No live "sanity checks" for action scripts](feedback_no_live_destructive_sanity_checks.md) — invoking a side-effecting script with real args IS the action; ask first or limit to `--help` / no-arg usage error.
 - [Revisit hard monitor-binding for workspaces 1-9](project_revisit_workspace_monitor_binding.md) — user dislikes hard DP-1/eDP-1 binding (2026-05-04); wait for them to bring it up, then surface free-roaming vs soft-bound vs preset options.
