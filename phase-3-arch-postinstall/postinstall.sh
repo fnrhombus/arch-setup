@@ -1403,117 +1403,84 @@ else
     warn "Couldn't locate greetd PAM template at $GREETD_PAM_TEMPLATE — leaving /etc/pam.d/greetd as-is."
 fi
 #
-# Design invariant: fingerprint is ALWAYS an option and NEVER required.
-# User's finger can only physically reach the reader at cold boot (the
-# laptop goes under the desk after login). Primary auth at sudo/hyprlock
-# is therefore PIN (fast, one-handed, works docked); fingerprint is still
-# wired in as a second-position sufficient module with a short timeout so
-# a user who did leave a finger within reach can still use it — but PIN
-# prompts first, so the common case never sees a blocking finger prompt.
-#
-#   sudo     : PIN → fingerprint(5s) → password. PIN primary; finger as a
-#              5s-timeout shortcut; pam_unix via system-auth as fallback.
-#   hyprlock : PIN → fingerprint(5s) → password. Same shape; `login`
-#              include provides pam_unix fallback.
-#
-# Module name quirk: pinpam-git ships its module as `libpinpam.so` (not
-# the expected `pam_pinpam.so`). PAM resolves bare names against
-# `/usr/lib/security/`, so we reference `libpinpam.so` literally — the
-# old `pam_pinpam.so` reference dlopen-failed silently and PAM treated
-# it as a faulty module, which is what kept PIN auth from ever working
-# pre-2026-04-22 even when `pinutil setup` had succeeded.
-#
-# pinpam returns AUTHINFO_UNAVAIL when no PIN is provisioned, so
-# 'sufficient' falls through cleanly to pam_fprintd/pam_unix — first-boot
-# (pre-`pinutil setup`) still works.
-#
-# pam_fprintd options: `max-tries=5` = up to five swipes per auth
-# attempt (a finger can land funny on the first couple tries and
-# still recover without falling through to password);
-# `timeout=20` at sudo/hyprlock = give up after 20s of no finger and
-# fall through to the password prompt. 20s is comfortable on the
-# Inspiron 7786 (fingerprint reader is in the power button — needs a
-# moment to reach for); shorter values felt rushed in real use.
-#
-# Lid-state escape hatch: when the laptop lid is closed (i.e. docked
-# under a desk, fingerprint reader physically unreachable), we want
-# password auth IMMEDIATELY rather than burning 20s waiting for a
-# finger that can't get there. /usr/local/bin/lid-closed exits 0 when
-# closed; with PAM control `[success=1 default=ignore]` PAM jumps one
-# line forward on success (skipping pam_fprintd entirely) and just
-# continues normally on failure (lid open → try fprintd as usual).
-#
-# NEVER remove pam_unix from the stack via `system-auth`/`system-login`/
-# `login` includes — that's the last-resort password path.
-#
-# Fully idempotent: tee overwrites with identical bytes on re-run.
-log "Writing /usr/local/bin/lid-closed (PAM helper for dock-aware fprintd skip)..."
-sudo tee /usr/local/bin/lid-closed >/dev/null <<'LIDEOF'
-#!/bin/sh
-# Exit 0 iff the laptop lid is closed (read /proc/acpi/button/lid/*/state).
-# PAM uses the exit code to decide whether to skip pam_fprintd.
-# No lid sensor on this machine? Assume open → exit 1 → fprintd tried.
-LID_FILE=$(ls /proc/acpi/button/lid/*/state 2>/dev/null | head -1)
-[ -z "$LID_FILE" ] && exit 1
-state=$(awk '{print $NF}' "$LID_FILE")
-[ "$state" = closed ] && exit 0 || exit 1
-LIDEOF
-sudo chmod 755 /usr/local/bin/lid-closed
-
-log "Writing PAM stacks (lid-aware: fprintd if open, PIN if closed, password fallback)..."
-
-# Design (rewritten 2026-04-30 per user spec): lid state determines
-# which factor is primary. The "wrong" factor is SKIPPED entirely —
-# not attempted, not even prompted for. Password is always the final
-# fallback so a broken TPM or unreadable finger doesn't lock the user
-# out.
+# Design (rewritten 2026-05-05): concurrent fingerprint + PIN + password.
+# pam_fprintd_grosshack races a fingerprint verify against a typed-input
+# prompt; whichever side resolves first wins.
 #
 # Behavior:
-#   Lid OPEN   → fprintd primary (max-tries=3, timeout=15) → password
-#   Lid CLOSED → libpinpam primary (its own retry loop)    → password
+#   Finger swipe    → grosshack SUCCESS → stack short-circuits, done <2s.
+#   Typed PIN       → grosshack stashes AUTHTOK, returns AUTHINFO_UNAVAIL
+#                    → libpinpam (use_first_pass) tests AUTHTOK as PIN
+#                    → SUCCESS, stack short-circuits.
+#   Typed password  → grosshack stashes AUTHTOK; libpinpam sees non-digits
+#                    → AUTH_ERR silently → pam_unix tests AUTHTOK as
+#                    password → SUCCESS.
+#   Wrong typed     → libpinpam silent-fall-through; pam_unix tries and
+#                    fails → standard sudo 3-retry loop.
 #
 # Same stack across sudo / hyprlock / polkit-1 / login (any auth surface
-# the user hits day-to-day). Only greetd is different — it uses its
-# own template at system-files/pam.d/greetd because cold-boot wants
-# password-or-fingerprint without depending on TPM (per Windows Hello
-# pattern). greetd is currently disabled (§1f); template stays in case
-# of revival.
+# the user hits day-to-day). Only greetd is different — it uses its own
+# template at system-files/pam.d/greetd because cold-boot wants password-
+# or-fingerprint without depending on TPM (per Windows Hello pattern).
+# greetd is currently disabled (§1f); template stays in case of revival.
 #
-# Control flow walk (one stack, four lines):
-#   1. pam_exec /usr/local/bin/lid-closed
-#        success=1   → jump 1 line forward (skip fprintd)
-#        default     → ignore (lid open, fall through to fprintd)
-#   2. pam_fprintd.so max-tries=3 timeout=15
-#        success=done → auth complete
-#        default      → jump 1 line forward (skip libpinpam, go to pam_unix)
-#                       i.e. lid open + finger fail → password, NOT PIN
-#   3. libpinpam.so
-#        success=done → auth complete
-#        default      → ignore (lid closed + PIN fail → password)
-#   4. pam_unix.so try_first_pass nullok
-#        required     → password is always the last word
+# Why not lid-aware: the fingerprint reader is on the keyboard deck and
+# IS physically blocked when the lid is closed. Earlier designs branched
+# on lid state to skip fprintd. The race-based design makes that
+# unnecessary: when the lid is closed grosshack still starts an fprintd
+# verify, no finger ever lands, but the typed-input pthread wins the
+# race fast. Cost is a few hundred ms of wasted D-Bus setup per closed-
+# lid auth, paid in exchange for stack simplicity (no lid sensor, no
+# pam_exec helper, no acpid/logind coupling, no broken-finger-skip
+# branching).
 #
-# Pre-flight: ensure /usr/local/bin/lid-closed exists (created above by
-# the lid-closed installer — sudo tee block earlier in §7a).
+# Module quirks:
+#   - libpinpam.so (NOT pam_pinpam.so): pinpam-fnrhombus ships it under
+#     this exact name. Bare references resolve against /usr/lib/security/.
+#   - pinpam-fnrhombus carries our try_first_pass/use_first_pass patch
+#     until upstream merges it. With use_first_pass + AUTHTOK missing or
+#     non-digits, libpinpam returns AUTH_ERR silently (no re-prompt).
+#     With no PIN provisioned at all, returns AUTHINFO_UNAVAIL.
+#   - pam-fprint-grosshack-fnrhombus carries a 1-line patch that resets
+#     a static SIGUSR1 flag at the start of each pam_authenticate call,
+#     fixing sudo's retry loop (without it, retries 2+ silently corrupt
+#     typed input).
+#   - pam_unix uses try_first_pass: tests AUTHTOK first; if absent or
+#     wrong, prompts fresh — that's how sudo's standard 3-retry loop
+#     surfaces.
+#
+# NEVER remove pam_unix from the stack via the `system-auth` /
+# `system-login` / `login` includes — that's the password fallback.
+#
+# Fully idempotent: tee overwrites with identical bytes on re-run.
 #
 # Recovery: if PAM is borked and you can't sudo, log into a different
 # TTY (Ctrl+Alt+F2 then `root` + install-time root password), then
 # edit /etc/pam.d/<broken-file>. Test with `sudo -k && sudo true`
 # from a fresh shell after every edit.
 
+# Scrub the old lid-aware helper from prior installs.
+log "Removing /usr/local/bin/lid-closed (lid-aware helper from prior installs)..."
+sudo rm -f /usr/local/bin/lid-closed
+
+log "Writing PAM stacks (concurrent fingerprint+PIN+password)..."
+
 # The actual stack — emit once into a temp string, then tee to all four
 # files so they stay byte-identical.
-read -r -d '' LID_AWARE_STACK <<'LIDPAMEOF' || true
+read -r -d '' CONCURRENT_STACK <<'CONCEOF' || true
 #%PAM-1.0
-# arch-setup: lid-aware auth. Fprintd if lid open, PIN if closed,
-# password fallback always. See postinstall.sh §7a for design.
-auth        [success=1 default=ignore]    pam_exec.so quiet /usr/local/bin/lid-closed
-auth        [success=done default=1]      pam_fprintd.so max-tries=3 timeout=15
-auth        [success=done default=ignore] libpinpam.so
-auth        required                       pam_unix.so try_first_pass nullok
+# arch-setup: concurrent fingerprint+PIN+password.
+# grosshack races finger vs typed input; libpinpam tests typed value as PIN
+# (use_first_pass = silent fall-through on non-digits); pam_unix tests typed
+# value as password (try_first_pass = standard prompt-on-fail retry).
+# See postinstall.sh §7a for design.
+auth        sufficient    pam_fprintd_grosshack.so
+auth        sufficient    libpinpam.so use_first_pass
+auth        required      pam_unix.so try_first_pass nullok
+
 account     include     system-auth
 session     include     system-auth
-LIDPAMEOF
+CONCEOF
 
 # /etc/pam.d/login NEEDS system-local-login (NOT system-auth) so pam_systemd
 # is chained via system-login. pam_systemd is what sets XDG_RUNTIME_DIR for
@@ -1522,10 +1489,10 @@ LIDPAMEOF
 # polkit-1) auth inside an existing session, so system-auth is sufficient.
 for pam_file in sudo hyprlock polkit-1; do
     log "  /etc/pam.d/${pam_file}"
-    printf '%s\n' "$LID_AWARE_STACK" | sudo tee "/etc/pam.d/${pam_file}" >/dev/null
+    printf '%s\n' "$CONCURRENT_STACK" | sudo tee "/etc/pam.d/${pam_file}" >/dev/null
 done
 log "  /etc/pam.d/login"
-printf '%s\n' "$LID_AWARE_STACK" | sed 's/system-auth/system-local-login/g' | sudo tee /etc/pam.d/login >/dev/null
+printf '%s\n' "$CONCURRENT_STACK" | sed 's/system-auth/system-local-login/g' | sudo tee /etc/pam.d/login >/dev/null
 
 # ---------- 7.5 LUKS TPM2 autounlock — VERIFY-ONLY (FDE per decisions.md §Q11) ----------
 # install.sh §5b is now the single source of truth for TPM2 enrollment:
@@ -2281,12 +2248,15 @@ echo "-- secrets / auth --"
 check "fprintd enabled"     "systemctl is-enabled fprintd"
 check "fprintd enrolled"    "fprintd-list tom 2>/dev/null | grep -q 'Fingerprints for user tom'"
 check "pinutil (TPM PIN)"   "test -x /usr/bin/pinutil || command -v pinutil"
-check "pinpam .so present"   "test -f /usr/lib/security/libpinpam.so"
+check "pinpam-fnrhombus pkg" "pacman -Q pinpam-fnrhombus"
+check "libpinpam.so present" "test -f /usr/lib/security/libpinpam.so"
+check "grosshack-fnrhombus pkg" "pacman -Q pam-fprint-grosshack-fnrhombus"
+check "grosshack .so present" "test -f /usr/lib/security/pam_fprintd_grosshack.so"
 check "PIN actually persisted" "! pinutil test < /dev/null 2>&1 | grep -q NoPinSet"
-check "lid-closed helper"    "test -x /usr/local/bin/lid-closed"
-# Lid-aware stack across sudo/hyprlock/polkit-1/login (per §7a, 2026-04-30 rewrite).
+check "lid-closed helper removed" "! test -e /usr/local/bin/lid-closed"
+# Concurrent fingerprint+PIN+password stack across sudo/hyprlock/polkit-1/login (per §7a, 2026-05-05 rewrite).
 for _f in sudo hyprlock polkit-1 login; do
-    check "lid-aware PAM in /etc/pam.d/${_f}" "grep -q 'pam_exec.so quiet /usr/local/bin/lid-closed' /etc/pam.d/${_f} && grep -q libpinpam /etc/pam.d/${_f} && grep -q pam_fprintd /etc/pam.d/${_f} && grep -q pam_unix /etc/pam.d/${_f}"
+    check "concurrent PAM in /etc/pam.d/${_f}" "grep -q pam_fprintd_grosshack /etc/pam.d/${_f} && grep -q 'libpinpam.so use_first_pass' /etc/pam.d/${_f} && grep -q 'pam_unix.so try_first_pass' /etc/pam.d/${_f} && ! grep -q lid-closed /etc/pam.d/${_f}"
 done
 unset _f
 check "pam_unix in sys-auth" "grep -q pam_unix /etc/pam.d/system-auth"
