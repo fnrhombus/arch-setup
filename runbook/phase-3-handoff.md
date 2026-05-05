@@ -166,7 +166,7 @@ This document is meant to be fed to Claude Code once you're inside Arch Linux. I
 - fprintd + libfprint
 - **Device**: Goodix `27c6:538c` — supported via AUR `libfprint-goodix-53xc` (older Dell OEM blob) on top of `libfprint-tod-git` built with `!lto`. See `docs/decisions.md` requirement list for the rationale. Do NOT swap to `libfprint-2-tod1-goodix` / `-v2` — those ship the 550A-only blob fork.
 - **Post-install**: 5 fingers pre-enrolled by `postinstall.sh` (right-index, left-index, right-middle, left-middle, right-thumb). Use `sudo fprintd-enroll -f <finger> tom` to add more (polkit denies unprivileged enroll from bare TTY).
-- Integrate with: TTY login (`/etc/pam.d/login` — lid-aware: fprintd if open, libpinpam if closed, password fallback), sudo, screen lock (hyprlock). greetd PAM template is also kept current for the disabled-fallback case.
+- Integrate with: TTY login (`/etc/pam.d/login` — concurrent stack: `pam_fprintd_grosshack` races finger vs typed input; `libpinpam` tests typed as PIN; `pam_unix` tests as password), sudo, screen lock (hyprlock). greetd PAM template is also kept current for the disabled-fallback case.
 
 ---
 

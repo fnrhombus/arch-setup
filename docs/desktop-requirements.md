@@ -78,9 +78,10 @@ bibata-cursor-theme              # AUR — Xcursor format only
 ## Login
 
 **Bare TTY → uwsm → Hyprland** is the active path. agetty on tty1 prompts
-for username + password; `/etc/pam.d/login` is the lid-aware stack
-(fprintd primary if lid open, libpinpam if closed, password fallback —
-see postinstall.sh §7a's design notes). On successful login, `~/.zprofile`
+for username + password; `/etc/pam.d/login` is the concurrent stack
+(`pam_fprintd_grosshack` races finger vs typed input; `libpinpam` tests
+typed value as PIN; `pam_unix` tests it as password — see postinstall.sh
+§7a's design notes). On successful login, `~/.zprofile`
 checks for tty1 + no existing Wayland/X session, then execs
 `uwsm start hyprland-uwsm.desktop`. uwsm hands Hyprland a proper
 graphical-session.target lifecycle (env import, dependent-unit

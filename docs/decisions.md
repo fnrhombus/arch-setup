@@ -172,8 +172,9 @@
 
 #### D) Login: bare TTY → uwsm → Hyprland (greetd kept disabled as fallback)
 - Active flow: agetty on tty1 → password/PIN/fingerprint via `/etc/pam.d/login`
-  (lid-aware: fprintd primary if lid open, libpinpam if closed, password
-  fallback) → `~/.zprofile` execs `uwsm start hyprland-uwsm.desktop`.
+  (concurrent stack: `pam_fprintd_grosshack` races finger vs typed input;
+  `libpinpam` tests typed value as PIN; `pam_unix` tests it as password)
+  → `~/.zprofile` execs `uwsm start hyprland-uwsm.desktop`.
 - Hyprland gets a proper graphical-session.target lifecycle through uwsm
   (env import, dependent-unit activation, clean shutdown on logout).
 - greetd + greetd-regreet stay installed and configured, just disabled.
