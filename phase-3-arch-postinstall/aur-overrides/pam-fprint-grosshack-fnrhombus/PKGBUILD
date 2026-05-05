@@ -1,0 +1,52 @@
+# Maintainer: Thomas Butler <2511516+fnrhombus@users.noreply.github.com>
+# Local fork override of AUR pam-fprint-grosshack with a one-line patch
+# that resets the static `has_recieved_sigusr1` flag at the start of
+# each pam_authenticate call. Without it, sudo's retry loop is broken:
+# the second pam_authenticate call sees the leftover flag from the prior
+# attempt, do_verify shortcuts, the prompt-pthread is cancelled mid-
+# pam_prompt, echo-off never engages, and partial typed input leaks
+# (visibly) into the next stack module's prompt.
+#
+# Upstream is functionally abandoned (last commit 2022-07-27); we carry
+# this fork indefinitely. Tracker: ../../runbook/post-reinstall-followups.md
+pkgname=pam-fprint-grosshack-fnrhombus
+pkgver=0.3.0
+pkgrel=1
+pkgdesc="PAM module enabling simultaneous fingerprint+password (fnrhombus fork: per-call SIGUSR1 reset)"
+url="https://gitlab.com/mishakmak/pam-fprint-grosshack"
+arch=(x86_64)
+license=(GPL)
+depends=(fprintd glib2 libfprint polkit dbus dbus-glib systemd)
+makedepends=(cmake meson pam_wrapper python-cairo python-dbus python-dbusmock)
+provides=(pam-fprint-grosshack)
+conflicts=(pam-fprint-grosshack)
+_git_folder=pam-fprint-grosshack
+source=("${_git_folder}::git+https://gitlab.com/mishakmak/pam-fprint-grosshack.git#tag=v${pkgver}")
+sha256sums=('SKIP')
+
+prepare() {
+  cd "${_git_folder}"
+  # Reset the static SIGUSR1 flag at the top of each do_auth call so sudo's
+  # retry loop sees a fresh state instead of bailing out on stale truth.
+  sed -i '/signal (SIGUSR1, handle_sigusr1);/i\      has_recieved_sigusr1 = false;' pam/pam_fprintd.c
+  # Verify the patch landed (fail loudly if upstream rephrased the line).
+  grep -q 'has_recieved_sigusr1 = false;' pam/pam_fprintd.c \
+    || { echo 'PATCH FAILED: could not find anchor line' >&2; exit 1; }
+}
+
+build() {
+  cd "${_git_folder}"
+  arch-meson . build \
+    -D pam_modules_dir=/usr/lib/security
+  meson compile -C build
+}
+
+check() {
+  cd "${_git_folder}"
+  meson test -C build --print-errorlogs
+}
+
+package() {
+  cd "${_git_folder}"
+  meson install -C build --destdir "$pkgdir"
+}

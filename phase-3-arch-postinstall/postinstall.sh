@@ -791,7 +791,10 @@ AUR_PACKAGES=(
     # for status/control from the terminal — pairs with the daemon.
     dropbox
     dropbox-cli
-    pinpam-git
+    # pinpam-git: replaced by pinpam-fnrhombus in §3-overrides below (carries
+    # a try_first_pass / use_first_pass patch needed by §7a's concurrent
+    # PAM stack). Drop the override and restore pinpam-git here when
+    # upstream merges the patch — see runbook/post-reinstall-followups.md.
     sesh-bin
     wvkbd
     iio-hyprland-git
@@ -854,6 +857,45 @@ if (( ${#AUR_FAILED[@]} > 0 )); then
     warn "AUR install failures: ${AUR_FAILED[*]}"
     warn "Resolve manually (often: 'pacman -R <conflicting-variant>' then 'yay -S <pkg>'), then re-run this script."
 fi
+
+# ---------- 3-overrides. Fork-pinned AUR packages built from in-repo PKGBUILDs ----------
+# Two AUR packages need patches that haven't landed upstream:
+#   pinpam-fnrhombus              — adds try_first_pass / use_first_pass
+#                                   to libpinpam (upstream PR pending).
+#   pam-fprint-grosshack-fnrhombus — 1-line sed: reset the per-call SIGUSR1
+#                                   flag so sudo's retry loop is intact
+#                                   (upstream effectively abandoned 2022-07).
+# Both are required for §7a's concurrent fingerprint+PIN+password PAM stack.
+# Build via local makepkg (yay can't, since the PKGBUILDs aren't on AUR),
+# install via pacman -U. provides=(...) lets dependents see the upstream name.
+# When upstream releases land, drop the override here and revert to AUR
+# (see runbook/post-reinstall-followups.md for the per-package recipe).
+log "Building fork-pinned AUR overrides..."
+for _override in pinpam-fnrhombus pam-fprint-grosshack-fnrhombus; do
+    _ovr_dir="$SCRIPT_DIR/aur-overrides/$_override"
+    if [[ ! -f "$_ovr_dir/PKGBUILD" ]]; then
+        warn "  $_override: PKGBUILD missing at $_ovr_dir — skipping"
+        continue
+    fi
+    log "  $_override: makepkg from $_ovr_dir"
+    pushd "$_ovr_dir" >/dev/null
+    if makepkg -sf --noconfirm --noprogressbar 2>&1; then
+        # provides=(upstream-name) means we may collide with an installed
+        # upstream pkg; remove it first if present so pacman -U doesn't
+        # default-N the conflict prompt.
+        _upstream=$(awk -F'[()]' '/^provides=/ {print $2}' PKGBUILD | tr -d "'\"" | awk '{print $1}')
+        if [[ -n "$_upstream" ]] && pacman -Qq "$_upstream" >/dev/null 2>&1 && [[ "$_upstream" != "$_override" ]]; then
+            log "    removing conflicting upstream pkg: $_upstream"
+            sudo pacman -Rdd --noconfirm "$_upstream" || true
+        fi
+        sudo pacman -U --noconfirm ./"$_override"-*.pkg.tar.zst \
+            || warn "  $_override: pacman -U failed"
+    else
+        warn "  $_override: makepkg failed"
+    fi
+    popd >/dev/null
+done
+unset _override _ovr_dir _upstream
 
 # ---------- 3-winapps. WinApps from upstream (winapps-org/winapps) ----------
 # WinApps lets you launch Windows apps from a Win11 VM as native Hyprland
