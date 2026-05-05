@@ -1596,12 +1596,11 @@ fi
 
 # ---------- 9. GitHub identity (one-shot if gh already authed) ----------
 # The planter scripts that handle bw login / gh auth login / SSH-signing
-# wire-up live in rhombu5/dots as
-#   ~/.local/share/arch-setup-bootstraps/{first-login,ssh-signing}.sh
-# applied by §13's chezmoi apply and dispatched by
-#   ~/.zshrc.d/arch-bootstrap-runner.zsh
-# on each interactive shell. Each script self-checks its precondition
-# and self-deletes on success.
+# wire-up live in this repo at phase-3-arch-postinstall/planters/, are
+# planted to ~/.local/share/arch-setup-bootstraps/ by §13b, and are
+# dispatched by ~/.zshrc.d/arch-bootstrap-runner.zsh (chezmoi-managed
+# in rhombu5/dots) on each interactive shell. Each script self-checks
+# its precondition and self-deletes on success.
 #
 # What stays here is the install-time fast path: if `gh` already authed
 # (e.g. the user re-runs postinstall after first login), surgically write
@@ -1918,6 +1917,24 @@ else
         warn "chezmoi init --apply failed — Hyprland will start with empty config. Re-run 'chezmoi init --apply $DOTS_REPO_HTTPS' once network is up."
     fi
 fi
+
+# ---------- 13b. Plant arch-setup-bootstraps (planters) ----------
+# Planters are one-shot scripts that fire on first interactive shell via
+# the .zshrc.d/arch-bootstrap-runner.zsh dispatcher (chezmoi-managed in
+# rhombu5/dots), do something requiring interactive auth (gh login, bw
+# unlock, OAuth flows, etc.), then self-delete. They live here in
+# arch-setup rather than in dots because (1) they're install-time
+# scaffolding, not config; (2) chezmoi tracking conflicts with
+# self-delete-on-success — chezmoi treats the missing file as
+# user-deleted-managed-content and prompts on every subsequent apply.
+#
+# The runner stays in dots (it's pure user-shell config); arch-setup
+# owns the install-time content the runner dispatches.
+log "Planting arch-setup-bootstraps..."
+mkdir -p "$HOME/.local/share/arch-setup-bootstraps"
+install -m 0755 -t "$HOME/.local/share/arch-setup-bootstraps" \
+    "$SCRIPT_DIR/planters/"*.sh \
+    || warn "planter install failed — see $SCRIPT_DIR/planters/."
 
 # Initial wallpaper render: chezmoi's run_once script downloads from callisto;
 # theme-toggle's first run picks one and renders matugen. Triggered manually
