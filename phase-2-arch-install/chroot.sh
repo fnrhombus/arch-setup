@@ -378,6 +378,67 @@ fi
 BASH
 chmod 755 /usr/local/sbin/limine-redeploy
 
+# ---------- Secure Boot: sbctl keys + sign EFI binaries + export .auth files for BIOS file-load ----------
+# The user enables Secure Boot AFTER install via a single BIOS trip — Custom
+# Mode → Replace PK from file → Append KEK + db from files → Secure Boot
+# Enable on. To make that one trip self-contained (one recovery-key prompt
+# at next boot, then silent forever), pre-stage everything here:
+#   - sbctl creates a custom PK/KEK/db keypair at /var/lib/sbctl/keys/
+#   - all four EFI binaries (limine fallback + limine source + 2 UKIs) get
+#     signed in place; sbctl's own pacman hook (zz-sbctl.hook, ships with
+#     the package) keeps them signed across kernel/limine/mkinitcpio/systemd
+#     upgrades
+#   - efitools converts our certs to UEFI .auth files (PK in replace mode,
+#     KEK + db in append mode preserving Microsoft KEK + UEFI CAs in db)
+#     and stages them at /boot/EFI/sbctl-keys/ where the BIOS file picker
+#     can find them
+#
+# Harmless when SB stays off — the .auth files just sit on the ESP, the
+# sbctl signatures don't change firmware verification (firmware only checks
+# them when SB is on). Cost: ~10 KB on the ESP.
+#
+# Full BIOS sequence + post-toggle TPM reseal: runbook/phase-3-handoff.md
+# "Upgrade Paths → Secure Boot via sbctl".
+log "sbctl: generating custom Secure Boot keys + signing EFI binaries..."
+if [[ ! -f /var/lib/sbctl/keys/PK/PK.pem ]]; then
+    sbctl create-keys
+else
+    log "  sbctl keys already exist — skipping create-keys"
+fi
+
+# -s tracks each file in /var/lib/sbctl/files.json so the zz-sbctl.hook
+# re-signs after package upgrades.
+sbctl sign -s /boot/EFI/BOOT/BOOTX64.EFI
+sbctl sign -s /usr/share/limine/BOOTX64.EFI
+sbctl sign -s /boot/EFI/Linux/arch-linux.efi
+sbctl sign -s /boot/EFI/Linux/arch-linux-lts.efi
+
+log "sbctl: exporting PK/KEK/db as .auth files for BIOS file-load..."
+# UEFI .auth = signed authenticated variable update. Dell BIOS Custom Mode
+# "Replace from File" / "Append from File" consume these directly.
+#   PK : replace mode (no -a) — replaces the factory Dell PK with ours
+#   KEK: append mode (-a) — added alongside Dell + Microsoft KEK
+#   db : append mode (-a) — added alongside Dell + Microsoft UEFI CAs
+SBGUID=$(cat /var/lib/sbctl/GUID)
+SBTMP=$(mktemp -d)
+
+cert-to-efi-sig-list -g "$SBGUID" /var/lib/sbctl/keys/PK/PK.pem  "$SBTMP/PK.esl"
+sign-efi-sig-list    -k /var/lib/sbctl/keys/PK/PK.key   -c /var/lib/sbctl/keys/PK/PK.pem  PK  "$SBTMP/PK.esl"  "$SBTMP/PK.auth"
+
+cert-to-efi-sig-list -g "$SBGUID" /var/lib/sbctl/keys/KEK/KEK.pem "$SBTMP/KEK.esl"
+sign-efi-sig-list -a -k /var/lib/sbctl/keys/PK/PK.key   -c /var/lib/sbctl/keys/PK/PK.pem  KEK "$SBTMP/KEK.esl" "$SBTMP/KEK.auth"
+
+cert-to-efi-sig-list -g "$SBGUID" /var/lib/sbctl/keys/db/db.pem  "$SBTMP/db.esl"
+sign-efi-sig-list -a -k /var/lib/sbctl/keys/KEK/KEK.key -c /var/lib/sbctl/keys/KEK/KEK.pem db  "$SBTMP/db.esl"  "$SBTMP/db.auth"
+
+install -d /boot/EFI/sbctl-keys
+install -m 644 "$SBTMP/PK.auth"  /boot/EFI/sbctl-keys/PK.auth
+install -m 644 "$SBTMP/KEK.auth" /boot/EFI/sbctl-keys/KEK.auth
+install -m 644 "$SBTMP/db.auth"  /boot/EFI/sbctl-keys/db.auth
+rm -rf "$SBTMP"
+unset SBGUID SBTMP
+log "  staged at /boot/EFI/sbctl-keys/{PK,KEK,db}.auth — ready for BIOS file-load."
+
 # ---------- Pacman hook: TPM2 PCR re-enrolment after kernel/UKI/limine upgrades ----------
 # Kernel / mkinitcpio / systemd / limine upgrades regenerate UKIs (which
 # rewrites the .pcrsig section). The seal still unseals because the policy

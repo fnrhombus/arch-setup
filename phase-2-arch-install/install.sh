@@ -514,7 +514,7 @@ pacstrap_attempt() {
         zsh tmux \
         efibootmgr \
         man-db man-pages texinfo \
-        systemd-ukify python-pefile sbsigntools tpm2-tss tpm2-tools \
+        systemd-ukify python-pefile sbsigntools tpm2-tss tpm2-tools sbctl efitools \
         pipewire pipewire-pulse pipewire-jack wireplumber \
         hyprland xdg-desktop-portal-hyprland xdg-desktop-portal-gtk \
         polkit \
@@ -609,6 +609,12 @@ First boot:
     "Enrolling TPM2 (signed PCR 11 policy)" lines above.
   - Prompts for the 48-digit recovery key if TPM enrollment failed at
     install time. Postinstall §7.5 retries from the running system.
+
+Secure Boot stays OFF. Install pre-staged keys + signed binaries +
+.auth files at /boot/EFI/sbctl-keys/ for a one-trip BIOS file-load
+enable: see runbook/phase-3-handoff.md "Upgrade Paths → Secure Boot
+via sbctl" — single BIOS dance, single recovery-key prompt at next
+boot, silent forever after.
 
 Log in as 'tom', then:
     ./postinstall.sh           # installs yay, zgenom, chezmoi (clones

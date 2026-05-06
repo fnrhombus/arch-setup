@@ -321,26 +321,20 @@ Everything listed below is installed automatically by the phase-2 + phase-3 scri
 - **fuzzel → walker / anyrun**: Other Wayland launchers if fuzzel turns out limiting (it hasn't so far for any documented user).
 - **Single channel → Dual channel RAM**: Add matching 16GB DDR4-2400 SODIMM stick.
 - **Replace dead battery**: Lid-close-on-battery hibernate is already wired (lid-handler is unconditional-hibernate on battery) — flips live the moment the battery is back, no reconfig.
-- **Secure Boot via sbctl**: Currently disabled. The reinstall pre-installs `sbctl` (postinstall §1) and the `95-limine-redeploy.hook` is already SB-aware (`/usr/local/sbin/limine-redeploy` calls `sbctl sign -s` after copy if SB is enrolled, no-op otherwise). To enable end-to-end:
-  1. **Reboot, BIOS, set Secure Boot to "Setup Mode"** (clears stored keys, lets sbctl enroll custom ones).
-  2. **From Arch**, enroll our own keys (and optionally Microsoft's, in case you ever want to UEFI-boot a vendor-signed binary):
-     ```
-     sudo sbctl create-keys
-     sudo sbctl enroll-keys --microsoft   # --microsoft optional but harmless
-     ```
-  3. **Sign every boot artifact** (sbctl tracks them after the first `-s` and its own pacman hook keeps them signed across upgrades). With UKIs, the kernel + initramfs are inside the signed PE, so signing the UKI itself is the only kernel-side step:
-     ```
-     sudo sbctl sign -s /boot/EFI/BOOT/BOOTX64.EFI
-     sudo sbctl sign -s /usr/share/limine/BOOTX64.EFI
-     sudo sbctl sign -s /boot/EFI/Linux/arch-linux.efi
-     sudo sbctl sign -s /boot/EFI/Linux/arch-linux-lts.efi
-     sudo sbctl verify     # confirm all 4 say "Signed"
-     ```
-  4. **Reboot, BIOS, flip Secure Boot to "User Mode" (enabled)**. First boot will prompt for the LUKS recovery key — PCR 7 changed (SB toggled on), so the TPM seal is invalid.
-  5. **Type the LUKS recovery key** from the photograph you took during install. System unlocks.
-  6. **Re-enroll TPM against the new PCR state**:
+- **Secure Boot via sbctl**: Disabled by default but **install pre-stages everything** for a one-trip BIOS file-load — sbctl keys generated, all 4 EFI binaries signed (limine fallback + source, both UKIs, all kept fresh by the `zz-sbctl.hook` across upgrades), and PK/KEK/db exported as `.auth` files at `/boot/EFI/sbctl-keys/` ready for the BIOS file picker. To enable end-to-end (one BIOS trip, one recovery-key prompt at next boot, silent forever after):
+  1. **Reboot, F2 → Secure Boot → Expert Key Management.**
+  2. Tick **Enable Custom Mode** (the Save/Replace/Append/Delete buttons activate).
+  3. **PK** radio → **Replace from File** → `EFI/sbctl-keys/PK.auth` (replaces the factory Dell PK with ours).
+  4. **KEK** radio → **Append from File** → `EFI/sbctl-keys/KEK.auth` (added alongside the Microsoft KEK so MS-signed firmware tools still run).
+  5. **db** radio → **Append from File** → `EFI/sbctl-keys/db.auth` (added alongside Microsoft UEFI CAs).
+  6. Back to **Secure Boot → Secure Boot Enable** → tick.
+  7. Save & exit. Reboot.
+  8. At the LUKS prompt, type the 48-digit recovery key from your photograph (PCR 7 changed when SB flipped on; expected once).
+  9. Login as tom, then re-bind the TPM seal to the new PCR 7:
      ```
      sudo /usr/local/sbin/tpm2-reseal-luks
      sudo reboot
      ```
-  7. Subsequent boots are silent again — the seal now binds to the new PCR 7 (SB-on) and survives every kernel update via the signed-PCR-11 UKI policy.
+  10. Boot is silent again. Secure Boot is wired; TPM seals against signed PCR 11 + PCR 7=SB-on. Subsequent kernel/limine upgrades stay silent (sbctl pacman hook re-signs binaries; TPM2 reseal hook keeps the seal current).
+
+  **Recovery if anything goes wrong:** in BIOS, **Reset All Keys** restores Dell's factory PK/KEK/db; turn off Custom Mode + Secure Boot Enable; you're back to the install baseline. The `.auth` files stay on the ESP for retry.

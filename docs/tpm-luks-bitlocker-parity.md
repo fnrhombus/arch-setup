@@ -86,7 +86,7 @@ sudo /usr/local/sbin/tpm2-reseal-luks                       # re-enroll with new
 # Reboot — silent unseal.
 ```
 
-**4. SB enablement** (after `sbctl enroll-keys`): see `runbook/phase-3-handoff.md` "Upgrade Paths" — first boot prompts for recovery key (PCR 7 changed), then `tpm2-reseal-luks` rebinds, then silent on the boot after that.
+**4. SB enablement** (BIOS file-load of pre-staged `.auth` files): see `runbook/phase-3-handoff.md` "Upgrade Paths → Secure Boot via sbctl" — single BIOS trip (Custom Mode → Replace PK + Append KEK + Append db + Secure Boot Enable on), then first boot prompts for the recovery key (PCR 7 changed), `tpm2-reseal-luks` rebinds, silent on the boot after that.
 
 ## Why not Option A / Option C
 
