@@ -1,5 +1,4 @@
-- [notify-send before sudo](feedback_sudo_fingerprint_announce.md) — `notify-send -u critical 'sudo' '<msg>'; sudo <cmd>` — terminal bell didn't work in user's setup.
-- [Confirm before interactive sudo](feedback_confirm_before_interactive_sudo.md) — notify-send isn't enough — ask "ready?" + state which input (swipe / PIN / password) before each one.
+- [Default to sudoa; ask before interactive sudo](feedback_confirm_before_interactive_sudo.md) — silent claude-askpass for setup; only ask + name input (swipe/PIN/password) when user auth is genuinely the test. No notify-send.
 - [Azure DDNS config](project_azure_ddns.md) — IDs live in `phase-3-arch-postinstall/setup-azure-ddns.sh` §1; non-default tenant, hardcoded `--tenant` flag.
 - [bw CLI libsecret integration](feedback_bw_cli_libsecret.md) — bwu/bw shell functions; one-time master-password seed → silent forever; same trust model as desktop "Unlock with system authentication".
 - [/etc/adjtime must be UTC](project_rtc_must_be_utc.md) — single-OS, no Windows. LOCAL setting from old dual-boot plan caused 4-hour skew that broke JWT/Azure/cert flows on 2026-04-30.
