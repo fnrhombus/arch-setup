@@ -176,9 +176,11 @@
   `pam_unix` tests typed value as password; **PIN is NOT a login factor
   by design** — `libpinpam` is excluded at this surface) → `~/.zprofile`
   execs `uwsm start hyprland-uwsm.desktop`.
-- PIN is available at the in-session re-auth surfaces (sudo, hyprlock,
-  polkit-1) where the full concurrent stack runs (`pam_fprintd_grosshack`
-  + `libpinpam` + `pam_unix`).
+- PIN is available at the in-session re-auth surfaces (sudo, physlock,
+  hyprlock, polkit-1) where the full concurrent stack runs
+  (`pam_fprintd_grosshack` + `libpinpam` + `pam_unix`). physlock is the
+  active screen lock (replaced hyprlock 2026-05-05); hyprlock's PAM
+  stack stays current as a graphical-lockscreen fallback.
 - Hyprland gets a proper graphical-session.target lifecycle through uwsm
   (env import, dependent-unit activation, clean shutdown on logout).
 - greetd + greetd-regreet stay installed and configured, just disabled.

@@ -31,7 +31,7 @@ Organized by category so you can skim. Nothing here is install instructions — 
 - **wleave** — Graphical logout/shutdown/reboot menu. GTK4 fork of the older `wlogout`; themed via matugen GTK CSS. Bound to Super+Shift+Q.
 - **awww** — Wayland wallpaper daemon with smooth transitions. Continuation of `swww` (LGFae moved/renamed it on Codeberg 2025-10). Binaries: `awww-daemon` (background), `awww img <path>` (set wallpaper).
 - **swayosd** — On-screen-display popups for volume/brightness/caps-lock. GTK4. Triggered by `swayosd-client --output-volume raise` etc. (which we wire to media keys).
-- **hyprlock** — Hyprland-native lockscreen. Layout in `~/.config/hypr/hyprlock.conf`; PAM stack at `/etc/pam.d/hyprlock` (PIN → fingerprint → password, per postinstall.sh §7a).
+- **hyprlock** — Hyprland-native graphical lockscreen. **No longer the active `lock_cmd`** — physlock replaced it 2026-05-05 (see `physlock` entry below). The package stays installed and the configs (`~/.config/hypr/hyprlock.conf`, `hyprlock.colors.conf`) + PAM stack (`/etc/pam.d/hyprlock`, the concurrent fingerprint+PIN+password stack from §7a) stay current as a recoverable fallback. Re-enable by reverting hypridle.conf's `lock_cmd` to `pidof hyprlock || hyprlock`.
 - **hypridle** — Hyprland-native idle daemon. Listens for input, fires actions on timeout (DPMS off at 28 min, lock at 30 min). No idle-hibernate.
 - **hyprpolkitagent** — Hyprland-native polkit agent. Pops up the auth dialog when an app needs root (Bitwarden unlock prompt, mount prompts, etc.).
 - **hyprpicker** — Color picker. Magnifier loupe + autocopy. Bound to Super+P.

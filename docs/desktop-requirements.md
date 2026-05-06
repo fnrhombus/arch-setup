@@ -82,8 +82,10 @@ for username + password; `/etc/pam.d/login` is the cold-boot stack —
 `pam_fprintd_grosshack` races finger vs typed input, `pam_unix` tests
 the typed value as password. **PIN is NOT a login factor** (libpinpam
 excluded at this surface by design). PIN works at the in-session
-re-auth surfaces (sudo, hyprlock, polkit-1). See postinstall.sh §7a's
-design notes. On successful login, `~/.zprofile`
+re-auth surfaces (sudo, physlock, hyprlock, polkit-1). physlock
+replaced hyprlock as the active `lock_cmd` 2026-05-05 — same PAM
+stack (`/etc/pam.d/physlock` includes hyprlock), TTY-based UX. See
+postinstall.sh §7a's design notes. On successful login, `~/.zprofile`
 checks for tty1 + no existing Wayland/X session, then execs
 `uwsm start hyprland-uwsm.desktop`. uwsm hands Hyprland a proper
 graphical-session.target lifecycle (env import, dependent-unit
@@ -383,15 +385,20 @@ themselves:
   /org/freedesktop/portal/desktop org.freedesktop.impl.portal.Settings ...`
   in addition to the per-component CSS reloads. Edge/Bitwarden pick it up
   automatically.
-- **XDPH + hyprlock + dpms-off crash mitigation.** Unresolved bug as of
-  Sep 2025 (Arch BBS #308227, XDPH#62): XDPH segfaults in libwayland-client
-  during `CCWlOutput` cleanup when hypridle fires `dpms,off` after
-  hyprlock has locked, leaving the desktop unresponsive on resume.
-  Mitigation in `hypridle.conf`: explicit `unlock_cmd = notify-send ...`
-  to fire an activity event that re-arms the portal connection; don't
-  ignore `dbus_inhibit` or `systemd_inhibit`; ensure the dpms-off listener
-  fires AFTER the lock listener (offset timeout by 1s). The earlier note
-  in this doc about a `dispatcher = on,resume` flag was wrong — that
+- **XDPH + hyprlock + dpms-off crash mitigation.** *Sidestepped 2026-05-05
+  by swapping `lock_cmd` to physlock — physlock chvts away from the
+  Hyprland VT before any DPMS transition, so the XDPH cleanup path that
+  segfaulted is never entered.* The remaining notes here document the
+  workaround that was active while hyprlock was the lock_cmd, in case
+  it ever gets re-enabled. Unresolved bug as of Sep 2025 (Arch BBS
+  #308227, XDPH#62): XDPH segfaults in libwayland-client during
+  `CCWlOutput` cleanup when hypridle fires `dpms,off` after hyprlock
+  has locked, leaving the desktop unresponsive on resume. Mitigation
+  in `hypridle.conf`: explicit `unlock_cmd = notify-send ...` to fire
+  an activity event that re-arms the portal connection; don't ignore
+  `dbus_inhibit` or `systemd_inhibit`; ensure the dpms-off listener
+  fires AFTER the lock listener (offset timeout by 1s). The earlier
+  note in this doc about a `dispatcher = on,resume` flag was wrong — that
   option doesn't exist in hypridle.
 - **Workspace overview = Hyprspace, not hyprexpo.** hyprexpo had issue #138
   (focus stuck after clicking the currently-visible workspace) AND no

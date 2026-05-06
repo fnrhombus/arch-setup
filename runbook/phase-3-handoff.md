@@ -31,8 +31,8 @@ This document is meant to be fed to Claude Code once you're inside Arch Linux. I
 - **Config**: Bare Hyprland with **Claude-authored configs in chezmoi**. NOT HyDE, NOT end-4 — every line is owned by us, applied via `chezmoi apply`. Sources at `dot_config/hypr/` in [rhombu5/dots](https://github.com/rhombu5/dots) (separate dotfiles repo, cloned to `~/.local/share/chezmoi`).
   - Entry point: `~/.config/hypr/hyprland.conf` (sources fragments)
   - Fragments: `monitors.conf`, `workspaces.conf`, `binds.conf`, `decoration.conf`, `animations.conf`, `input.conf`, `exec.conf`, `plugins.conf`, `colors.conf` (matugen-rendered)
-  - Lockscreen: `hyprlock.conf` + `hyprlock.colors.conf` (matugen)
-  - Idle daemon: `hypridle.conf` (30 min lock, 30 min DPMS off, no idle-hibernate)
+  - Lockscreen: physlock (TTY-based; chvts to a free VT for auth, Hyprland session preserved). `hyprlock.conf` + `hyprlock.colors.conf` (matugen) stay in place as a recoverable graphical-lockscreen fallback.
+  - Idle daemon: `hypridle.conf` (30 min lock via physlock, 30 min DPMS off, no idle-hibernate)
 - **Theme system**: matugen (Material You from current wallpaper) — see GLOSSARY entry. Master dark/light flip via Super+Shift+T (`~/.local/bin/theme-toggle`).
 - **Workspace strategy**: static + monitor-bound (1-5 → DP-1 external Vizio, 6-9 → eDP-1 internal, 10 → scratch floating). See `docs/desktop-requirements.md`.
 - **Keybinds**: ~85 rich custom bindings — printable cheat sheet at `runbook/keybinds.md` (auto-generated from `binds.conf` by `validate-hypr-binds --emit-cheatsheet`). Quick reference: Super+Return = ghostty, Super+B = browser, Super+E = VSCode, Super+C = claude, Super+Space = launcher, Super+V = clipboard picker, Super+, = settings panel, Super+grave = workspace overview.
@@ -306,7 +306,7 @@ Everything listed below is installed automatically by the phase-2 + phase-3 scri
 6. Git worktree workflow with Claude Code + tmux
 7. Dev environment (Docker, Node, .NET, Python, Jupyter)
 8. Touch gestures + Wacom tablet
-9. Fingerprint auth (TTY login, sudo, hyprlock screen lock)
+9. Fingerprint auth (TTY login, sudo, physlock screen lock — hyprlock is the dormant graphical fallback)
 10. Audio (PipeWire + Bluetooth)
 11. Auto-rotation for tablet mode
 12. Clipboard history (cliphist + fuzzel keybind)

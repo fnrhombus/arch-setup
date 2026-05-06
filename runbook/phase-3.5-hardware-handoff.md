@@ -14,7 +14,7 @@ Those pieces were deferred because each has real tuning surface — doing them b
 
 ### What's already working (don't re-do these)
 
-- Fingerprint (Goodix 27C6) for sudo/polkit/hyprlock
+- Fingerprint (Goodix 27C6) for sudo/polkit/physlock (hyprlock is dormant as a graphical fallback)
 - TPM-PIN via pinpam for the same services
 - Internal display (Intel UHD 620, Wayland-native)
 - External HDMI monitor (wired directly to iGPU)
