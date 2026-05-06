@@ -1992,9 +1992,15 @@ if ! command -v chezmoi >/dev/null; then
     warn "  Skipping dotfile apply — Hyprland will start with empty config."
 elif [[ -d "$DOTS_SRC/.git" ]]; then
     log "chezmoi source already present at $DOTS_SRC — pulling + applying..."
-    git -C "$DOTS_SRC" remote set-url origin "$DOTS_REPO_SSH"
+    # Pull via HTTPS so we don't depend on Bitwarden's SSH agent being
+    # unlocked — postinstall may run from a TTY before BW desktop is up,
+    # and re-runs from a graphical shell may hit the BW auto-lock window.
+    # Switch back to SSH after the pull so future user pushes go via the
+    # BW agent.
+    git -C "$DOTS_SRC" remote set-url origin "$DOTS_REPO_HTTPS"
     git -C "$DOTS_SRC" pull --ff-only \
         || warn "git pull on chezmoi source failed — applying current checkout."
+    git -C "$DOTS_SRC" remote set-url origin "$DOTS_REPO_SSH"
     chezmoi apply --force \
         || warn "chezmoi apply reported issues — check 'chezmoi status' and 'chezmoi diff'."
 else
