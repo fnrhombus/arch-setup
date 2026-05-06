@@ -815,7 +815,11 @@ AUR_PACKAGES=(
     iio-hyprland-git
     powershell-bin
     awww-bin
-    hyprlax-bin
+    # hyprlax retired 2026-05-06 — replaced by hyprmural (per-workspace
+    # static wallpapers + Hyprland IPC). Switch to plain `hyprmural` after
+    # the first GitHub release publishes the stable AUR package; until then
+    # the rolling -git flavor tracks tip-of-main.
+    hyprmural-git
     matugen-bin
     overskride
     wleave
