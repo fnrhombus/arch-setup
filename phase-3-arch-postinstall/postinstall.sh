@@ -825,6 +825,10 @@ AUR_PACKAGES=(
     # is written in §7a below to include the hyprlock auth stack.
     physlock
     bibata-cursor-theme
+    # Meta package — pulls in every ttf-*-nerd variant from extra/. The
+    # explicit ttf-jetbrains-mono-nerd / ttf-firacode-nerd in §1's pacman
+    # list stay as a safety net if AUR is unreachable on first run.
+    ttf-nerd-fonts-meta
     pacseek
     limine-snapper-sync
     # azure-ddns intentionally NOT here — see §4d below. We build the
