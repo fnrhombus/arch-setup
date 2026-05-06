@@ -1722,6 +1722,10 @@ fi
 # tree) reference sibling files via $SCRIPT_DIR, which a single-file
 # fetch wouldn't supply. Passes any args through
 # (e.g. `fnpostinstall --no-verify`).
+# mkdir: ~/.zshrc.d is normally chezmoi-created by §13's apply (it ships
+# arch-bootstrap-runner.zsh into it), but §13 runs AFTER us — so on a
+# fresh install the dir doesn't exist yet and the redirect would fail.
+mkdir -p "$HOME/.zshrc.d"
 cat > "$HOME/.zshrc.d/arch-postinstall.zsh" <<'FNEOF'
 # arch-setup: re-run the latest postinstall from GitHub, logging to /tmp.
 fnpostinstall() {
