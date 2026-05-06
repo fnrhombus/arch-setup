@@ -136,9 +136,3 @@ There is no build, lint, or test target. Work is almost entirely **editing markd
 
 - **Always do as much work in parallel as is reasonably possible.** Independent tool calls should go in a single message with multiple tool blocks; independent edits to different files should batch; independent research questions should fan out via parallel `Agent` calls. Do not serialize work that has no dependency. (Web/mobile Claude Code does not support a user-level `~/.claude/CLAUDE.md`, so this lives here as the project-scoped equivalent until that surface gains one.)
 
-## Commit discipline
-
-- **Always commit on task completion.** Never leave a finished task as uncommitted work.
-- **Commits MUST be atomic** — one logical change per commit. If uncommitted changes span multiple tasks, split them into separate commits (use `git add -p` or path-scoped `git add`).
-- **Hierarchy:** a *task* is the lowest unit of work (one commit). A *feature* is the next level up (one or more task commits that together deliver the feature).
-- **Push on feature completion.** Once all task commits that make up a feature are in, push to the remote. Don't push partial features mid-stream unless the user asks.
