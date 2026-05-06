@@ -83,19 +83,17 @@ branch (commit `9b5f364`) and ship it as the `pinpam-fnrhombus`
 package built from
 `phase-3-arch-postinstall/aur-overrides/pinpam-fnrhombus/PKGBUILD`.
 
-**Upstream tracker.** PR not yet filed (we wanted to validate end-to-end
-on the live system first; confirmed working 2026-05-05). File at
-[RazeLighter777/pinpam](https://github.com/RazeLighter777/pinpam) when
-ready — branch from `dev` per their README. Upstream is active (last
-push 2026-03-02; recent third-party MRs merged within 2-4 days).
+**Upstream tracker.**
+- Issue: [RazeLighter777/pinpam#8](https://github.com/RazeLighter777/pinpam/issues/8) — feature request.
+- PR: [RazeLighter777/pinpam#9](https://github.com/RazeLighter777/pinpam/pull/9) — `fnrhombus:try-first-pass` → `RazeLighter777:dev`, filed 2026-05-06.
+
+Upstream is active (last push 2026-03-02; recent third-party MRs merged within 2-4 days).
 
 **Schedule prompt to give Claude:**
 
-> `/schedule` a monthly agent: `gh pr list -R RazeLighter777/pinpam
-> --search "try_first_pass OR use_first_pass" --state all`. If a PR
-> with that subject is merged AND the merge commit is on `master` (or
-> the AUR `pinpam-git` PKGBUILD's `_commit` advances past the merge):
-> open a PR against arch-setup that deletes
+> `/schedule` a monthly agent: `gh pr view 9 -R RazeLighter777/pinpam`.
+> If state is `MERGED` AND the AUR `pinpam-git` PKGBUILD's `_commit`
+> advances past the merge: open a PR against arch-setup that deletes
 > `phase-3-arch-postinstall/aur-overrides/pinpam-fnrhombus/`, restores
 > `pinpam-git` to `AUR_PACKAGES` in postinstall.sh §3, removes the
 > `pinpam-fnrhombus` entry from the §3-overrides loop, updates the
