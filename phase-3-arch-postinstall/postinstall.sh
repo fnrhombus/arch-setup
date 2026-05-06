@@ -128,6 +128,21 @@ done
 [[ "$(id -un)" == "tom" ]] || die "Run as user 'tom'."
 ping -c1 -W3 archlinux.org >/dev/null || die "No network."
 
+# --- sudoa auto-detect ---
+# Replaces the `sudo -v` prerequisite for re-runs / installs where dots
+# has been applied at least once. If ~/.local/bin/claude-askpass is
+# present and successfully returns a password, export SUDO_ASKPASS so
+# the keeper below picks the askpass branch — no interactive auth at
+# all for the rest of the run.
+# Fresh installs without dots applied yet still hit the fallback below
+# (the unchanged `sudo -v` requirement); that path is preserved.
+if [[ -z "${SUDO_ASKPASS:-}" ]] \
+    && [[ -x "$HOME/.local/bin/claude-askpass" ]] \
+    && "$HOME/.local/bin/claude-askpass" >/dev/null 2>&1; then
+    export SUDO_ASKPASS="$HOME/.local/bin/claude-askpass"
+    log "sudoa detected: SUDO_ASKPASS=$SUDO_ASKPASS — postinstall will run unattended"
+fi
+
 # --- sudo keeper ---
 # A full postinstall takes 10-20 min and fires dozens of sudo calls. If sudo
 # needs fresh auth mid-run (fingerprint/PIN/password), it silently hangs the
@@ -805,6 +820,10 @@ AUR_PACKAGES=(
     overskride
     wleave
     hyprshutdown
+    # physlock: TTY-based screen lock. dots' hypridle.conf invokes this
+    # as the lock_cmd (replaced hyprlock 2026-05-05). /etc/pam.d/physlock
+    # is written in §7a below to include the hyprlock auth stack.
+    physlock
     bibata-cursor-theme
     pacseek
     limine-snapper-sync
@@ -1515,6 +1534,21 @@ for pam_file in sudo hyprlock polkit-1; do
 done
 log "  /etc/pam.d/login (no PIN — cold-boot surface)"
 printf '%s\n' "$LOGIN_STACK" | sudo tee /etc/pam.d/login >/dev/null
+
+# /etc/pam.d/physlock — TTY-based screen lock invoked from hypridle.
+# Just includes the hyprlock stack so physlock and hyprlock stay in
+# sync (same in-session auth surface: finger / PIN / password). If
+# we ever re-introduce hyprlock as the lock_cmd, this file still
+# applies — physlock is harmless when unused.
+log "  /etc/pam.d/physlock"
+sudo tee /etc/pam.d/physlock >/dev/null <<'PHYSEOF'
+#%PAM-1.0
+# arch-setup: physlock includes the hyprlock stack (in-session re-auth:
+# fingerprint + PIN + password). See postinstall.sh §7a.
+auth     include    hyprlock
+account  include    hyprlock
+session  include    hyprlock
+PHYSEOF
 
 # ---------- 7.5 LUKS TPM2 autounlock — VERIFY-ONLY (FDE per decisions.md §Q11) ----------
 # install.sh §5b is now the single source of truth for TPM2 enrollment:
@@ -2290,6 +2324,10 @@ for _f in sudo hyprlock polkit-1; do
 done
 unset _f
 check "login PAM (no PIN, cold-boot)" "grep -q pam_fprintd_grosshack /etc/pam.d/login && grep -q 'pam_unix.so try_first_pass' /etc/pam.d/login && ! grep -q libpinpam /etc/pam.d/login && ! grep -q lid-closed /etc/pam.d/login"
+# physlock — TTY-based screen lock. Pkg from AUR; PAM file written in §7a.
+check "physlock pkg" "pacman -Q physlock"
+check "physlock setuid" "test -u /usr/bin/physlock"
+check "physlock PAM stack (includes hyprlock)" "grep -qE 'include[[:space:]]+hyprlock' /etc/pam.d/physlock"
 check "pam_unix in sys-auth" "grep -q pam_unix /etc/pam.d/system-auth"
 check "LUKS root TPM2"      "sudo systemd-cryptenroll /dev/disk/by-partlabel/ArchRoot 2>/dev/null | awk 'NR>1 && \$2==\"tpm2\"{f=1} END{exit !f}'"
 check "PCR signing keypair exists" "[[ -f /etc/systemd/tpm2-pcr-public.pem && -f /etc/systemd/tpm2-pcr-private.pem ]]"
