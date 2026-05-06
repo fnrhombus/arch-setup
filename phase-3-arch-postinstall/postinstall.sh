@@ -1179,41 +1179,6 @@ sudo install -d -m 755 /var/lib/azure-ddns
 sudo systemctl daemon-reload
 sudo systemctl enable azure-ddns.timer
 
-# Stub /etc/letsencrypt/azure.ini for certbot's dns-azure plugin (same SP
-# creds as the DDNS daemon — DNS Zone Contributor covers both record
-# updates and dns-01 challenge TXT records). setup-azure-ddns.sh rewrites
-# this with real values; until then certbot-renew.timer no-ops.
-sudo install -d -m 755 /etc/letsencrypt
-if [[ ! -f /etc/letsencrypt/azure.ini ]]; then
-    sudo tee /etc/letsencrypt/azure.ini >/dev/null <<'CERTBOTEOF'
-# /etc/letsencrypt/azure.ini — credentials for certbot's dns-azure plugin.
-# mode 600, owner root. NEVER commit this file with real values.
-#
-# Mirror values from /etc/azure-ddns.env after setup-azure-ddns.sh runs.
-#
-# Issuance command (one-time, after DNS is live):
-#   sudo certbot certonly \
-#       --authenticator dns-azure \
-#       --dns-azure-credentials /etc/letsencrypt/azure.ini \
-#       --dns-azure-propagation-seconds 60 \
-#       -d metis.rhombus.rocks \
-#       --agree-tos -m <your-email> --no-eff-email
-#
-# Renewal: certbot installs certbot-renew.timer that runs `certbot renew`
-# twice daily. Idempotent — only acts within 30d of expiry.
-
-dns_azure_environment = "AzurePublicCloud"
-dns_azure_tenant_id =
-dns_azure_subscription_id =
-dns_azure_resource_group =
-dns_azure_sp_client_id =
-dns_azure_sp_client_secret =
-CERTBOTEOF
-    sudo chmod 600 /etc/letsencrypt/azure.ini
-    sudo chown root:root /etc/letsencrypt/azure.ini
-fi
-sudo systemctl enable certbot-renew.timer 2>/dev/null || true
-
 # ---------- 5. Claude Code CLI ----------
 # Two-stage install:
 #   (a) bootstrap via mise+npm — gets us a working `claude` binary
@@ -2392,9 +2357,9 @@ check "azure-ddns NM hook"  "test -x /usr/lib/NetworkManager/dispatcher.d/90-azu
 check "azure-ddns env"      "sudo test -f /etc/azure-ddns.env"
 check "azure-ddns env filled" "sudo grep -qE '^AZ_TENANT_ID=.+' /etc/azure-ddns.env"
 check "azure-ddns last run OK" "sudo systemctl status azure-ddns.service 2>/dev/null | grep -q 'status=0/SUCCESS' || ! sudo test -f /etc/azure-ddns.env || ! sudo grep -qE '^AZ_TENANT_ID=.+' /etc/azure-ddns.env"
-check "certbot"             "command -v certbot"
-check "certbot azure plugin" "sudo test -d /opt/pipx/venvs/certbot && sudo ls /opt/pipx/venvs/certbot/lib/python*/site-packages 2>/dev/null | grep -q certbot_dns_azure"
-check "LE cert (if issued)" "! test -d /etc/letsencrypt/live/metis.rhombus.rocks || sudo test -f /etc/letsencrypt/live/metis.rhombus.rocks/fullchain.pem"
+check "lego installed"      "command -v lego"
+check "lego-renew.timer"    "systemctl is-enabled lego-renew.timer"
+check "LE cert (if issued)" "! sudo test -d /etc/lego/certificates || sudo test -f /etc/lego/certificates/${LEGO_DOMAINS:-metis.rhombus.rocks}.crt"
 
 echo "-- GPU compute (NVIDIA + Docker) --"
 check "nvidia-470xx-dkms"     "pacman -Q nvidia-470xx-dkms"
@@ -2450,7 +2415,7 @@ if (( ${#RUN_WARNINGS[@]} > 0 )); then
     done
 fi
 
-# ---------- 20. Interactive follow-up (gh + bw + azure-ddns + certbot) ----------
+# ---------- 20. Interactive follow-up (gh + bw + azure-ddns + lego) ----------
 # Up to this point the install has been hands-off (modulo fprintd's
 # 13-swipe enrollment + the LUKS recovery key transcription). The next
 # four steps NEED browser auth or device-code flows, so we batch them
@@ -2464,14 +2429,13 @@ fi
 #     to get the prompts.
 #
 # Order matters: gh first (small, fast, fails locally if no browser),
-# then bw, then azure-ddns (which needs az login), then certbot
-# (depends on /etc/letsencrypt/azure.ini which setup-azure-ddns.sh
-# writes).
+# then bw, then azure-ddns (which needs az login), then lego (depends
+# on /etc/lego/lego.env which setup-azure-ddns.sh writes).
 if [[ -t 0 ]]; then
     echo
     echo "=== Interactive follow-up ==="
     echo "The remaining steps need browser / device-code auth — quickly walking"
-    echo "through gh, bw, azure-ddns, certbot. Press Ctrl+C any time to skip"
+    echo "through gh, bw, azure-ddns, lego. Press Ctrl+C any time to skip"
     echo "the rest; you can re-run individual commands manually later."
     echo
 
@@ -2520,41 +2484,27 @@ if [[ -t 0 ]]; then
         warn "~/setup-azure-ddns.sh not found — Azure DDNS not provisioned. Stage it from arch-setup/phase-3-arch-postinstall/setup-azure-ddns.sh."
     fi
 
-    # --- 20d. certbot certonly (Let's Encrypt cert) ---
-    # Only attempt if azure.ini was filled in by setup-azure-ddns.sh AND
-    # we haven't already issued a cert for metis.rhombus.rocks.
-    if [[ -x /usr/local/bin/certbot ]] || command -v certbot >/dev/null; then
-        if sudo test -f /etc/letsencrypt/live/metis.rhombus.rocks/fullchain.pem; then
-            log "Let's Encrypt cert for metis.rhombus.rocks already issued — skipping."
-        elif sudo grep -qE '^dns_azure_sp_client_id\s*=\s*[^[:space:]]+' /etc/letsencrypt/azure.ini 2>/dev/null; then
-            log "Issuing Let's Encrypt cert for metis.rhombus.rocks..."
-            # certbot prompts for email + ToS unless --agree-tos -m are passed.
-            # We use the user's gh email if available, fall back to interactive.
-            ce_email=""
-            if command -v gh >/dev/null && gh auth status >/dev/null 2>&1; then
-                gh_user=$(gh api user --jq '.login' 2>/dev/null) || gh_user=""
-                gh_id=$(gh api user --jq '.id' 2>/dev/null) || gh_id=""
-                if [[ -n "$gh_user" && -n "$gh_id" ]]; then
-                    ce_email="${gh_id}+${gh_user}@users.noreply.github.com"
-                fi
-            fi
-            ce_email_args=()
-            if [[ -n "$ce_email" ]]; then
-                ce_email_args=(--agree-tos -m "$ce_email" --no-eff-email)
-            fi
-            sudo certbot certonly \
-                --authenticator dns-azure \
-                --dns-azure-credentials /etc/letsencrypt/azure.ini \
-                --dns-azure-propagation-seconds 60 \
-                -d metis.rhombus.rocks \
-                "${ce_email_args[@]}" \
-                || warn "certbot certonly failed — see /var/log/letsencrypt/letsencrypt.log."
+    # --- 20d. lego run (initial Let's Encrypt cert via azuredns) ---
+    # Auto-issue if creds are wired (setup-azure-ddns.sh wrote
+    # /etc/lego/lego.env in §20c) and we haven't already issued.
+    # Renewal is handled by lego-renew.timer (set up in §3a).
+    if command -v lego >/dev/null && sudo test -s /etc/lego/lego.env; then
+        if sudo test -f "/etc/lego/certificates/${LEGO_DOMAINS}.crt"; then
+            log "Let's Encrypt cert for ${LEGO_DOMAINS} already issued — skipping."
+        elif sudo grep -qE '^AZURE_CLIENT_ID=.+' /etc/lego/lego.env 2>/dev/null; then
+            log "Issuing Let's Encrypt cert for ${LEGO_DOMAINS} via lego..."
+            sudo bash -c "set -a; . /etc/lego/lego.env; \
+                /usr/bin/lego --accept-tos \
+                    --email '${LEGO_EMAIL}' \
+                    --domains '${LEGO_DOMAINS}' \
+                    --dns azuredns --path /etc/lego run" \
+                || warn "lego run failed — see output. Re-run setup-azure-ddns.sh and retry."
         else
-            log "/etc/letsencrypt/azure.ini missing creds — skipping certbot. Run setup-azure-ddns.sh first."
+            log "/etc/lego/lego.env missing creds — skipping. Run setup-azure-ddns.sh first."
         fi
     fi
 else
-    log "Non-TTY run — skipping interactive setup (gh/bw/azure-ddns/certbot)."
+    log "Non-TTY run — skipping interactive setup (gh/bw/azure-ddns/lego)."
 fi
 
 echo
@@ -2593,21 +2543,22 @@ cat <<'POSTINSTALL_OUTRO'
         az login
         ~/setup-azure-ddns.sh           # idempotent; rotates secret on each run
 
-      The script writes /etc/azure-ddns.env + /etc/letsencrypt/azure.ini and
+      The script writes /etc/azure-ddns.env + /etc/lego/lego.env and
       restarts azure-ddns. First call may 403 (role propagation, ~30s–5min)
       — just retry. Timer + NM hook take over after first success.
 
 [5] Let's Encrypt cert for metis.rhombus.rocks (after step 4 succeeds):
 
-        sudo certbot certonly \
-            --authenticator dns-azure \
-            --dns-azure-credentials /etc/letsencrypt/azure.ini \
-            --dns-azure-propagation-seconds 60 \
-            -d metis.rhombus.rocks \
-            --agree-tos -m <your-email> --no-eff-email
+      §20d in this script auto-issues if creds are wired and no cert
+      exists yet. To re-issue or run manually:
 
-      certbot-renew.timer is already enabled — it'll renew within 30d
-      of expiry, twice daily, with no further action.
+        sudo bash -c 'set -a; . /etc/lego/lego.env; \
+            lego --accept-tos --email goliyth@gmail.com \
+                 --domains metis.rhombus.rocks \
+                 --dns azuredns --path /etc/lego run'
+
+      lego-renew.timer is already enabled — it renews daily within
+      30d of expiry, no further action.
 
 [6] Firewall:
       Already on (default deny in, allow out, 22/tcp ALLOW for ssh).
