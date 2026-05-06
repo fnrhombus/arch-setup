@@ -645,9 +645,12 @@ fi
 # group to call pinutil without sudo. pinutil scopes the PIN to the
 # effective user, so it MUST run as tom (not via sudo) for libpinpam.so
 # to find the PIN at PAM time. See §7 for the rationale.
+#
+# §7 wraps pinutil calls with `sg tss -c …` so the new group takes effect
+# in this same postinstall run — no need to log out and back in first.
 if ! id -nG tom | grep -qw tss; then
+    log "Adding tom to tss group (TPM access for pinutil)..."
     sudo usermod -aG tss tom
-    warn "Added tom to tss group — log out and back in for it to take effect (or pinutil setup will be skipped this run)."
 fi
 
 # ---------- 1a-numlock. Enable numlock at boot (covers greeter + TTY) ----------
@@ -1386,11 +1389,15 @@ fi
 # PAM wiring for PIN lives in §7a below (sudo + hyprlock only — not greetd).
 if command -v pinutil >/dev/null; then
     if [[ -z "${SKIP_PIN:-}" ]]; then
-        if [[ -t 0 ]] && id -nG tom | grep -qw tss; then
+        if [[ -t 0 ]]; then
             log "Setting up TPM-backed PIN for tom (digits-only, 6+ chars)..."
-            # No sudo — the PIN must belong to tom, not root. tom needs
-            # tss-group membership for /dev/tpmrm0 access (handled by §1).
-            if pinutil setup 2>&1 | tee /tmp/pinutil-setup.log; then
+            # `sg tss -c …` enters tss group context for one command. Without
+            # this, on a fresh install the postinstall shell hasn't picked up
+            # §1a-tss's `usermod -aG tss tom` yet — pinutil would inherit
+            # the cached groups and fail to open /dev/tpmrm0 (mode 660 root:tss).
+            # Effective UID stays tom — required so the PIN is scoped to tom,
+            # not root.
+            if sg tss -c 'pinutil setup' 2>&1 | tee /tmp/pinutil-setup.log; then
                 log "TPM PIN set (per pinutil)."
             elif grep -q 'already has a PIN' /tmp/pinutil-setup.log; then
                 log "TPM PIN already set — keeping (idempotent re-run)."
@@ -1404,7 +1411,7 @@ if command -v pinutil >/dev/null; then
             # NV handle errors out (TPM_RC_HANDLE / 0x18B). The reliable
             # smoke test is `pinutil test < /dev/null` — returns NoPinSet
             # if the PIN didn't actually persist.
-            if pinutil test < /dev/null 2>&1 | grep -q NoPinSet; then
+            if sg tss -c 'pinutil test < /dev/null' 2>&1 | grep -q NoPinSet; then
                 warn "pinutil test reports NoPinSet immediately after setup."
                 warn "This means the TPM NV write failed silently (likely NV"
                 warn "index conflict with BitLocker/LUKS-TPM2). PAM PIN auth"
@@ -1413,10 +1420,6 @@ if command -v pinutil >/dev/null; then
                 warn "  sudo tpm2_nvundefine 0xXXXX  # free the conflicting slot"
                 warn "  pinutil delete && pinutil setup     # (no sudo!)"
             fi
-        elif [[ -t 0 ]]; then
-            warn "Skipping pinutil setup — tom is not yet in the tss group."
-            warn "  Log out and back in (group membership refreshes on login),"
-            warn "  then run: pinutil setup"
         else
             warn "No TTY — skipping 'pinutil setup'. Run it manually after login: pinutil setup"
         fi
