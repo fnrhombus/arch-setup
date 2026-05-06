@@ -1,6 +1,7 @@
 - [Default to sudoa; ask before interactive sudo](feedback_confirm_before_interactive_sudo.md) — silent claude-askpass for setup; only ask + name input (swipe/PIN/password) when user auth is genuinely the test. No notify-send.
 - [Azure DDNS config](project_azure_ddns.md) — IDs live in `phase-3-arch-postinstall/setup-azure-ddns.sh` §1; non-default tenant, hardcoded `--tenant` flag.
 - [bw CLI libsecret integration](feedback_bw_cli_libsecret.md) — bwu/bw shell functions; one-time master-password seed → silent forever; same trust model as desktop "Unlock with system authentication".
+- [LUKS recovery key in bw has hyphens](project_luks_recovery_key_bw_format.md) — bw entry stores the 48-digit key BitLocker-style (XXXXXX-XXXXXX-…); strip non-digits with `tr -cd '0-9'` before cryptsetup/cryptenroll, expect exactly 48 digits.
 - [/etc/adjtime must be UTC](project_rtc_must_be_utc.md) — single-OS, no Windows. LOCAL setting from old dual-boot plan caused 4-hour skew that broke JWT/Azure/cert flows on 2026-04-30.
 - [wpws (per-workspace wallpaper + accent)](project_wpws.md) — Python daemon in dots, designed for extraction to its own repo. Slow path = matugen; fast path = wpws's own PIL extractor.
 - [display-watchdog](project_display_watchdog.md) — Hyprland blackout-recovery daemon in dots, designed for extraction. Lid-aware: open → re-enable internal, closed → hibernate.
@@ -10,3 +11,4 @@
 - [Inspiron 7786 HDMI port doesn't wire CEC](project_inspiron_hdmi_cec_dead.md) — exhaustively tested 2026-05-04 with 5 cables; skip CEC, use network presence (TV at 192.168.1.98) instead.
 - [Atomic shared-lib install](feedback_shared_lib_install_atomic.md) — never `cp` over a live `/usr/lib/*.so`; use `install` or `mv` to get a new inode. Observed 2026-05-04 with aquamarine causing GPF in ld.so. Also: clean up `.bak` files in /usr/lib immediately, ldconfig will pick them up.
 - [greetd is dead tech](project_greetd_not_in_use.md) — 2026-05-05: greetd no longer in use, not even as fallback. Don't reference in new design / docs / comments. Infra left inert until user asks for full purge.
+- [TPM SHA-256 bank unusable on Inspiron 7786](project_tpm_sha256_bank_unavailable.md) — `sha256: []` in tpm2_getcap pcrs is a hardware/firmware limitation; cryptenroll always falls back to SHA-1; don't try to fix.
