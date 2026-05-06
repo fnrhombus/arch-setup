@@ -207,10 +207,11 @@ sudo pacman -Syu --noconfirm --needed \
     network-manager-applet pavucontrol hyprpwcenter ttf-material-symbols-variable blueman udiskie \
     nwg-look nwg-displays \
     qt5ct qt6ct papirus-icon-theme \
-    imv zathura zathura-pdf-poppler \
+    imv zathura zathura-pdf-poppler vlc \
+    waydroid \
     iio-sensor-proxy libwacom wtype \
     mission-center \
-    remmina freerdp \
+    remmina freerdp dialog openbsd-netcat \
     ufw \
     azure-cli lego rclone \
     memtest86+ memtest86+-efi \
@@ -284,6 +285,18 @@ if command -v nvidia-ctk >/dev/null; then
     fi
 fi
 
+# ---------- 1a-waydroid. Enable waydroid-container.service ----------
+# waydroid runs Android in an LXC container. The package (§1) pulls in lxc;
+# binder_linux is built into the stock Arch kernel (CONFIG_ANDROID_BINDER_IPC=m,
+# auto-loaded by waydroid-container.service), so no DKMS module needed.
+#
+# Service enable here makes the container manager start at boot. Actually
+# downloading the Android system image requires `sudo waydroid init`, which
+# is interactive (~1 GB pull, prompts for vanilla vs gapps) — left for the
+# user to run manually post-install.
+log "Enabling waydroid-container.service..."
+sudo systemctl enable --now waydroid-container.service
+
 # ---------- 1a-dockur. Windows VM compose for dockur/windows + WinApps ----------
 # dockur/windows runs Win11 in QEMU under Docker, fully unattended on first
 # `docker compose up`. Replaces the prior libvirt+QEMU stack: smaller
@@ -311,7 +324,7 @@ name: windows
 services:
   windows:
     image: dockurr/windows
-    container_name: windows
+    container_name: WinApps
     environment:
       VERSION: "11"
       RAM_SIZE: "8G"
@@ -624,7 +637,7 @@ if (( SKIP_WINDOWS_INSTALL == 1 )); then
 else
     log "Starting dockur/windows VM in background (install runs in parallel)..."
     sudo docker compose -f /etc/dockur-windows/compose.yaml up -d \
-        || warn "docker compose up failed — see 'docker logs windows'."
+        || warn "docker compose up failed — see 'docker logs WinApps'."
 fi
 
 # ---------- 1a-tss. TPM access for tom (needed by pinutil) ----------
@@ -2178,7 +2191,7 @@ else
     health=""
     last_health=""
     while (( $(date +%s) < deadline )); do
-        health=$(sudo docker inspect --format='{{if .State.Health}}{{.State.Health.Status}}{{else}}no-healthcheck{{end}}' windows 2>/dev/null || echo "missing")
+        health=$(sudo docker inspect --format='{{if .State.Health}}{{.State.Health.Status}}{{else}}no-healthcheck{{end}}' WinApps 2>/dev/null || echo "missing")
         if [[ "$health" == "healthy" ]]; then
             log "  Windows VM is up (container health=healthy)."
             break
@@ -2190,7 +2203,7 @@ else
         sleep 30
     done
     if [[ "$health" != "healthy" ]]; then
-        warn "Windows install did not reach 'healthy' within 45 min — check 'sudo docker logs windows' or http://127.0.0.1:8006/"
+        warn "Windows install did not reach 'healthy' within 45 min — check 'sudo docker logs WinApps' or http://127.0.0.1:8006/"
     fi
 fi
 
@@ -2390,7 +2403,7 @@ check "winapps.conf docker"  "grep -q '^WAFLAVOR=\"docker\"' $HOME/.config/winap
 # Container may be absent if user passed --skip-windows-install — pass if
 # absent OR if it exists and is currently running. sudo because tom may
 # not be in the docker group yet in this shell.
-check "windows VM (if present)" "! sudo docker ps -a --format '{{.Names}}' 2>/dev/null | grep -q '^windows$' || sudo docker ps --format '{{.Names}}' 2>/dev/null | grep -q '^windows$'"
+check "windows VM (if present)" "! sudo docker ps -a --format '{{.Names}}' 2>/dev/null | grep -q '^WinApps$' || sudo docker ps --format '{{.Names}}' 2>/dev/null | grep -q '^WinApps$'"
 
 echo "-- snapshots / udev / planters --"
 check "snapper config /"    "sudo test -f /etc/snapper/configs/root"
@@ -2624,7 +2637,7 @@ cat <<'POSTINSTALL_OUTRO'
           waiting on container health=healthy.
 
       Verify the VM is up:
-        docker ps                       # 'windows' container, healthy
+        docker ps                       # 'WinApps' container, healthy
         # OR open http://127.0.0.1:8006/ — direct VM display (noVNC).
 
       Configure WinApps (one-time, after VM is up):
@@ -2633,6 +2646,9 @@ cat <<'POSTINSTALL_OUTRO'
         # writes ~/.local/bin/winapps + ~/.local/share/applications/
         # *.desktop entries. For a guided run instead, omit the
         # --setupAllOfficiallySupportedApps flag for the wizard.
+        # Note: container is named 'WinApps' (matches WinApps's hardcoded
+        # `--filter name=WinApps` probe) while the compose project + service
+        # + volume stay 'windows' to preserve the dockur volume identity.
 
       VS Enterprise activation:
         On first launch of Visual Studio inside the VM, sign in with
@@ -2646,8 +2662,8 @@ cat <<'POSTINSTALL_OUTRO'
       Hyprland windows via FreeRDP.
 
       Stop / start the VM:
-        docker stop windows             # release ~8G RAM when not in use
-        docker start windows            # boots the existing Windows install
+        docker stop WinApps             # release ~8G RAM when not in use
+        docker start WinApps            # boots the existing Windows install
         # `restart: unless-stopped` in the compose means it auto-starts
         # at boot unless you manually stopped it.
 
