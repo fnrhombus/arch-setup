@@ -116,7 +116,7 @@ Grouped by purpose. Full list lives in `install.sh`/`chroot.sh`/`postinstall.sh`
 - **Desktop shell / UI** — `waybar`, `swaync`, `swayosd`, `fuzzel`, `cliphist`, `wl-clipboard`, `grim`, `slurp`, `satty`, `hyprshot`
 - **File managers / viewers** — `nautilus`, `yazi`, `imv`, `zathura`, `zathura-pdf-poppler`, `vlc`
 - **Terminal / editors** — `ghostty`, `helix`, `vim`, `tmux`, `zsh`
-- **CLI utilities** — `bat`, `fd`, `ripgrep`, `eza`, `lsd`, `btop`, `jq`, `fzf`, `zoxide`, `direnv`, `sd`, `go-yq`, `xh`, `tldr`, `pkgfile`, `man-db`, `man-pages`
+- **CLI utilities** — `bat`, `fd`, `ripgrep`, `eza`, `lsd`, `btop`, `jq`, `fzf`, `zoxide`, `direnv`, `sd`, `go-yq`, `xh`, `glow`, `tldr`, `pkgfile`, `man-db`, `man-pages`
 - **Fonts / icons** — `noto-fonts`, `noto-fonts-emoji`, `ttf-jetbrains-mono-nerd`, `ttf-firacode-nerd`, `ttf-material-symbols-variable`, `terminus-font`, `papirus-icon-theme`
 - **Theming** — `nwg-look`, `nwg-displays`, `qt5ct`, `qt6ct`
 - **2-in-1 hardware** — `iio-sensor-proxy`, `libwacom`, `wtype`
