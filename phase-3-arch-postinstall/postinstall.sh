@@ -312,6 +312,9 @@ sudo systemctl enable --now waydroid-container.service
 # install — they can run it manually later.
 log "Writing dockur/windows compose + OEM first-boot script..."
 sudo install -d -m 755 /etc/dockur-windows /etc/dockur-windows/oem
+# First-run only — preserve user RAM/disk/port tunings on re-run. Delete
+# the file before re-running postinstall to pick up upstream compose changes.
+if [[ ! -f /etc/dockur-windows/compose.yaml ]]; then
 sudo tee /etc/dockur-windows/compose.yaml >/dev/null <<'DOCKUREOF'
 # /etc/dockur-windows/compose.yaml — Win11 + VS Enterprise, exposed via
 # RDP on 127.0.0.1:3389 for WinApps. Web UI at http://127.0.0.1:8006/
@@ -350,6 +353,7 @@ services:
 volumes:
   windows_data:
 DOCKUREOF
+fi
 
 # OEM first-boot scripts. dockur/windows copies the /oem mount into
 # C:\OEM in the guest and SetupComplete.cmd executes any *.bat / *.cmd
@@ -951,7 +955,8 @@ unset _override _ovr_dir _upstream
 # so winapps-setup talks to the dockur container instead of libvirt.
 #
 # Idempotent: subsequent runs `git pull` to refresh; the symlink is
-# unconditional (ln -sf); the conf file is rewritten each run.
+# unconditional (ln -sf); the conf file is first-run only so user
+# tweaks (RDP creds, port) survive re-runs — delete it to regen.
 log "Installing WinApps from upstream (winapps-org/winapps)..."
 if [[ ! -d /opt/winapps/.git ]]; then
     sudo git clone --depth 1 https://github.com/winapps-org/winapps.git /opt/winapps \
@@ -968,15 +973,17 @@ fi
 # the compose USERNAME/PASSWORD; IP is loopback because compose binds
 # 3389 to 127.0.0.1 only.
 install -d -m 755 "$XDG_CONFIG_HOME/winapps"
-cat >"$XDG_CONFIG_HOME/winapps/winapps.conf" <<'WACONFEOF'
-# Auto-written by postinstall §3-winapps. Edit if you change the dockur
-# compose USERNAME/PASSWORD or the port bindings.
+if [[ ! -f "$XDG_CONFIG_HOME/winapps/winapps.conf" ]]; then
+    cat >"$XDG_CONFIG_HOME/winapps/winapps.conf" <<'WACONFEOF'
+# First-run default written by postinstall §3-winapps. Edit freely —
+# postinstall won't clobber this on re-runs (delete the file to regen).
 RDP_USER="Docker"
 RDP_PASS="Docker"
 RDP_DOMAIN=""
 RDP_IP="127.0.0.1"
 WAFLAVOR="docker"
 WACONFEOF
+fi
 log "  WinApps installed (backend=docker). Run 'winapps-setup --user' once the dockur VM is up to wire desktop entries."
 
 # ---------- 3-edge. Microsoft Edge: suppress OOBE / welcome / sign-in nags ----------
