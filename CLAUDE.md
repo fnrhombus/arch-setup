@@ -131,6 +131,7 @@ There is no build, lint, or test target. Work is almost entirely **editing markd
 
 - Markdown checkboxes (`- [ ]`) in `docs/decisions.md` track unmet requirements — tick them as work completes, don't delete them.
 - Platform-specific notes in prose should stay plain; the `[Windows]`/`[WSL]` annotation convention is for the user's global `~/.claude/CLAUDE.md`, not for this repo's content.
+- **Keep the README "What gets set up" inventory current.** Whenever you add, remove, or rename a pacman/AUR package, systemd unit, system file, pacman hook, PAM stack entry, planter, or any other observable thing this repo installs or configures, update [`README.md`](README.md) in the same commit. The README is the human-facing index of "what does this install" — if it lies, the next reinstall surprises Tom. Mirror equivalent changes in [`docs/decisions.md`](docs/decisions.md) when the change reflects a *decision*, not just an addition.
 
 ## Working style
 
