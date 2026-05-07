@@ -14,6 +14,10 @@
 # Claude Code worktrees (per-session sandboxes, not source)
 /.claude/worktrees/
 
+# Claude Code per-project memory — public repo, may contain identifiers
+# safer kept local. Per ~/.claude/CLAUDE.md "Project memory" rule.
+/.claude/memory/
+
 # Temp working files
 .tmp-*
 
