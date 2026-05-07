@@ -1715,203 +1715,15 @@ fnpostinstall() {
 }
 FNEOF
 
-# ---------- 10. zgenom + zsh config (enriched from fnwsl) ----------
+# ---------- 10. zgenom (zsh plugin manager) ----------
+# zgenom itself is just a git clone — the plugin list, .zshrc, and
+# .zsh_aliases all come from chezmoi-managed dots (§13). Plugin-cache
+# warmup happens at §13a after `chezmoi apply` puts the canonical
+# .zshrc in place.
 if [[ ! -d "$HOME/.zgenom" ]]; then
     log "Cloning zgenom..."
     retry git clone https://github.com/jandamm/zgenom.git "$HOME/.zgenom"
 fi
-
-log "Writing ~/.zshrc..."
-cat > "$HOME/.zshrc" <<'ZSHEOF'
-# --- Powerlevel10k instant prompt (must be near top) ---
-if [[ -r "${XDG_CACHE_HOME:-$HOME/.cache}/p10k-instant-prompt-${(%):-%n}.zsh" ]]; then
-  source "${XDG_CACHE_HOME:-$HOME/.cache}/p10k-instant-prompt-${(%):-%n}.zsh"
-fi
-
-# --- Zgenom plugin manager ---
-ZGEN_DIR="${HOME}/.zgenom"
-source "${ZGEN_DIR}/zgenom.zsh"
-
-if ! zgenom saved; then
-  zgenom ohmyzsh
-  zgenom ohmyzsh plugins/sudo
-  zgenom ohmyzsh plugins/colored-man-pages
-  zgenom ohmyzsh plugins/extract
-  zgenom ohmyzsh plugins/command-not-found
-  zgenom ohmyzsh plugins/docker
-  zgenom ohmyzsh plugins/docker-compose
-  zgenom ohmyzsh plugins/npm
-  zgenom ohmyzsh plugins/pip
-  zgenom ohmyzsh plugins/dotnet
-  zgenom load zdharma-continuum/fast-syntax-highlighting
-  zgenom load zsh-users/zsh-autosuggestions
-  zgenom load zsh-users/zsh-history-substring-search
-  zgenom load zsh-users/zsh-completions
-  zgenom load Aloxaf/fzf-tab
-  zgenom load unixorn/fzf-zsh-plugin
-  zgenom load romkatv/powerlevel10k powerlevel10k
-  zgenom save
-  zgenom compile "$HOME/.zshrc"
-fi
-
-# --- History ---
-HISTFILE=~/.zsh_history
-HISTSIZE=100000
-SAVEHIST=100000
-setopt APPEND_HISTORY SHARE_HISTORY HIST_EXPIRE_DUPS_FIRST HIST_IGNORE_DUPS \
-       HIST_IGNORE_ALL_DUPS HIST_FIND_NO_DUPS HIST_IGNORE_SPACE \
-       HIST_SAVE_NO_DUPS HIST_REDUCE_BLANKS
-
-# --- Shell options ---
-setopt NO_BEEP INTERACTIVE_COMMENTS MULTIOS
-
-# --- Completion ---
-autoload -Uz compinit
-if [[ -n ~/.zcompdump(#qN.mh+24) ]]; then
-  compinit
-else
-  compinit -C
-fi
-autoload -Uz bashcompinit && bashcompinit
-# Claude Code ships completions via `claude --print-completion zsh` at runtime.
-# Previous versions sourced a bash-completion file we never wrote — that was
-# dead code. Source only if the binary is actually on PATH, otherwise
-# mise-shim startup is a ~200ms tax on every shell for nothing.
-if command -v claude &>/dev/null; then
-    eval "$(claude --print-completion zsh 2>/dev/null)" || true
-fi
-zstyle ':completion:*' use-cache on
-zstyle ':completion:*' cache-path ~/.zsh/cache
-zstyle ':completion:*' menu select
-zstyle ':completion:*' matcher-list 'm:{a-zA-Z}={A-Za-z}'
-
-# --- PATH ---
-export PATH="$HOME/.local/bin:$PATH"
-typeset -aU path
-
-# --- Tool inits ---
-eval "$(mise activate zsh)"
-eval "$(zoxide init zsh)"
-eval "$(direnv hook zsh)"
-
-# --- Aliases ---
-source ~/.zsh_aliases 2>/dev/null
-
-# --- Local overrides ---
-for f in ~/.zshrc.d/*(N); do source "$f"; done
-
-# --- Report commands that ran >2s ---
-REPORTTIME=2
-
-# --- Powerlevel10k config ---
-[[ -f ~/.p10k.zsh ]] && source ~/.p10k.zsh
-ZSHEOF
-
-# No pre-shipped ~/.p10k.zsh on purpose: first zsh launch fires `p10k configure`,
-# the interactive wizard that writes ~/.p10k.zsh based on user taste. Sourcing
-# of ~/.p10k.zsh is already wired in the .zshrc block above — once the wizard
-# finishes, subsequent shells pick the config up.
-
-log "Writing ~/.zsh_aliases..."
-cat > "$HOME/.zsh_aliases" <<'ALIASEOF'
-# --- Navigation ---
-alias ..="cd .."
-alias ...="cd ../.."
-alias ....="cd ../../.."
-
-# --- ls (eza) ---
-alias ls='eza --group-directories-first --icons'
-alias ll='eza -l --git --group-directories-first --icons'
-alias la='eza -la --git --group-directories-first --icons'
-alias lt='eza --tree --level=2 --icons'
-alias tree='eza --tree --icons'
-
-# --- bat ---
-alias cat='bat --paging=never'
-
-# --- mc: make directory and cd into it ---
-mc() { mkdir -p "$1" && cd "$1"; }
-
-# --- bw (Bitwarden CLI): unlock the vault using libsecret (gnome-keyring) ---
-# Same auth model as the desktop app's "Unlock with system authentication"
-# toggle: master password lives in gnome-keyring (unlocked at login by
-# PAM), CLI pulls it silently to unlock the BW vault for this shell.
-#
-# First call in a fresh keyring prompts for the master password ONCE
-# (`secret-tool store ...`) and persists it. Every subsequent shell can
-# `bwu` without typing anything — the keyring is already unlocked from
-# PAM at login.
-#
-# To wipe the stored master password (e.g. after rotating it):
-#     secret-tool clear service bitwarden user master
-bwu() {
-    local pw session
-    for attempt in 1 2; do
-        # 1. Try the keyring first (silent on subsequent calls).
-        if ! pw=$(secret-tool lookup service bitwarden user master 2>/dev/null); then
-            # 2. Fall back to interactive prompt — using `read -rs` so
-            #    we can validate non-empty BEFORE pushing into libsecret.
-            #    secret-tool store's own prompt is harder to validate.
-            echo -n "Bitwarden master password (one-time seed): " >&2
-            IFS= read -rs pw
-            echo >&2
-            if [[ -z "$pw" ]]; then
-                echo "bwu: empty password — aborting (re-run when ready)." >&2
-                return 1
-            fi
-            printf '%s' "$pw" | secret-tool store \
-                --label='Bitwarden master password' \
-                service bitwarden user master
-        fi
-        session=$(BW_PASSWORD="$pw" command bw unlock --passwordenv BW_PASSWORD --raw 2>/dev/null) || true
-        if [[ -n "$session" ]]; then
-            export BW_SESSION="$session"
-            printf '%s' "$BW_SESSION" | secret-tool store \
-                --label='Bitwarden CLI session' \
-                service bitwarden type session
-            echo "bwu: vault unlocked." >&2
-            return 0
-        fi
-        echo "bwu: that password didn't unlock the vault — wiping cached entry, re-prompting..." >&2
-        secret-tool clear service bitwarden user master 2>/dev/null
-        pw=""
-    done
-    echo "bwu: couldn't unlock after retry. Check: bw login --check; bw status" >&2
-    return 1
-}
-
-# `bw` wrapper: transparent unlock. If vault is locked or BW_SESSION
-# is missing/stale, pull the cached session from libsecret; if that's
-# also stale, re-run bwu (which uses the master password in libsecret —
-# silent unless the keyring has been wiped). End result: every `bw`
-# command Just Works in any shell after the user has run bwu once.
-#
-# Cost: one `bw status` invocation per call to gate the unlock check
-# (~100ms). Skip the gate when stdin isn't a TTY (scripts/CI) so we
-# don't accidentally prompt during automation.
-bw() {
-    if [[ -t 0 ]]; then
-        if [[ -z "${BW_SESSION:-}" ]]; then
-            BW_SESSION=$(secret-tool lookup service bitwarden type session 2>/dev/null) && export BW_SESSION
-        fi
-        local status
-        status=$(command bw status 2>/dev/null | jq -r .status 2>/dev/null)
-        if [[ "$status" == "locked" ]] || [[ "$status" == "" ]]; then
-            bwu >&2 || return $?
-        fi
-    fi
-    command bw "$@"
-}
-ALIASEOF
-
-log "Pre-building zgenom plugin cache (so first login is fast)..."
-# _POSTINSTALL_NONINTERACTIVE: signals to any interactive ~/.zshrc.d/*
-# planter (gh auth, bw login, etc.) that this is a warmup subshell —
-# they should no-op rather than blocking postinstall on browser-based
-# auth flows. The planters are designed to fire on real first logins;
-# this just keeps them from firing inside postinstall itself.
-_POSTINSTALL_NONINTERACTIVE=1 zsh -i -c 'echo zgenom warmup complete' 2>/dev/null \
-    || warn "zgenom warmup had issues; first login will rebuild."
 
 # ---------- 11. tmux config — handled by chezmoi (§13) ----------
 # dot_tmux.conf in rhombu5/dots is the source of truth (Ctrl+a prefix, splits open
@@ -1986,6 +1798,16 @@ else
         warn "chezmoi init --apply failed — Hyprland will start with empty config. Re-run 'chezmoi init --apply $DOTS_REPO_HTTPS' once network is up."
     fi
 fi
+
+# ---------- 13a. zgenom plugin cache warmup ----------
+# Pre-build zgenom's plugin cache so the user's first interactive shell
+# isn't a 5-10s cold-cache wait. Runs against dots' .zshrc (chezmoi-applied
+# above). _POSTINSTALL_NONINTERACTIVE signals any .zshrc.d/* fragment
+# that this is a warmup subshell — they should no-op rather than blocking
+# postinstall on browser-based auth flows.
+log "Pre-building zgenom plugin cache (so first login is fast)..."
+_POSTINSTALL_NONINTERACTIVE=1 zsh -i -c 'echo zgenom warmup complete' 2>/dev/null \
+    || warn "zgenom warmup had issues; first login will rebuild."
 
 # ---------- 13b. Plant arch-setup-bootstraps (planters) ----------
 # Planters are one-shot scripts that fire on first interactive shell via
