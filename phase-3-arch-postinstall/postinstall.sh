@@ -1956,6 +1956,31 @@ if [[ -f "$HOME/.config/systemd/user/hyprmural.service" ]]; then
         || warn "hyprmural.service enable failed — re-run inside a graphical session (or systemctl --user enable --now hyprmural.service manually)."
 fi
 
+# Enable the rest of the graphical-session daemons promoted from
+# `exec-once` to systemd user units (2026-05-08). Motivation: hypridle
+# was observed to disappear silently mid-session — no coredump, no
+# journal trail under exec-once — leaving lock-on-idle dead until
+# reboot. Owning these as systemd user units gives journald capture +
+# Restart= recovery.
+#
+#   hypridle.service        upstream + dots-shipped drop-in raising
+#                           Restart=on-failure → Restart=always
+#   cliphist.service        upstream (wl-paste --watch cliphist store)
+#   swayosd-server.service  this repo's chezmoi (dots)
+#   iio-hyprland.service    this repo's chezmoi (dots)
+#   display-watchdog.service this repo's chezmoi (dots)
+#
+# WantedBy=graphical-session.target so they all auto-start once §0 of
+# exec.conf brings that target up. The is-active guard is a no-op-on-
+# rerun safety: the loop is otherwise idempotent.
+log "Enabling promoted graphical-session daemons..."
+systemctl --user daemon-reload
+for u in hypridle.service cliphist.service swayosd-server.service \
+         iio-hyprland.service display-watchdog.service; do
+    systemctl --user enable --now "$u" 2>/dev/null \
+        || warn "$u enable failed — re-run inside a graphical session (systemctl --user enable --now $u)."
+done
+
 # Hyprland plugins via hyprpm — eager build, lazy enable.
 #
 # Design (rewritten 2026-04-30 after a Hyprspace HEAD crash sent the
