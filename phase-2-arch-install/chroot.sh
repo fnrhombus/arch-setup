@@ -10,8 +10,9 @@
 #   - hibernate via btrfs swapfile (resume= + resume_offset= in /etc/kernel/cmdline)
 #   - NVIDIA blacklist (MX250 Optimus — Intel iGPU only, decisions.md §Q5)
 #   - NetworkManager + bluetooth + fprintd enabled (greetd is installed
-#     and PAM-wired here but disabled by postinstall §1f — bare-TTY login
-#     is the active surface; greetd stays as a recoverable fallback)
+#     and PAM-wired here for legacy reasons but disabled by postinstall
+#     §1f — bare-TTY login is the only active login surface; greetd
+#     infra is left inert pending full purge)
 #   - greetd PAM stack from system-files/pam.d/greetd (gnome-keyring + fprintd)
 #   - yay build is done in phase-3 (needs non-root + network)
 
