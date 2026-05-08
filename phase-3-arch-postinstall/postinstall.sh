@@ -1073,37 +1073,53 @@ WACONFEOF
 fi
 log "  WinApps installed (backend=docker). Run 'winapps-setup --user' once the dockur VM is up to wire desktop entries."
 
-# ---------- 3-edge. Microsoft Edge: suppress OOBE / welcome / sign-in nags ----------
+# ---------- 3-edge. Microsoft Edge: suppress OOBE, set sensible defaults ----------
 # Edge's default first-launch flow drops the user into a multi-page welcome
 # wizard ("Make Edge yours" → sign-in prompt → choose appearance → import →
 # pin to taskbar) BEFORE navigating to whatever URL xdg-open passed it.
 # That broke the user during `gh auth login`: the device-code URL was
 # requested, but Edge stayed on edge://welcome-edge until OOBE finished.
 #
-# Managed-policy file at /etc/opt/edge/policies/managed/ short-circuits
-# all of that. HideFirstRunExperience is the single most important key;
-# the others suppress nags that show up later (sign-in pop-ups, telemetry
-# banners, Microsoft Rewards promos, etc).
+# Two policy files split by intent:
+#
+#   policies/managed/      — enforced, non-overridable. Locks the setting in
+#                            Edge UI ("Managed by your organization" ribbon).
+#                            Reserve for things that MUST stick across user
+#                            edits — currently just the OOBE block.
+#
+#   policies/recommended/  — defaults applied at first run, user-overridable
+#                            in edge://settings. No "managed" ribbon. Used
+#                            for sensible cruft-suppression (no Rewards / no
+#                            promo tabs) and for re-enabling diagnostic
+#                            uploads (MetricsReportingEnabled) that we want
+#                            on for crash debugging but the user can turn
+#                            off if they want.
+#
+# Policies dropped from the previous setup because they matched Edge's stock
+# defaults (so the policy was a no-op): DefaultBrowserSettingEnabled (true),
+# BrowserSignin (1 / optional), SyncDisabled (false). Re-add to managed/ only
+# if a future Edge release changes its default.
 #
 # Policy reference:
 #   https://learn.microsoft.com/en-us/deployedge/microsoft-edge-policies
 if pacman -Q microsoft-edge-stable-bin >/dev/null 2>&1; then
-    log "Writing Edge managed policy (suppress OOBE / sign-in / promos)..."
-    sudo install -d -m 755 /etc/opt/edge/policies/managed
-    sudo tee /etc/opt/edge/policies/managed/arch-setup.json >/dev/null <<'EDGEPOLICYEOF'
+    log "Writing Edge managed + recommended policy files..."
+    sudo install -d -m 755 /etc/opt/edge/policies/managed /etc/opt/edge/policies/recommended
+    sudo tee /etc/opt/edge/policies/managed/arch-setup.json >/dev/null <<'EDGEMANAGEDEOF'
 {
-    "HideFirstRunExperience": true,
-    "DefaultBrowserSettingEnabled": true,
-    "BrowserSignin": 1,
+    "HideFirstRunExperience": true
+}
+EDGEMANAGEDEOF
+    sudo tee /etc/opt/edge/policies/recommended/arch-setup.json >/dev/null <<'EDGERECOMMENDEDEOF'
+{
     "RestoreOnStartup": 1,
-    "SyncDisabled": false,
-    "MetricsReportingEnabled": false,
+    "MetricsReportingEnabled": true,
     "PersonalizationReportingEnabled": false,
     "PromotionalTabsEnabled": false,
     "ShowMicrosoftRewards": false,
     "PromotionsEnabled": false
 }
-EDGEPOLICYEOF
+EDGERECOMMENDEDEOF
 fi
 
 # ---------- 3a. lego (Let's Encrypt cert issuance via Azure DNS) ----------
