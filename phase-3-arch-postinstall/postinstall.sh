@@ -2013,9 +2013,25 @@ if command -v snapper >/dev/null && [[ ! -f /etc/snapper/configs/root ]]; then
         sudo sed -i 's|^SUBVOLUME=.*|SUBVOLUME="/"|' /etc/snapper/configs/root
         sudo sed -i 's|^ALLOW_USERS=.*|ALLOW_USERS="tom"|' /etc/snapper/configs/root
         # Register the config name so `snapper list-configs` sees it.
-        if ! grep -q '^SNAPPER_CONFIGS=.*root' /etc/conf.d/snapper 2>/dev/null; then
-            echo 'SNAPPER_CONFIGS="root"' | sudo tee -a /etc/conf.d/snapper >/dev/null
-        fi
+        # Idempotent: delete every existing SNAPPER_CONFIGS= line, then
+        # append ours. The package default is `SNAPPER_CONFIGS=""` near
+        # the top of the file, and snapper uses the FIRST occurrence —
+        # so a naïve `tee -a` leaves the empty default winning over our
+        # appended `="root"`. Symptom: `snapper list-configs` over D-Bus
+        # returns empty even though the file in /etc/snapper/configs/
+        # exists; limine-snapper-sync (which queries snapperd) thinks
+        # no config exists, falls through to its `snapper create-config`
+        # auto-init, which fails on our pre-existing .snapshots
+        # subvolume and rolls back by deleting the config file we just
+        # wrote. End result: every pacman transaction quietly destroys
+        # our snapper config until this fix is in place.
+        sudo sed -i '/^SNAPPER_CONFIGS=/d' /etc/conf.d/snapper
+        echo 'SNAPPER_CONFIGS="root"' | sudo tee -a /etc/conf.d/snapper >/dev/null
+        # snapperd caches the config list at startup. Force a re-read
+        # so anything that queries via D-Bus during this run (notably
+        # limine-snapper-sync, fired by the baseline snapshot below
+        # and by every subsequent pacman transaction) sees our config.
+        sudo systemctl try-restart snapperd 2>/dev/null || true
         sudo chown -R :tom /.snapshots 2>/dev/null || true
         sudo chmod 750 /.snapshots
         # Baseline snapshot — safe now that config exists and .snapshots is writable.
