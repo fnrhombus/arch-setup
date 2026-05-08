@@ -5,7 +5,10 @@
 if [[ -n "${_POSTINSTALL_NONINTERACTIVE:-}" ]]; then
     return 0
 fi
-if [[ -t 0 ]]; then
+# `[[ -o interactive ]]`, not `[[ -t 0 ]]`: p10k's instant-prompt
+# redirects fd 0 during .zshrc init, so `-t 0` returns false in
+# Ghostty/Hyprland zsh — the prompts below would silently never run.
+if [[ -o interactive ]]; then
   if command -v bw &>/dev/null && ! bw login --check &>/dev/null; then
     echo ""
     echo "=== arch: Bitwarden CLI login (for secrets scripting) ==="

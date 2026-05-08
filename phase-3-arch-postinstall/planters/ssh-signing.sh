@@ -7,7 +7,10 @@ fi
 # Explicitly set SSH_AUTH_SOCK to the Bitwarden socket here (rather than rely
 # on .zshrc.d load order) so we never wire signing to the wrong agent's key
 # if some future drop-in sets a competing SSH_AUTH_SOCK first.
-if [[ -t 0 ]] && command -v gh &>/dev/null && gh auth status &>/dev/null \
+# `[[ -o interactive ]]`, not `[[ -t 0 ]]`: p10k's instant-prompt
+# redirects fd 0 during .zshrc init, so `-t 0` returns false in
+# Ghostty/Hyprland zsh — this whole block would silently never run.
+if [[ -o interactive ]] && command -v gh &>/dev/null && gh auth status &>/dev/null \
    && [[ -S "$HOME/.bitwarden-ssh-agent.sock" ]]; then
   _pubkey=$(SSH_AUTH_SOCK="$HOME/.bitwarden-ssh-agent.sock" ssh-add -L 2>/dev/null | head -1)
   if [[ "$_pubkey" == ssh-* ]]; then

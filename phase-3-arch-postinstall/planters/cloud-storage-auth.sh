@@ -5,7 +5,12 @@
 if [[ -n "${_POSTINSTALL_NONINTERACTIVE:-}" ]]; then
     return 0
 fi
-[[ -t 0 ]] || return 0
+# `[[ -o interactive ]]`, not `[[ -t 0 ]]`: powerlevel10k's instant-prompt
+# redirects fd 0 during .zshrc init, so `-t 0` returns false in any
+# Ghostty/Hyprland zsh that uses p10k — the planter would silently
+# return 0 every login. The actual question is whether the shell
+# itself is interactive, which is what `-o interactive` answers.
+[[ -o interactive ]] || return 0
 
 _dbox_done=0
 _gdrive_done=0
