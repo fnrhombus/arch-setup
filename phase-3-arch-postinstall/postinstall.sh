@@ -219,6 +219,7 @@ sudo pacman -Syu --noconfirm --needed \
     sbctl \
     mise chezmoi github-cli \
     docker docker-compose docker-buildx nvidia-container-toolkit \
+    libvirt qemu-full virt-manager edk2-ovmf swtpm \
     snapper snap-pac \
     cmake cpio
 
@@ -297,11 +298,26 @@ fi
 log "Enabling waydroid-container.service..."
 sudo systemctl enable --now waydroid-container.service
 
+# ---------- 1a-libvirt. libvirt + QEMU + virt-manager: general VM stack ----------
+# §1's pacman pass installs libvirt, qemu-full, virt-manager, edk2-ovmf, swtpm.
+# Socket-activated daemon (libvirtd.socket) — not the .service — so the
+# daemon spins up on first virsh/virt-manager call rather than at boot.
+# Adding tom to the libvirt group grants access without sudo. Windows-
+# specific VMs go through dockur/windows (§1a-dockur below); this stack
+# carries general-purpose VMs (other distros, cross-arch via qemu-system-*,
+# kernel testing, etc.).
+log "Enabling libvirtd.socket and adding tom to libvirt group..."
+sudo systemctl enable --now libvirtd.socket
+if ! id -nG tom | grep -qw libvirt; then
+    sudo usermod -aG libvirt tom
+    warn "Added tom to libvirt group — log out and back in for it to take effect."
+fi
+
 # ---------- 1a-dockur. Windows VM compose for dockur/windows + WinApps ----------
 # dockur/windows runs Win11 in QEMU under Docker, fully unattended on first
-# `docker compose up`. Replaces the prior libvirt+QEMU stack: smaller
-# footprint (no virt-manager / libvirt daemon), declarative compose-as-
-# code, fits the existing Docker-for-cloud-storage story. WinApps
+# `docker compose up`. Used for Windows specifically — declarative
+# compose-as-code + tight WinApps integration. General-purpose VMs go
+# through the libvirt+QEMU+virt-manager stack (§1a-libvirt above). WinApps
 # (§3-winapps) bridges via FreeRDP to surface individual Windows apps
 # as Hyprland windows (Parallels-Coherence-equivalent).
 #
@@ -1855,6 +1871,18 @@ if [[ -f "$HOME/.config/systemd/user/tablet-mode-watcher.service" ]]; then
     systemctl --user daemon-reload
     systemctl --user enable --now tablet-mode-watcher.service 2>/dev/null \
         || warn "tablet-mode-watcher.service enable failed — re-run inside a graphical session (or systemctl --user enable --now tablet-mode-watcher.service manually)."
+fi
+
+# Enable hyprmural.service — the per-workspace wallpaper layer daemon.
+# Shipped via chezmoi from rhombu5/dots:
+#   dot_config/systemd/user/hyprmural.service
+# WantedBy=graphical-session.target so it auto-starts once Hyprland brings
+# the target up via §0 of dots' exec.conf.
+if [[ -f "$HOME/.config/systemd/user/hyprmural.service" ]]; then
+    log "Enabling hyprmural.service..."
+    systemctl --user daemon-reload
+    systemctl --user enable --now hyprmural.service 2>/dev/null \
+        || warn "hyprmural.service enable failed — re-run inside a graphical session (or systemctl --user enable --now hyprmural.service manually)."
 fi
 
 # Hyprland plugins via hyprpm — eager build, lazy enable.

@@ -121,6 +121,7 @@ Grouped by purpose. Full list lives in `install.sh`/`chroot.sh`/`postinstall.sh`
 - **Theming** — `nwg-look`, `nwg-displays`, `qt5ct`, `qt6ct`
 - **2-in-1 hardware** — `iio-sensor-proxy`, `libwacom`, `wtype`
 - **Containers** — `docker`, `docker-compose`, `docker-buildx`, `nvidia-container-toolkit`, `waydroid`
+- **Virtualization** — `libvirt`, `qemu-full`, `virt-manager`, `edk2-ovmf`, `swtpm` (general-purpose VMs; Windows specifically uses `dockur/windows` instead)
 - **Remote** — `remmina`, `freerdp`, `dialog`, `openbsd-netcat`
 - **Cloud / DNS / certs** — `azure-cli`, `lego`, `rclone`
 - **Dev tooling** — `mise`, `chezmoi`, `github-cli`, `cmake`, `cpio`, `git`, `curl`, `wget`
@@ -147,8 +148,8 @@ Grouped by purpose. Full list lives in `install.sh`/`chroot.sh`/`postinstall.sh`
 
 ### Services enabled
 
-- **System** — `systemd-timesyncd`, `NetworkManager`, `bluetooth`, `fprintd`, `fstrim.timer`, `smartd`, `sshd`, `ufw`, `cups.socket`, `docker`, `waydroid-container`, `numlock-on`, `lego-renew.timer`, `azure-ddns.timer`
-- **User (`tom`)** — `hyprpolkitagent`, `wallpaper-rotate.timer`, `tablet-mode-watcher`, `rclone-gdrive-bisync.timer`, `dropbox` (the latter two stay no-op until first-login planters auth them)
+- **System** — `systemd-timesyncd`, `NetworkManager`, `bluetooth`, `fprintd`, `fstrim.timer`, `smartd`, `sshd`, `ufw`, `cups.socket`, `docker`, `waydroid-container`, `libvirtd.socket`, `numlock-on`, `lego-renew.timer`, `azure-ddns.timer`
+- **User (`tom`)** — `hyprpolkitagent`, `hyprmural`, `wallpaper-rotate.timer`, `tablet-mode-watcher`, `rclone-gdrive-bisync.timer`, `dropbox` (the latter two stay no-op until first-login planters auth them)
 - **Disabled / masked**
   - `greetd.service` — disabled (TTY login active)
   - `systemd-tpm2-setup.service` — masked (benign unseal failure on fresh install)
