@@ -999,6 +999,15 @@ for _override in pinpam-fnrhombus pam-fprint-grosshack-fnrhombus; do
             log "    removing conflicting upstream pkg: $_upstream"
             sudo pacman -Rdd --noconfirm "$_upstream" || true
         fi
+        # makepkg also produces an -debug split package containing
+        # /usr/lib/debug/... files. If the upstream's -debug variant is
+        # still installed, it owns the same paths and the pacman -U
+        # below aborts with "conflicting files". Remove it too.
+        if [[ -n "$_upstream" ]] && pacman -Qq "${_upstream}-debug" >/dev/null 2>&1 \
+                && [[ "${_upstream}-debug" != "${_override}-debug" ]]; then
+            log "    removing conflicting upstream debug pkg: ${_upstream}-debug"
+            sudo pacman -Rdd --noconfirm "${_upstream}-debug" || true
+        fi
         sudo pacman -U --noconfirm ./"$_override"-*.pkg.tar.zst \
             || warn "  $_override: pacman -U failed"
     else
@@ -2016,6 +2025,20 @@ if command -v snapper >/dev/null && [[ ! -f /etc/snapper/configs/root ]]; then
         sudo snapper --no-dbus -c root create --description "clean install postinstall baseline" || \
             warn "snapper baseline failed — config is in place but no snapshot taken."
     fi
+fi
+
+# ---------- 16-limine. Point limine-snapper-sync at our subvolume layout ----------
+# Package default is ROOT_SNAPSHOTS_PATH="/@/.snapshots" (assumes
+# .snapshots is nested inside the root subvolume @). Our layout puts
+# .snapshots in its own top-level subvolume @snapshots, mounted at
+# /.snapshots. Without this fix, limine-snapper-sync fires a
+# notification on every pacman transaction complaining that
+# `@/.snapshots` doesn't match the `/@snapshots` it sees in /proc/mounts,
+# and skips updating the limine snapshot menu. Idempotent sed.
+if [[ -f /etc/limine-snapper-sync.conf ]] \
+        && ! sudo grep -q '^ROOT_SNAPSHOTS_PATH="/@snapshots"' /etc/limine-snapper-sync.conf; then
+    log "Patching ROOT_SNAPSHOTS_PATH in /etc/limine-snapper-sync.conf for our @snapshots subvolume..."
+    sudo sed -i 's|^ROOT_SNAPSHOTS_PATH=.*|ROOT_SNAPSHOTS_PATH="/@snapshots"|' /etc/limine-snapper-sync.conf
 fi
 
 # ---------- 17. USB-serial udev rules (ESP32 / Pico / FTDI / CH340) ----------
