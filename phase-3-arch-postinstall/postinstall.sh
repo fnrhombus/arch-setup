@@ -331,7 +331,19 @@ if command -v nvidia-ctk >/dev/null; then
     sudo nvidia-ctk runtime configure --runtime=docker --quiet
     post_hash=$(sudo sha256sum "$daemon_json" 2>/dev/null | awk '{print $1}' || true)
     if [[ "$pre_hash" != "$post_hash" ]]; then
-        log "  daemon.json changed — restarting docker.service"
+        log "  daemon.json changed — restarting containerd + docker.service"
+        # Restart containerd alongside docker. If §1's pacman -Syu just
+        # upgraded the docker package, the dockerd binary on disk is
+        # newer than the running PID *and* containerd-shim got bumped
+        # too — but the running containerd PID hasn't picked up the new
+        # shim yet (pacman doesn't auto-restart system services on
+        # Arch). Restarting docker alone leaves stale containerd ↔
+        # new-shim, and any subsequent `docker run` / `compose up`
+        # wedges with: failed to create TTRPC connection: unsupported
+        # protocol: \b\x03\x12Yunix (corrupted protobuf framing).
+        # try-restart is a no-op if containerd isn't active yet (fresh
+        # install — service comes up via docker.service's dependency).
+        sudo systemctl try-restart containerd 2>/dev/null || true
         sudo systemctl restart docker.service
     fi
 fi
