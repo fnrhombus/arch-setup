@@ -65,7 +65,15 @@ if command -v rclone &>/dev/null; then
             # to gdrive, which is rarely what's wanted.
             if [[ -z "$(ls -A "$HOME/GoogleDrive" 2>/dev/null)" ]]; then
                 echo "arch: seeding rclone bisync baseline (gdrive → ~/GoogleDrive)..."
-                if rclone bisync gdrive: "$HOME/GoogleDrive" --resync --resilient; then
+                # --filter-from: exclude Google Photos videos (MD5 mismatch on
+                # transfer because Google transcodes them server-side, breaking
+                # bisync's hash check). Photos sync fine; videos don't. The
+                # filter file lives in dots (chezmoi) and stays in sync with
+                # rclone-gdrive-bisync.service.
+                if rclone bisync gdrive: "$HOME/GoogleDrive" \
+                        --filter-from "$HOME/.config/rclone/gdrive-filters.txt" \
+                        --resync --resilient \
+                        --max-delete 25 --create-empty-src-dirs; then
                     mkdir -p "$HOME/.local/state"
                     touch "$_bisync_marker"
                     systemctl --user start rclone-gdrive-bisync.timer 2>/dev/null || true
