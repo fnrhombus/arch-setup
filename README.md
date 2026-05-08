@@ -194,6 +194,7 @@ Configuration written by `chroot.sh` and `postinstall.sh` (sources under
   - `ssh-signing.sh` — pull SSH pubkey from Bitwarden, set `allowedSignersFile`
   - `cloud-storage-auth.sh` — Dropbox + rclone bisync setup
   - `callisto-rdp.sh` — Callisto RDP password into GNOME keyring for Remmina
+  - `windows-rdp.sh` — WinApps VM RDP password (from `~/.config/winapps/winapps.conf`) into GNOME keyring for Remmina
 
 ### Ancillary one-shots
 
