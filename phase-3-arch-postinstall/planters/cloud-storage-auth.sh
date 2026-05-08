@@ -1,5 +1,8 @@
 #!/usr/bin/env zsh
-# arch: cloud-storage planter — link Dropbox + OAuth rclone gdrive + seed bisync baseline (self-deleting)
+# arch: cloud-storage planter — link Dropbox (official daemon, general
+# sync) + OAuth rclone gdrive (~/GoogleDrive bisync) + OAuth rclone
+# Dropbox (~/.claude memory+plans bisync) + seed each baseline.
+# Self-deleting once all three sections succeed.
 # Skipped during postinstall's zgenom warmup (which sources this file too) so
 # we don't block on a browser auth flow that warmup can't complete.
 if [[ -n "${_POSTINSTALL_NONINTERACTIVE:-}" ]]; then
@@ -14,6 +17,7 @@ fi
 
 _dbox_done=0
 _gdrive_done=0
+_claude_done=0
 
 # --- Dropbox: link account on first run ---
 if command -v dropbox &>/dev/null; then
@@ -78,12 +82,57 @@ if command -v rclone &>/dev/null; then
             _gdrive_done=1
         fi
     fi
+    # --- rclone Dropbox: claude memory + plans bisync ---
+    # Hybrid setup: official Dropbox daemon (above) handles general
+    # ~/Dropbox sync; this rclone remote selectively bisyncs just the
+    # Claude memory dirs + plans dir to dropbox:claude/ for cross-machine
+    # continuity, gated by ~/.config/rclone/claude-filters.txt.
+    _claude_marker="$HOME/.local/state/rclone-dropbox-claude-bisync-initialized"
+    _claude_filter="$HOME/.config/rclone/claude-filters.txt"
+
+    if [[ ! -f "$_rclone_conf" ]] || ! grep -q '^\[dropbox\]' "$_rclone_conf" 2>/dev/null; then
+        echo ""
+        echo "=== arch: rclone Dropbox OAuth (Claude memory + plans) ==="
+        echo "Opening a browser to authorize rclone for Dropbox."
+        # `>/dev/null` muzzles rclone's post-auth config dump — by default
+        # `rclone config create` echoes the resulting [dropbox] block to
+        # stdout, *including the access_token + refresh_token JSON*. The
+        # config gets persisted to rclone.conf either way; suppress the
+        # echo so credentials don't leak into the calling shell's
+        # transcript / journal / scrollback.
+        rclone config create dropbox dropbox >/dev/null || true
+    fi
+
+    if grep -q '^\[dropbox\]' "$_rclone_conf" 2>/dev/null && [[ -f "$_claude_filter" ]]; then
+        if [[ ! -f "$_claude_marker" ]]; then
+            echo "arch: seeding rclone bisync baseline (dropbox:claude → ~/.claude memory+plans)..."
+            # --resync-mode path2: local ~/.claude wins on the initial
+            # baseline. Without it, an empty dropbox:claude/ would wipe
+            # any local memories on first sync.
+            if rclone bisync dropbox:claude "$HOME/.claude" \
+                    --filter-from "$_claude_filter" \
+                    --resync --resync-mode path2 \
+                    --resilient --max-delete 25 --create-empty-src-dirs; then
+                mkdir -p "$HOME/.local/state"
+                touch "$_claude_marker"
+                systemctl --user start rclone-dropbox-claude-bisync.timer 2>/dev/null || true
+                _claude_done=1
+                echo "arch: claude bisync seeded — timer will sync every 5 min."
+            else
+                echo "arch: dropbox:claude bisync --resync failed — start a new shell to retry."
+            fi
+        else
+            _claude_done=1
+        fi
+    fi
+    unset _claude_marker _claude_filter
     unset _rclone_conf _bisync_marker
 fi
 
-# Self-delete only when both services are fully configured. Partial completion
-# leaves the planter in place so a future shell can finish what's left.
-if (( _dbox_done && _gdrive_done )); then
+# Self-delete only when all three sections are fully configured. Partial
+# completion leaves the planter in place so a future shell can finish
+# whatever's left.
+if (( _dbox_done && _gdrive_done && _claude_done )); then
     rm -f "$HOME/.local/share/arch-setup-bootstraps/cloud-storage-auth.sh"
 fi
-unset _dbox_done _gdrive_done
+unset _dbox_done _gdrive_done _claude_done
