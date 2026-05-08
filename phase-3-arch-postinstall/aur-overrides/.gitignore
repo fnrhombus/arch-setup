@@ -1,0 +1,10 @@
+# makepkg build artifacts
+*.pkg.tar.zst
+*.pkg.tar.zst.sig
+
+# per-package working dirs (created by makepkg run)
+*/src/
+*/pkg/
+# upstream git clones makepkg pulls under each PKGBUILD dir
+*/pinpam/
+*/pam-fprint-grosshack/
