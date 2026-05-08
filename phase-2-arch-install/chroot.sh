@@ -490,11 +490,31 @@ reseal_one() {
     local dev="$1"
     [[ -b "$dev" ]] || { echo "tpm2-reseal: $dev not present (yet?); skipping" >&2; return; }
     echo "tpm2-reseal: re-enrolling TPM2 slot on $dev..."
-    systemd-cryptenroll --wipe-slot=tpm2 "$dev" >/dev/null 2>&1 || true
-    systemd-cryptenroll --tpm2-device=auto \
-        --tpm2-public-key="$PUB" --tpm2-public-key-pcrs=11 \
-        --tpm2-pcrs=7 \
-        "$dev"
+    # Single atomic command: cryptenroll uses the existing TPM2
+    # binding to unlock LUKS (still valid post kernel/UKI rebuild
+    # via the signed-PCR-11 policy — same install-time keypair
+    # signs the new .pcrsig section), wipes the old slot, adds the
+    # new one. The two-command form (wipe-then-add) used to wedge
+    # the pacman transaction here: command #1 wiped the only TPM2
+    # slot, command #2 had no auth left and fell back to a
+    # passphrase prompt routed through systemd-ask-password —
+    # which has no agent to answer it in a pacman-hook context.
+    #
+    # If the existing TPM2 still can't auto-unlock (firmware
+    # update / TPM clear / PCR 7 drift past the policy / first run
+    # before any TPM2 is enrolled), `timeout` bails out instead of
+    # hanging forever. The pacman transaction completes cleanly;
+    # next boot prompts for the recovery key, user re-runs this
+    # script manually to re-bind.
+    if ! timeout 30 systemd-cryptenroll \
+            --wipe-slot=tpm2 \
+            --tpm2-device=auto \
+            --tpm2-public-key="$PUB" --tpm2-public-key-pcrs=11 \
+            --tpm2-pcrs=7 \
+            "$dev"; then
+        echo "tpm2-reseal: SKIPPED $dev — existing TPM2 couldn't auto-unlock (firmware change / TPM clear / PCR 7 drift / first enrollment). Recover with: sudo /usr/local/sbin/tpm2-reseal-luks  (will prompt for the LUKS recovery key)" >&2
+        return 0
+    fi
 }
 
 scan() {
