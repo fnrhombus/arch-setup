@@ -123,7 +123,11 @@ trap cleanup_on_fail EXIT
 
 confirm() {
     local prompt="${1:-Continue?}"
-    read -rp "$prompt [yes/NO]: " reply
+    # Read from /dev/tty so prompts work even if stdin is closed or
+    # piped — matches prompt_password() / gen_and_show_luks_passphrase()
+    # below. Without this, a piped invocation would silently send EOF
+    # and abort with "Aborted by user." instead of asking the human.
+    read -rp "$prompt [yes/NO]: " reply </dev/tty
     [[ "$reply" == "yes" ]] || die "Aborted by user."
 }
 
@@ -576,7 +580,8 @@ EOF
 )
 
 arch-chroot /mnt /root/chroot.sh
-rm -f /mnt/root/.pw /mnt/root/.luks
+# chroot.sh shreds /root/.pw and /root/.luks itself before exit; no
+# rm needed here.
 
 # Passphrase was only needed for luksFormat + luksAddKey; scrub from memory.
 unset LUKS_PW

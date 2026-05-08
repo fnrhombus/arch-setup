@@ -9,7 +9,9 @@
 #     load-bearing one since some firmware drops NVRAM entries on update)
 #   - hibernate via btrfs swapfile (resume= + resume_offset= in /etc/kernel/cmdline)
 #   - NVIDIA blacklist (MX250 Optimus — Intel iGPU only, decisions.md §Q5)
-#   - NetworkManager + greetd + bluetooth + fprintd enabled
+#   - NetworkManager + bluetooth + fprintd enabled (greetd is installed
+#     and PAM-wired here but disabled by postinstall §1f — bare-TTY login
+#     is the active surface; greetd stays as a recoverable fallback)
 #   - greetd PAM stack from system-files/pam.d/greetd (gnome-keyring + fprintd)
 #   - yay build is done in phase-3 (needs non-root + network)
 
@@ -290,11 +292,21 @@ install -m 644 /usr/share/limine/BOOTX64.EFI /boot/EFI/BOOT/BOOTX64.EFI
 # `|| true` because efibootmgr can fail in a chroot if /sys/firmware/efi
 # isn't mounted — install.sh handles the EFI vars mount.
 if [[ -d /sys/firmware/efi/efivars ]]; then
+    # Derive the EFI partition number from PARTLABEL=EFI (set by
+    # install.sh's sgdisk) instead of hardcoding `--part 1`. Robust to
+    # any future partition-layout change; falls back to 1 only if the
+    # lookup fails (and we log loudly so it's visible).
+    _efi_part=$(lsblk -ln -o PARTN,PARTLABEL "$SAMSUNG_DISK" | awk '$2 == "EFI" {print $1; exit}')
+    if [[ -z "$_efi_part" ]]; then
+        log "  efibootmgr: PARTLABEL=EFI not found on $SAMSUNG_DISK — falling back to --part 1"
+        _efi_part=1
+    fi
     efibootmgr --quiet --create-only \
-        --disk "$SAMSUNG_DISK" --part 1 \
+        --disk "$SAMSUNG_DISK" --part "$_efi_part" \
         --label "Limine Boot Manager" \
         --loader '\EFI\BOOT\BOOTX64.EFI' 2>/dev/null \
         || log "  efibootmgr NVRAM entry skipped (may already exist or efivars unavailable)"
+    unset _efi_part
 fi
 
 # Limine config — written to /boot/limine.conf. Each Linux entry chainloads
@@ -550,7 +562,12 @@ chmod 755 /usr/local/sbin/tpm2-reseal-luks
 # live ISO's snapshot, which can be days old; a stale DB makes `pacman -S`
 # error with "target not found" for packages that were just rebuilt. Cheap.
 log "Installing TPM2 userspace..."
-pacman -Sy --noconfirm
+# -Syu (not -Sy): avoid the partial-upgrade footgun if chroot.sh ever
+# runs against a partially-configured /mnt where some pacstrap'd
+# packages are older than the current sync DB. Cost on a fresh install
+# is small (mostly already current relative to the live ISO snapshot,
+# minus a handful of mirror-newer packages).
+pacman -Syu --noconfirm
 pacman -S --noconfirm --needed tpm2-tss tpm2-tools libsecret gnome-keyring
 
 # ---------- TPM2 PCR bank: report current state ----------
