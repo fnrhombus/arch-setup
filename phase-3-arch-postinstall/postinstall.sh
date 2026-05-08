@@ -252,7 +252,7 @@ sudo pacman -Syu --noconfirm --needed \
     ghostty fuzzel cliphist satty hyprshot \
     nautilus yazi \
     hyprland hyprlock hypridle hyprpolkitagent hyprpicker uwsm \
-    waybar swaync swayosd \
+    swaync swayosd \
     xdg-desktop-portal-gtk xdg-desktop-portal-hyprland \
     network-manager-applet pavucontrol hyprpwcenter ttf-material-symbols-variable blueman udiskie \
     nwg-look nwg-displays \
@@ -920,6 +920,15 @@ AUR_PACKAGES=(
     overskride
     wleave
     hyprshutdown
+    # waybar-git: tracking master instead of [extra]/waybar. The 0.15.0
+    # release has a known GdkMonitor property-access UAF on Wayland
+    # output remove/re-add (Waybar #3530 / #4361) — six SIGSEGVs in 4
+    # days on a clamshell+HDMI setup where eDP-1 is repeatedly disabled
+    # by the lid-handler. Fixes for that class landed on master after
+    # 0.15.0 was tagged (PR #4938 / #4946 / #5007). Switched 2026-05-08;
+    # see runbook/post-reinstall-followups.md §4 for the revert path
+    # once an extra/waybar bumps past 0.15.0 with the fixes.
+    waybar-git
     # physlock: TTY-based screen lock. dots' hypridle.conf invokes this
     # as the lock_cmd (replaced hyprlock 2026-05-05). /etc/pam.d/physlock
     # is written in §7a below to include the hyprlock auth stack.

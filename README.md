@@ -113,7 +113,7 @@ Grouped by purpose. Full list lives in `install.sh`/`chroot.sh`/`postinstall.sh`
 - **Audio** — `pipewire`, `pipewire-pulse`, `pipewire-jack`, `wireplumber`, `pavucontrol`
 - **Bluetooth** — `bluez`, `bluez-utils`, `blueman`
 - **Compositor / portals** — `hyprland`, `hyprlock`, `hypridle`, `hyprpolkitagent`, `hyprpicker`, `uwsm`, `xdg-desktop-portal-hyprland`, `xdg-desktop-portal-gtk`, `polkit`
-- **Desktop shell / UI** — `waybar`, `swaync`, `swayosd`, `fuzzel`, `cliphist`, `wl-clipboard`, `grim`, `slurp`, `satty`, `hyprshot`
+- **Desktop shell / UI** — `waybar-git` (AUR; tracking master for post-0.15.0 GdkMonitor crash fixes), `swaync`, `swayosd`, `fuzzel`, `cliphist`, `wl-clipboard`, `grim`, `slurp`, `satty`, `hyprshot`
 - **File managers / viewers** — `nautilus`, `yazi`, `imv`, `zathura`, `zathura-pdf-poppler`, `vlc`
 - **Terminal / editors** — `ghostty`, `helix`, `vim`, `tmux`, `zsh`
 - **CLI utilities** — `bat`, `fd`, `ripgrep`, `eza`, `lsd`, `btop`, `jq`, `fzf`, `zoxide`, `direnv`, `sd`, `go-yq`, `xh`, `glow`, `tldr`, `pkgfile`, `man-db`, `man-pages`

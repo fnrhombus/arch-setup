@@ -109,3 +109,46 @@ with near-zero merge probability.
   `grosshack-fnrhombus pkg` check with `pam-fprint-grosshack`
 - `runbook/GLOSSARY.md`: revert the grosshack entry to reference upstream
 - Delete this entry
+
+## 4. waybar-git swap (post-0.15.0 GdkMonitor crash fixes) — watch for stable
+
+**Background.** `waybar 0.15.0` (the [extra] version) has a recurring
+GdkMonitor property-access use-after-free on Wayland output remove/
+re-add — six SIGSEGVs in 4 days observed 2026-05-04 → 2026-05-08 on a
+clamshell+HDMI setup where the lid-handler repeatedly disables and
+re-enables eDP-1. Stack signature matches Waybar
+[#3530](https://github.com/Alexays/Waybar/issues/3530) (closed) and
+[#4361](https://github.com/Alexays/Waybar/issues/4361) (open). Fixes
+for that bug class landed on master *after* 0.15.0 was tagged in Feb
+2026 — PR
+[#4938](https://github.com/Alexays/Waybar/pull/4938) (`hyprland/window`
+UAF), [#4946](https://github.com/Alexays/Waybar/pull/4946) (Wayland
+globals leak/UAF), [#5007](https://github.com/Alexays/Waybar/pull/5007)
+(TOCTOU), among others. Switched from `waybar` to AUR `waybar-git`
+2026-05-08.
+
+The companion `waybar.service` drop-in in dots
+(`dot_config/systemd/user/waybar.service.d/restart.conf`) is the
+belt-and-suspenders auto-respawn — independent of the binary swap; keep
+it even after reverting back to stable `waybar`.
+
+**Schedule prompt to give Claude:**
+
+> `/schedule` a monthly agent: `pacman -Si waybar` against the
+> [extra] version. If the version is `> 0.15.0` AND the changelog or
+> upstream release notes reference fixes for the GdkMonitor UAF
+> (Waybar #3530/#4361 or PRs #4938/#4946/#5007), open a PR against
+> arch-setup that (a) restores `waybar` to §1's pacman -S list, (b)
+> removes the `waybar-git` block from §3's `AUR_PACKAGES`, (c) deletes
+> this entry. Ping me with the PR link.
+
+**Files to revert when fixed:**
+
+- `phase-3-arch-postinstall/postinstall.sh` §1: re-add `waybar` to the
+  pacman list (around line 255, with the other hypr* / swayosd entries).
+- `phase-3-arch-postinstall/postinstall.sh` §3: remove the `waybar-git`
+  block (comment + entry) from `AUR_PACKAGES`.
+- `README.md`: revert the "Desktop shell / UI" entry from `waybar-git`
+  back to `waybar`.
+- (`dot_config/systemd/user/waybar.service.d/restart.conf` in dots:
+  KEEP — it's independent of the package source.)
