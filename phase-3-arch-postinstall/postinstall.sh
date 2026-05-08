@@ -128,49 +128,99 @@ done
 [[ "$(id -un)" == "tom" ]] || die "Run as user 'tom'."
 ping -c1 -W3 archlinux.org >/dev/null || die "No network."
 
-# --- sudoa auto-detect ---
-# Replaces the `sudo -v` prerequisite for re-runs / installs where dots
-# has been applied at least once. If ~/.local/bin/claude-askpass is
-# present and successfully returns a password, export SUDO_ASKPASS so
-# the keeper below picks the askpass branch — no interactive auth at
-# all for the rest of the run.
-# Fresh installs without dots applied yet still hit the fallback below
-# (the unchanged `sudo -v` requirement); that path is preserved.
-if [[ -z "${SUDO_ASKPASS:-}" ]] \
-    && [[ -x "$HOME/.local/bin/claude-askpass" ]] \
-    && "$HOME/.local/bin/claude-askpass" >/dev/null 2>&1; then
+# --- sudo prep ---
+# Postinstall fires dozens of sudo calls and runs 10-20 min. We need
+# sudo to stay primed without manual interaction. Four paths, in order
+# of preference; all converge on SUDO_ASKPASS so the keeper below
+# always uses the askpass branch (robust against any installer that
+# clears sudo's timestamp mid-run):
+#
+#   1. $PASS env var set — automation escape hatch (e.g. Claude debug
+#      runs). Build a tmpfs-backed askpass from it, then unset PASS so
+#      it doesn't leak to subprocesses.
+#   2. Caller already exported SUDO_ASKPASS — respect it.
+#   3. ~/.local/bin/claude-askpass present and working (subsequent runs
+#      where dots is applied + bw seeded). Pulls password from
+#      Bitwarden silently via libsecret.
+#   4. None of the above — prompt for the sudo password ONCE here, write
+#      it to a tmpfs-backed askpass, then run hands-off. This is the
+#      fresh-install path (dots not applied yet → no claude-askpass).
+POSTINSTALL_PWFILE=
+POSTINSTALL_ASKPASS=
+
+# Builds a tmpfs-backed askpass helper from the password in $1. Sets
+# POSTINSTALL_PWFILE / POSTINSTALL_ASKPASS / SUDO_ASKPASS. Two-file
+# layout (raw-bytes pwfile + cat-the-pwfile helper) keeps shell escaping
+# out of the picture — passwords containing $, `, ', ", \, etc. all
+# survive verbatim.
+_build_tmpfs_askpass() {
+    local _pw="$1"
+    local _runtime="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}"
+    [[ -d "$_runtime" && -w "$_runtime" ]] || _runtime="/dev/shm"
+    [[ -d "$_runtime" && -w "$_runtime" ]] || _runtime="/tmp"
+    POSTINSTALL_PWFILE=$(mktemp "$_runtime/postinstall-pw.XXXXXX")
+    chmod 0600 "$POSTINSTALL_PWFILE"
+    printf '%s\n' "$_pw" > "$POSTINSTALL_PWFILE"
+    chmod 0400 "$POSTINSTALL_PWFILE"
+    POSTINSTALL_ASKPASS=$(mktemp "$_runtime/postinstall-askpass.XXXXXX")
+    cat > "$POSTINSTALL_ASKPASS" <<HELPEREOF
+#!/bin/bash
+cat "$POSTINSTALL_PWFILE"
+HELPEREOF
+    chmod 0500 "$POSTINSTALL_ASKPASS"
+    export SUDO_ASKPASS="$POSTINSTALL_ASKPASS"
+}
+
+if [[ -n "${PASS:-}" ]]; then
+    log "PASS env var detected — using as sudo password (automation escape hatch)"
+    _build_tmpfs_askpass "$PASS"
+    unset PASS
+elif [[ -n "${SUDO_ASKPASS:-}" ]] && [[ -x "${SUDO_ASKPASS}" ]] \
+        && "$SUDO_ASKPASS" >/dev/null 2>&1; then
+    log "Using pre-set SUDO_ASKPASS=$SUDO_ASKPASS"
+elif [[ -x "$HOME/.local/bin/claude-askpass" ]] \
+        && "$HOME/.local/bin/claude-askpass" >/dev/null 2>&1; then
     export SUDO_ASKPASS="$HOME/.local/bin/claude-askpass"
-    log "sudoa detected: SUDO_ASKPASS=$SUDO_ASKPASS — postinstall will run unattended"
+    log "claude-askpass detected — postinstall will run unattended"
+else
+    log "No askpass helper found — prompting for sudo password (one-time, this run only)..."
+    while :; do
+        printf 'Sudo password for %s: ' "$USER" >&2
+        if ! IFS= read -rs _PASSWORD < /dev/tty; then
+            printf '\n' >&2
+            die "Aborted (EOF on password prompt)"
+        fi
+        printf '\n' >&2
+        # -k invalidates any cached creds so we genuinely test this
+        # input; -S reads the password from stdin.
+        if printf '%s\n' "$_PASSWORD" | sudo -k -S -v 2>/dev/null; then
+            break
+        fi
+        printf 'Wrong password. Try again.\n' >&2
+    done
+    _build_tmpfs_askpass "$_PASSWORD"
+    unset _PASSWORD
 fi
+unset -f _build_tmpfs_askpass
 
 # --- sudo keeper ---
-# A full postinstall takes 10-20 min and fires dozens of sudo calls. If sudo
-# needs fresh auth mid-run (fingerprint/PIN/password), it silently hangs the
-# script — our Bash context has no TTY to prompt through. Keep the credential
-# cache warm by touching it every 60s for the life of this script.
-#
-# Two modes:
-#   - SUDO_ASKPASS exported + helper executable  → keeper can re-auth on its
-#     own via `sudo -A` when the cache expires. Robust to anything inside
-#     the run that clears the cache (some installer scripts have been observed to).
-#   - Otherwise                                    → keeper only refreshes an
-#     already-cached credential via `sudo -n -v`. A pre-run `sudo -v` is
-#     required; if the cache is ever cleared during the run, the next sudo
-#     call will hang.
-if [[ -n "${SUDO_ASKPASS:-}" ]] && [[ -x "${SUDO_ASKPASS}" ]]; then
-    sudo -A -v 2>/dev/null \
-        || die "sudo -A prime failed. Check SUDO_ASKPASS=$SUDO_ASKPASS returns the correct password."
-    sudo_refresh() { sudo -An -v 2>/dev/null || sudo -A -v 2>/dev/null; }
-else
-    sudo -n -v 2>/dev/null \
-        || die "sudo is not pre-authed. Either run 'sudo -v' in your terminal first, or export SUDO_ASKPASS pointing at a helper script that prints your password."
-    sudo_refresh() { sudo -n -v 2>/dev/null; }
-fi
+# Always uses the askpass branch since the prep above guarantees
+# SUDO_ASKPASS is set + executable. Touches the credential cache every
+# 60s; if the cache is ever cleared, the next sudo -A call re-auths via
+# the helper.
+sudo -A -v 2>/dev/null \
+    || die "sudo -A prime failed. SUDO_ASKPASS=$SUDO_ASKPASS is not returning the right password."
+sudo_refresh() { sudo -An -v 2>/dev/null || sudo -A -v 2>/dev/null; }
 (
     while sudo_refresh; do sleep 60; done
 ) &
 SUDO_KEEPER_PID=$!
-trap 'kill "$SUDO_KEEPER_PID" 2>/dev/null || true' EXIT
+trap '
+    [[ -n "${SUDO_KEEPER_PID:-}" ]] && kill "$SUDO_KEEPER_PID" 2>/dev/null || true
+    [[ -n "${POSTINSTALL_PWFILE:-}"  ]] && shred -uz "$POSTINSTALL_PWFILE" 2>/dev/null || true
+    [[ -n "${POSTINSTALL_PWFILE:-}"  ]] && rm -f "$POSTINSTALL_PWFILE" || true
+    [[ -n "${POSTINSTALL_ASKPASS:-}" ]] && rm -f "$POSTINSTALL_ASKPASS" || true
+' EXIT
 
 export HOME="/home/tom"
 export XDG_CONFIG_HOME="$HOME/.config"
