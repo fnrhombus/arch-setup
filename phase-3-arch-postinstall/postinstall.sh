@@ -245,7 +245,7 @@ sudo pacman -Syu --noconfirm --needed \
     sd go-yq xh glow \
     man-db man-pages pkgfile tldr \
     wl-clipboard grim slurp \
-    xdg-user-dirs pipewire pipewire-pulse pipewire-jack wireplumber \
+    xdg-user-dirs pipewire pipewire-pulse pipewire-jack pipewire-alsa wireplumber alsa-utils \
     noto-fonts noto-fonts-emoji ttf-jetbrains-mono-nerd ttf-firacode-nerd \
     terminus-font \
     bitwarden bitwarden-cli \
