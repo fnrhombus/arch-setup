@@ -239,24 +239,41 @@ install -d -m 755 /boot/EFI/Linux
 sed -i 's/^MODULES=.*/MODULES=(btrfs)/' /etc/mkinitcpio.conf
 sed -i 's/^HOOKS=.*/HOOKS=(base systemd autodetect modconf kms keyboard sd-vconsole block sd-encrypt filesystems fsck)/' /etc/mkinitcpio.conf
 
-# Switch presets to UKI mode + drop fallback build.
+# Switch presets: linux = dual-output (UKI + bare image), linux-lts = UKI-only.
 #
-# UKI sizes: ~80 MB default, ~160 MB fallback (autodetect strips modules
-# from the default initramfs; fallback bundles all of them). Two kernels
-# × default-only = ~160 MB on the 1 GiB ESP — plenty of room left for
-# sbctl-signed copies once Secure Boot is enrolled.
+# Why dual output for linux: the UKI is the default boot path (signed PCR 11
+# → silent TPM unlock). The bare /boot/vmlinuz-linux + /boot/initramfs-linux.img
+# pair backs the `protocol: linux` "Recovery (linux)" entry in limine.conf —
+# also the clone-source for limine-snapper-sync (it can't parse efi_chainload).
+# Both stay fresh because mkinitcpio -P rebuilds whatever the preset has
+# uncommented.
 #
-# Trade-off vs. keeping fallback: a broken autodetect on the default UKI
-# leaves no boot path. Mitigation: linux-lts default UKI IS the regression
-# fallback — kernel regressions are the canonical reason fallback exists,
-# and LTS covers that. Bad-autodetect is rare on this stable hardware.
+# Why UKI-only for linux-lts: snapshot rollback rolls back the rootfs, not
+# the kernel — one Recovery entry suffices. Dropping LTS bare initramfs
+# saves ~130 MB on the ESP and halves the per-snapshot clone cost; with
+# both, limine-snapper-sync hits the 85% ESP usage limit and refuses to
+# inject any snapshots. LTS UKI stays for kernel-regression silent boot.
+#
+# Sizes: UKI ~150 MB, bare initramfs ~130 MB. linux (UKI + bare) + linux-lts
+# (UKI) ≈ 430 MB on the 1 GiB ESP — leaves ~390 MB headroom (vs. 85% limit)
+# for sbctl-signed copies AND limine-snapper-sync's content-addressed
+# snapshot blobs.
+#
+# Why not fallback: linux-lts UKI covers the regression-of-default-kernel
+# scenario; bad-autodetect is rare on this stable hardware.
 #
 # Idempotent: multiple sed runs converge.
 for _preset in /etc/mkinitcpio.d/linux.preset /etc/mkinitcpio.d/linux-lts.preset; do
     [[ -f "$_preset" ]] || continue
     _kver="${_preset##*/}"; _kver="${_kver%.preset}"   # linux | linux-lts
+    if [[ "$_kver" == "linux" ]]; then
+        # linux: enable bare image build for the Recovery entry / snapper-sync.
+        sed -i 's|^#default_image=|default_image=|' "$_preset"
+    else
+        # linux-lts: ensure bare image is NOT built (UKI-only).
+        sed -i 's|^default_image=|#default_image=|' "$_preset"
+    fi
     sed -i \
-        -e 's|^default_image=|#default_image=|' \
         -e 's|^fallback_image=|#fallback_image=|' \
         -e "s|^PRESETS=.*|PRESETS=('default')|" \
         "$_preset"
@@ -310,33 +327,74 @@ if [[ -d /sys/firmware/efi/efivars ]]; then
     unset _efi_part
 fi
 
-# Limine config — written to /boot/limine.conf. Each Linux entry chainloads
-# a UKI from /boot/EFI/Linux/ via efi_chainload. UKIs embed their own
-# cmdline (/etc/kernel/cmdline, baked in at mkinitcpio -P time), so limine
-# doesn't need to specify it.
+# Limine config — written to /boot/limine.conf.
 #
-# Why efi_chainload instead of `protocol: linux`: the signed PCR 11
-# predictions live inside the UKI's `.pcrsig` PE section. Booting via
-# protocol: linux would unpack and re-stitch kernel+initrd, breaking the
-# UKI's PE layout and invalidating the signature → TPM refuses to unseal
-# the LUKS slot → recovery key prompt on every boot. efi_chainload runs
-# the UKI as-is (firmware loads it as a PE binary), preserving sig validity.
+# Structure: nested under a single `/+Arch Linux` parent (auto-expanded
+# directory). Required by limine-snapper-sync — the AUR tool clones a
+# `protocol: linux` sub-entry to inject snapshot menu entries, and it
+# expects a parent/child shape (README Example 2). Flat top-level entries
+# would parse fine for limine itself but limine-snapper-sync would log
+# "no kernel in /boot/limine.conf" on every snapper transaction and
+# refuse to inject anything.
 #
-# SYNTAX-CHECK: limine 8.x config format. If syntax has drifted by the
-# time this runs, see https://github.com/limine-bootloader/limine/blob/trunk/CONFIG.md
-log "Writing /boot/limine.conf (efi_chainload UKIs)..."
-cat > /boot/limine.conf <<'EOF'
+# Sub-entries:
+#   1. UKI (linux) [default]      — efi_chainload to signed UKI, silent
+#                                    TPM unlock via PCR 11 .pcrsig.
+#   2. UKI (linux-lts)            — same model, kernel-regression fallback.
+#   3. Recovery (linux)           — bare vmlinuz + initramfs via
+#                                    `protocol: linux`. NO TPM unlock
+#                                    (.pcrsig is UKI-specific) → LUKS
+#                                    passphrase prompt. Source-of-clone
+#                                    for limine-snapper-sync's snapshot
+#                                    entries.
+#
+# No "Recovery (linux-lts)" entry: snapshot rollback rolls back the
+# rootfs, not the kernel — one Recovery is enough. Dropping it saves
+# ~130 MB on the ESP and halves the per-snapshot clone cost (without
+# this, limine-snapper-sync hits the 85% ESP usage limit and refuses
+# to inject snapshots).
+#
+# Trailing `/Snapshots` is the placeholder limine-snapper-sync populates.
+#
+# Why efi_chainload for the UKI entries: signed PCR 11 predictions live
+# in the UKI's `.pcrsig` PE section. Booting via `protocol: linux` would
+# unpack and re-stitch kernel+initrd, breaking the PE layout and
+# invalidating the signature → TPM refuses to unseal → recovery key
+# prompt on every boot. efi_chainload runs the UKI as-is (firmware
+# loads it as a PE binary), preserving sig validity.
+#
+# Why `comment: machine-id=`: lets limine-snapper-sync auto-target the
+# OS block by machine-id rather than name; survives entry renames.
+#
+# SYNTAX-CHECK: limine 8.x config format (see /usr/share/doc/limine/CONFIG.md
+# or https://github.com/limine-bootloader/limine/blob/trunk/CONFIG.md).
+_machine_id=$(cat /etc/machine-id)
+log "Writing /boot/limine.conf (nested /+Arch Linux: UKIs + recovery)..."
+cat > /boot/limine.conf <<EOF
 timeout: 5
-default_entry: 1
+default_entry: Arch Linux/UKI (linux)
 
-/Arch Linux
-    protocol: efi_chainload
-    image_path: boot():/EFI/Linux/arch-linux.efi
+/+Arch Linux
+    comment: machine-id=${_machine_id}
 
-/Arch Linux (LTS)
-    protocol: efi_chainload
-    image_path: boot():/EFI/Linux/arch-linux-lts.efi
+    //UKI (linux)
+        protocol: efi_chainload
+        image_path: boot():/EFI/Linux/arch-linux.efi
+
+    //UKI (linux-lts)
+        protocol: efi_chainload
+        image_path: boot():/EFI/Linux/arch-linux-lts.efi
+
+    //Recovery (linux)
+        protocol: linux
+        kernel_path: boot():/vmlinuz-linux
+        module_path: boot():/intel-ucode.img
+        module_path: boot():/initramfs-linux.img
+        cmdline: root=/dev/mapper/cryptroot rootflags=subvol=@ resume=/dev/mapper/cryptroot resume_offset=${SWAP_RESUME_OFFSET} rw quiet
+
+/Snapshots
 EOF
+unset _machine_id
 
 # Pacman hook: re-deploy limine BIOS/UEFI binaries when the limine package
 # updates. Without this, a limine package upgrade leaves /boot/EFI/BOOT/

@@ -44,9 +44,27 @@ later by chezmoi are catalogued separately in the
   - 16 GiB NoCOW swapfile on `@swap` (hibernation-ready, `resume_offset` captured at install)
 - **Bootloader: limine** (replaced systemd-boot 2026-04-22)
   - UEFI fallback at `/boot/EFI/BOOT/BOOTX64.EFI` + NVRAM entry
-  - `/boot/limine.conf` chainloads UKIs; `memtest86+` entry added by postinstall
+  - `/boot/limine.conf` uses a nested `/+Arch Linux` parent with three sub-entries:
+    UKI(linux) [default], UKI(linux-lts), Recovery(linux). Plus a
+    `/Snapshots` placeholder for `limine-snapper-sync` and a `/Memtest86+`
+    block added by postinstall §1c.
+  - **UKI sub-entries** chainload via `protocol: efi_chainload` (silent TPM unseal).
+  - **Recovery (linux) sub-entry** uses `protocol: linux` against the bare
+    `/boot/vmlinuz-linux` + `/boot/initramfs-linux.img` pair; it
+    **prompts for the LUKS passphrase** (`.pcrsig` is UKI-specific). Exists
+    so `limine-snapper-sync` has a clonable entry shape — snapshot menu
+    entries are clones of it. Only one Recovery entry (no LTS variant)
+    because snapshot rollback rolls back the rootfs, not the kernel.
+  - `/etc/limine-snapper-sync.conf` tuning (postinstall §16):
+    `EXCLUDE_SNAPSHOT_ENTRIES="*UKI*"`, `MAX_SNAPSHOT_ENTRIES=auto`,
+    `ROOT_SNAPSHOTS_PATH="/@snapshots"`.
 - **Unified Kernel Images** (`linux`, `linux-lts`) at `/boot/EFI/Linux/`
-  - Built by `mkinitcpio` in UKI mode (`/etc/kernel/uki.conf`, `/etc/kernel/cmdline`)
+  - Built by `mkinitcpio`. Linux preset = **dual output** (`default_uki=`
+    *and* `default_image=` set, so both the UKI *and* the bare initramfs
+    the Recovery entry references stay fresh). LTS preset = **UKI-only**
+    (`default_image` commented) — saves ~130 MB on the 1 GiB ESP.
+  - UKI build governed by `/etc/kernel/uki.conf` (PCR 11 signing) and
+    `/etc/kernel/cmdline`.
   - HOOKS: `base systemd autodetect modconf kms keyboard sd-vconsole block sd-encrypt filesystems fsck`
   - `MODULES=(btrfs)` explicit
 - **Pacman hooks** for boot integrity

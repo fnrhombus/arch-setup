@@ -2113,11 +2113,129 @@ fi
 # notification on every pacman transaction complaining that
 # `@/.snapshots` doesn't match the `/@snapshots` it sees in /proc/mounts,
 # and skips updating the limine snapshot menu. Idempotent sed.
-if [[ -f /etc/limine-snapper-sync.conf ]] \
-        && ! sudo grep -q '^ROOT_SNAPSHOTS_PATH="/@snapshots"' /etc/limine-snapper-sync.conf; then
-    log "Patching ROOT_SNAPSHOTS_PATH in /etc/limine-snapper-sync.conf for our @snapshots subvolume..."
-    sudo sed -i 's|^ROOT_SNAPSHOTS_PATH=.*|ROOT_SNAPSHOTS_PATH="/@snapshots"|' /etc/limine-snapper-sync.conf
+if [[ -f /etc/limine-snapper-sync.conf ]]; then
+    if ! sudo grep -q '^ROOT_SNAPSHOTS_PATH="/@snapshots"' /etc/limine-snapper-sync.conf; then
+        log "Patching ROOT_SNAPSHOTS_PATH in /etc/limine-snapper-sync.conf for our @snapshots subvolume..."
+        sudo sed -i 's|^ROOT_SNAPSHOTS_PATH=.*|ROOT_SNAPSHOTS_PATH="/@snapshots"|' /etc/limine-snapper-sync.conf
+    fi
+    # Skip cloning UKI sub-entries — they have no `cmdline:` to mutate
+    # (the cmdline is baked into the UKI's PE section), so cloning them
+    # for snapshots is meaningless and fires a notify-send warning every
+    # pacman transaction. The Recovery sub-entry (protocol: linux) is
+    # the real clone-source; UKIs stay untouched.
+    if ! sudo grep -q '^EXCLUDE_SNAPSHOT_ENTRIES="\*UKI\*"' /etc/limine-snapper-sync.conf; then
+        log "Setting EXCLUDE_SNAPSHOT_ENTRIES=\"*UKI*\" in /etc/limine-snapper-sync.conf..."
+        sudo sed -i 's|^#\?EXCLUDE_SNAPSHOT_ENTRIES=.*|EXCLUDE_SNAPSHOT_ENTRIES="*UKI*"|' /etc/limine-snapper-sync.conf
+    fi
+    # MAX_SNAPSHOT_ENTRIES=auto: tool fits as many snapshots as the 85%
+    # ESP usage limit allows, silently dropping the oldest. Default 8 is
+    # too aggressive for our 1 GiB ESP — tool aborts with a noisy
+    # "boot partition usage will exceed 85.0% limit" instead of degrading.
+    if ! sudo grep -q '^MAX_SNAPSHOT_ENTRIES=auto' /etc/limine-snapper-sync.conf; then
+        log "Setting MAX_SNAPSHOT_ENTRIES=auto in /etc/limine-snapper-sync.conf..."
+        sudo sed -i 's|^MAX_SNAPSHOT_ENTRIES=.*|MAX_SNAPSHOT_ENTRIES=auto|' /etc/limine-snapper-sync.conf
+    fi
 fi
+
+# ---------- 16b-limine. Recovery entry + dual-output mkinitcpio for snapper-sync ----------
+# limine-snapper-sync (v1.x) clones a `protocol: linux` sub-entry to inject
+# snapshot menu entries; it can't parse `efi_chainload`/UKI entries. The
+# UKI entry is load-bearing (signed PCR 11 .pcrsig in the UKI's PE section
+# is what unseals the TPM-bound LUKS slot) so we keep it as default and
+# add a parallel `protocol: linux` "Recovery (linux)" sub-entry that
+# limine-snapper-sync can clone.
+#
+# Single Recovery entry (linux only, no linux-lts) — snapshot rollback rolls
+# back the rootfs, not the kernel; one Recovery suffices. Halves the
+# per-snapshot clone cost so we stay below the 85% ESP usage limit.
+#
+# Two independent fixes, each idempotent:
+#
+#   (a) mkinitcpio presets: uncomment `default_image=` for linux ONLY (we
+#       need the bare initramfs the Recovery (linux) entry references).
+#       Ensure linux-lts default_image stays commented (UKI-only — saves
+#       ~130 MB ESP).
+#
+#   (b) /boot/limine.conf: migrate the flat `/Arch Linux` + `/Arch Linux (LTS)`
+#       layout to a nested `/+Arch Linux` parent with UKI + Recovery (linux)
+#       sub-entries plus a trailing `/Snapshots` placeholder. Detected by
+#       absence of "//Recovery (linux)"; one-shot rewrite preserves any
+#       /Memtest86+ block already added by §1c.
+#
+# (a) preset state — track whether we changed anything so we know
+# whether to trigger mkinitcpio -P.
+_preset_changed=0
+if [[ -f /etc/mkinitcpio.d/linux.preset ]] \
+        && sudo grep -q '^#default_image=' /etc/mkinitcpio.d/linux.preset; then
+    log "Uncommenting default_image= in /etc/mkinitcpio.d/linux.preset (recovery clone-source)..."
+    sudo sed -i 's|^#default_image=|default_image=|' /etc/mkinitcpio.d/linux.preset
+    _preset_changed=1
+fi
+if [[ -f /etc/mkinitcpio.d/linux-lts.preset ]] \
+        && sudo grep -q '^default_image=' /etc/mkinitcpio.d/linux-lts.preset; then
+    log "Re-commenting default_image= in /etc/mkinitcpio.d/linux-lts.preset (UKI-only)..."
+    sudo sed -i 's|^default_image=|#default_image=|' /etc/mkinitcpio.d/linux-lts.preset
+    # Stale bare LTS initramfs from a previous dual-output build — clean up.
+    sudo rm -f /boot/initramfs-linux-lts.img
+    _preset_changed=1
+fi
+
+# (b) limine.conf migration to nested structure with recovery entries.
+if [[ -f /boot/limine.conf ]] && ! sudo grep -q '//Recovery (linux)' /boot/limine.conf; then
+    log "Migrating /boot/limine.conf to nested layout with recovery entries..."
+    _machine_id=$(cat /etc/machine-id)
+    _kernel_cmdline=$(sudo cat /etc/kernel/cmdline | tr -d '\n')
+    # Preserve /Memtest86+ block if it was already added by §1c — bool only;
+    # we re-emit the canonical form below so any stale path is corrected.
+    _has_memtest=0
+    if sudo test -f /boot/memtest86+/memtest.efi; then _has_memtest=1; fi
+    sudo cp /boot/limine.conf /boot/limine.conf.pre-recovery.bak
+    sudo tee /boot/limine.conf >/dev/null <<EOF
+timeout: 5
+default_entry: Arch Linux/UKI (linux)
+
+/+Arch Linux
+    comment: machine-id=${_machine_id}
+
+    //UKI (linux)
+        protocol: efi_chainload
+        image_path: boot():/EFI/Linux/arch-linux.efi
+
+    //UKI (linux-lts)
+        protocol: efi_chainload
+        image_path: boot():/EFI/Linux/arch-linux-lts.efi
+
+    //Recovery (linux)
+        protocol: linux
+        kernel_path: boot():/vmlinuz-linux
+        module_path: boot():/intel-ucode.img
+        module_path: boot():/initramfs-linux.img
+        cmdline: ${_kernel_cmdline}
+EOF
+    if (( _has_memtest )); then
+        sudo tee -a /boot/limine.conf >/dev/null <<'EOF'
+
+/Memtest86+
+    protocol: efi_chainload
+    image_path: boot():/memtest86+/memtest.efi
+EOF
+    fi
+    sudo tee -a /boot/limine.conf >/dev/null <<'EOF'
+
+/Snapshots
+EOF
+    log "  /boot/limine.conf migrated. Backup at /boot/limine.conf.pre-recovery.bak."
+    unset _machine_id _kernel_cmdline _has_memtest
+fi
+
+# Refresh bare initramfs if presets just changed. mkinitcpio -P writes
+# /boot/initramfs-linux.img *and* rebuilds both UKIs (existing behaviour);
+# all three finish in ~1-2 minutes total.
+if (( _preset_changed )); then
+    log "Running mkinitcpio -P to refresh bare initramfs (presets changed)..."
+    sudo mkinitcpio -P
+fi
+unset _preset_changed
 
 # ---------- 17. USB-serial udev rules (ESP32 / Pico / FTDI / CH340) ----------
 if [[ ! -f /etc/udev/rules.d/99-usb-serial.rules ]]; then

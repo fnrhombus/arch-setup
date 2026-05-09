@@ -186,8 +186,8 @@ This document is meant to be fed to Claude Code once you're inside Arch Linux. I
 - If nvidia modules are loading, check `/etc/modprobe.d/blacklist-nvidia.conf`
 
 ### Boot + storage
-- **Bootloader**: limine. Config: `/boot/limine.conf`. UEFI binary at `/boot/EFI/BOOT/BOOTX64.EFI` (fallback path so a NVRAM reset doesn't kill us). Linux entries chainload UKIs from `/boot/EFI/Linux/`.
-- **Snapper integration**: `limine-snapper-sync` auto-generates boot menu entries from snapper snapshots — pick yesterday's snapshot at the menu to roll back a bad pacman update.
+- **Bootloader**: limine. Config: `/boot/limine.conf`. UEFI binary at `/boot/EFI/BOOT/BOOTX64.EFI` (fallback path so a NVRAM reset doesn't kill us). Nested `/+Arch Linux` parent with UKI(linux/lts) [chainloaded, silent TPM unseal] + Recovery(linux) [bare `protocol: linux`, prompts for LUKS passphrase] sub-entries. The Recovery entry exists as the clone-source for limine-snapper-sync; only one (linux, not lts) — snapshot rollback rolls back the rootfs, not the kernel.
+- **Snapper integration**: `limine-snapper-sync` auto-generates boot menu entries from snapper snapshots under `/Snapshots`. Snapshot entries are clones of the Recovery (linux) sub-entry → also prompt for the LUKS passphrase. Pick yesterday's snapshot at the menu to roll back a bad pacman update. Tuned via `/etc/limine-snapper-sync.conf`: `EXCLUDE_SNAPSHOT_ENTRIES="*UKI*"`, `MAX_SNAPSHOT_ENTRIES=auto`, `ROOT_SNAPSHOTS_PATH="/@snapshots"`.
 - Samsung layout (single OS): [EFI 1GiB FAT32] [LUKS2 ~475GiB → btrfs with @, @home, @snapshots, @swap]
 - 16 GiB NoCOW swapfile inside `@swap` for hibernate (S4). `resume=/dev/mapper/cryptroot resume_offset=<N>` in `/etc/kernel/cmdline`.
 - SATA mode: AHCI (RAID hides the drives from Linux).

@@ -142,19 +142,52 @@
 
 #### A) Bootloader: limine
 - Single config file (`/boot/limine.conf`), modern actively-developed.
-- Linux entries chainload UKIs via `protocol: efi_chainload` (built by mkinitcpio + ukify, signed PCR 11 predictions in `.pcrsig` PE section). Required for the BitLocker-parity LUKS seal — see `docs/tpm-luks-bitlocker-parity.md`.
+- **Nested layout** under one `/+Arch Linux` parent (auto-expanded), per
+  limine-snapper-sync's clone-source requirement (it parses sub-entries,
+  not flat top-level entries). Three sub-entries: UKI(linux) [default],
+  UKI(linux-lts), Recovery(linux). No Recovery(linux-lts) — snapshot
+  rollback rolls back the rootfs, not the kernel, so one Recovery is
+  enough; the second would double the per-snapshot clone cost on the
+  ESP and force limine-snapper-sync into "exceeds 85% limit" abort.
+- **UKI sub-entries** chainload via `protocol: efi_chainload` (built by
+  mkinitcpio + ukify, signed PCR 11 predictions in `.pcrsig` PE section).
+  Required for the BitLocker-parity LUKS seal — see
+  `docs/tpm-luks-bitlocker-parity.md`. Default boot is silent (TPM
+  unseals). LTS UKI exists for kernel-regression silent boot.
+- **Recovery (linux) sub-entry** uses `protocol: linux` against the bare
+  `/boot/vmlinuz-linux` + `/boot/initramfs-linux.img` pair. It exists
+  *because* `limine-snapper-sync` v1.x can only clone `protocol: linux`
+  entries; without it the snapshot menu never gets populated. Booting a
+  recovery entry **prompts for the LUKS passphrase** — the UKI's `.pcrsig`
+  is unique to the UKI's PE measurement, so the bare-kernel path can't
+  unseal. Acceptable: recovery is already a "something is broken" path.
+- **mkinitcpio modes**: linux preset = dual output (`default_uki=` *and*
+  `default_image=` set, so every kernel/microcode hook refreshes the UKI
+  *and* the bare initramfs); linux-lts preset = UKI-only (`default_image`
+  stays commented). Saves ~130 MB on the ESP. The bare initramfs has to
+  stay fresh because the Recovery entry (and snapshot clones) reference
+  it directly.
+- **`limine-snapper-sync` config tuning** in `/etc/limine-snapper-sync.conf`
+  (postinstall §16): `EXCLUDE_SNAPSHOT_ENTRIES="*UKI*"` (skip cloning UKI
+  sub-entries — they have no `cmdline:` to mutate, and cloning them fires
+  spurious notify-send warnings); `MAX_SNAPSHOT_ENTRIES=auto` (fit as
+  many snapshots as the 85% ESP limit allows, silently dropping oldest);
+  `ROOT_SNAPSHOTS_PATH="/@snapshots"` (matches our top-level @snapshots
+  subvolume, not the package default `/@/.snapshots`).
 - First-class snapper-snapshot rollback in the boot menu via the AUR
-  `limine-snapper-sync` package (installed by postinstall §3) — pick yesterday's
-  snapshot from the menu when a `pacman -Syu` breaks userspace, no chroot
-  recovery dance.
+  `limine-snapper-sync` package (installed by postinstall §3) — pick
+  yesterday's snapshot from the menu when a `pacman -Syu` breaks userspace,
+  no chroot recovery dance. Snapshot entries are clones of the Recovery (linux)
+  sub-entry, so they also prompt for the LUKS passphrase.
 - UEFI binary deployed to the ESP fallback path (`/boot/EFI/BOOT/BOOTX64.EFI`)
   so a NVRAM reset (BIOS update, CMOS clear) doesn't kill the boot path —
   firmware always falls back to that path.
 - Pacman post-upgrade hook (`/etc/pacman.d/hooks/95-limine-redeploy.hook`)
   re-copies the binary on every limine package update, so the deployed copy
   never goes stale. SB-aware: re-signs via `sbctl` if Secure Boot is enrolled.
-- Recovery story: keep the Arch live USB around. limine doesn't need an
-  on-disk recovery slot — boot the USB from F12 if the main install is hosed.
+- Recovery story: pick a snapshot from the limine menu (entered via the
+  `/Snapshots` directory). Keep the Arch live USB around as the second-tier
+  fallback if limine itself is broken — boot the USB from F12.
 - **Switched from systemd-boot 2026-04-22**: snapshot-rollback wasn't
   available without a chroot dance, and `limine-snapper-sync` is the cleanest
   way in. systemd-boot is the boring-but-fine fallback if limine ever proves
