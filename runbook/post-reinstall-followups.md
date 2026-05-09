@@ -152,3 +152,28 @@ it even after reverting back to stable `waybar`.
   back to `waybar`.
 - (`dot_config/systemd/user/waybar.service.d/restart.conf` in dots:
   KEEP — it's independent of the package source.)
+
+## 5. Delete `/boot/limine.conf.pre-recovery.bak` after 2026-05-23
+
+**Background.** `postinstall.sh §16b-limine` (added 2026-05-09 in commit
+`3a77cd4`) backs up `/boot/limine.conf` to `/boot/limine.conf.pre-recovery.bak`
+the first time it migrates the flat layout to the nested `/+Arch Linux`
+layout with the Recovery (linux) sub-entry. The backup exists so that if
+the new config breaks boot, you can restore the working pre-fix file from
+a live USB without reinstalling limine. Procedure documented in
+`runbook/SURVIVAL.md` § "limine.conf got mangled".
+
+After two weeks of stable boots + at least one verified snapper-snapshot
+recovery cycle, the backup has served its purpose and just clutters the ESP.
+
+**Action when the date arrives:**
+
+```bash
+# Confirm current limine.conf is healthy (nested layout + Recovery sub-entry):
+sudo grep -q '//Recovery (linux)' /boot/limine.conf && echo OK
+# Then delete the backup:
+sudo rm /boot/limine.conf.pre-recovery.bak
+# And delete this entry from this file.
+```
+
+**Trigger date:** 2026-05-23 (two weeks after 2026-05-09).

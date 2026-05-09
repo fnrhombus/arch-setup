@@ -143,6 +143,28 @@ sudo systemctl disable --now greetd.service  # back to bare TTY
 
 ## 6. Nuclear options
 
+### limine.conf got mangled (but the binary still loads)
+
+Symptom: limine displays a syntax/parse error, OR the menu loads but no entry boots. The bootloader binary itself is fine — you just need to restore a known-good config.
+
+`postinstall.sh §16b-limine` saves a backup at **`/boot/limine.conf.pre-recovery.bak`** the first time it migrates the config to the nested layout. That's the fastest rescue: boot the Ventoy USB → unlock LUKS → mount the ESP → swap the file:
+
+```bash
+cryptsetup open /dev/disk/by-partlabel/ArchRoot cryptroot    # LUKS passphrase
+EFI=$(lsblk -rno NAME,PARTTYPE | awk '$2=="c12a7328-f81f-11d2-ba4b-00a0c93ec93b"{print "/dev/"$1; exit}')
+mkdir -p /mnt/esp && mount "$EFI" /mnt/esp
+ls -la /mnt/esp/limine.conf*           # verify .pre-recovery.bak exists
+
+cp /mnt/esp/limine.conf.pre-recovery.bak /mnt/esp/limine.conf
+sync
+umount /mnt/esp; cryptsetup close cryptroot
+reboot                                  # remove the USB
+```
+
+This restores the pre-fix flat layout. The "no kernel in /boot/limine.conf" warning will return on every snapper transaction (that's the bug postinstall §16b was fixing) — re-run postinstall to re-apply, or wait for a Claude session to debug.
+
+If `limine.conf.pre-recovery.bak` doesn't exist on the ESP (postinstall §16b never ran), use the live-USB reinstall path below.
+
 ### Arch won't boot (limine menu missing or broken)
 
 1. **F12 at the Dell logo** → pick the Netac's EFI boot entry directly. With the custom-ISO build, the Netac recovery partition holds our pre-baked ISO with `phase-2-arch-install/` in `/root/arch-setup/`. (Dotfiles aren't bundled — postinstall fetches them from [rhombu5/dots](https://github.com/rhombu5/dots) over the network.)
