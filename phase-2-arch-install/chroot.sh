@@ -223,8 +223,13 @@ EOF
 #                                       captured by install.sh §8.5.
 #   rootflags=subvol=@                 — keep root on the @ subvolume.
 #   quiet                              — keep boot logs out of the user's face.
+#   video=DP-1:3840x2160@30           — force native-res console on the 4K TV;
+#                                       without it the kernel comes up at
+#                                       1080p in the top-left quarter. UHD 620
+#                                       caps HDMI at 4K@30 (HDMI 1.4). Per-
+#                                       connector hint, so eDP-1 is unaffected.
 cat > /etc/kernel/cmdline <<EOF
-root=/dev/mapper/cryptroot rootflags=subvol=@ resume=/dev/mapper/cryptroot resume_offset=$SWAP_RESUME_OFFSET rw quiet
+root=/dev/mapper/cryptroot rootflags=subvol=@ resume=/dev/mapper/cryptroot resume_offset=$SWAP_RESUME_OFFSET rw quiet video=DP-1:3840x2160@30
 EOF
 chmod 644 /etc/kernel/cmdline
 
