@@ -1247,15 +1247,20 @@ AllowUsers tom
 SSHDEOF
 sudo systemctl enable --now sshd.service
 
-# ---------- 4b. Callisto authorized key ----------
-# Hardcoded public half of the user's "Callisto" Bitwarden vault SSH key.
-# Public keys are non-secret; private half stays in Bitwarden, surfaces via
-# the Bitwarden SSH agent socket on the originating box. Idempotent append.
-CALLISTO_PUBKEY='ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAICmgv+3Enh89mb5vutzHEgwzKitOzdrje8lQVF/bss/X thoma@callisto'
-if ! grep -qxF "$CALLISTO_PUBKEY" "$HOME/.ssh/authorized_keys"; then
-    log "Adding Callisto pubkey to authorized_keys..."
-    echo "$CALLISTO_PUBKEY" >> "$HOME/.ssh/authorized_keys"
-fi
+# ---------- 4b. Authorized SSH keys (Callisto + Ganymede) ----------
+# Public halves of the user's SSH-Key items in Bitwarden. Public keys are
+# non-secret; private halves stay in Bitwarden, surfaced via the bw SSH-agent
+# socket on each origin device. Idempotent append.
+AUTHORIZED_PUBKEYS=(
+    'ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAICmgv+3Enh89mb5vutzHEgwzKitOzdrje8lQVF/bss/X thoma@callisto'
+    'ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAILhFCMGjKIqo5SvNVqFWmlwS4s45dFluJoPuzBqpn5iO thoma@ganymede'
+)
+for _key in "${AUTHORIZED_PUBKEYS[@]}"; do
+    if ! grep -qxF "$_key" "$HOME/.ssh/authorized_keys" 2>/dev/null; then
+        log "Adding $(awk '{print $NF}' <<<"$_key") pubkey to authorized_keys..."
+        echo "$_key" >> "$HOME/.ssh/authorized_keys"
+    fi
+done
 
 # ---------- 4c. ufw: host firewall (IPv4 + IPv6) ----------
 # IPv6 puts every device on a globally routable address, so the router's
