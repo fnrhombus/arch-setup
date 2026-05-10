@@ -115,6 +115,10 @@ later by chezmoi are catalogued separately in the
   - `~/.zprofile` execs `uwsm start hyprland-uwsm.desktop`
   - `numlock-on.service` enables NumLock before login
   - `logind.conf.d/10-lid.conf` delegates lid handling to the user session
+- **Lockscreen-tty** — `getty@tty1.service` ExecStart overridden to `/usr/local/bin/lockscreen-tty`,
+  which loops btop (running as a non-privileged `lockuser`) ↔ a 30s-timeout login prompt. `/proc`
+  mounted `hidepid=2,gid=proc` so btop's process pane shows only lockuser's own procs;
+  `tom` is in the `proc` group so his own btop/htop/ps aren't gimped
 - **greetd + ReGreet** — installed but **disabled** (kept inert as a recoverable fallback;
   see memory note `project_greetd_not_in_use.md`)
 - Hyprland session entry shipped by the `hyprland` pacman package; configs come from `rhombu5/dots` via chezmoi
@@ -183,7 +187,7 @@ Configuration written by `chroot.sh` and `postinstall.sh` (sources under
 - **Hardware quirks**
   - `/etc/modprobe.d/blacklist-nvidia.conf` — display modules blacklisted, CUDA modules allowed
   - `/etc/modprobe.d/rtl8723be.conf` — `aspm=0 ant_sel=2 fwlps=N ips=N` (PCIe AER storm fix)
-- **Login / session** — `/etc/systemd/logind.conf.d/10-lid.conf`, PAM stacks (`sudo`, `hyprlock`, `polkit-1`, `physlock`, `login`, `greetd`)
+- **Login / session** — `/etc/systemd/logind.conf.d/10-lid.conf`, PAM stacks (`sudo`, `hyprlock`, `polkit-1`, `physlock`, `login`, `greetd`), `/usr/local/bin/lockscreen-tty`, `/etc/systemd/system/getty@tty1.service.d/lockscreen.conf`
 - **Network** — `/etc/NetworkManager/system-connections/*.nmconnection` (pre-seeded Wi-Fi)
 - **Pacman** — `/etc/pacman.conf` + the three hooks above in `/etc/pacman.d/hooks/`
 - **journald** — `/etc/systemd/journald.conf.d/10-size.conf`

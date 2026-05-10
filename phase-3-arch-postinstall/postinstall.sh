@@ -854,6 +854,38 @@ sudo systemctl mask systemd-tpm2-setup.service
 log "Disabling greetd.service (TTY login mode)..."
 sudo systemctl disable greetd.service 2>/dev/null || true
 
+# ---------- 1g. Lockscreen-on-tty1: btop as screensaver, login on q ----------
+# Replaces agetty on tty1 with /usr/local/bin/lockscreen-tty: shows btop as a
+# non-privileged `lockuser`. Press q in btop → login prompt; 30s of no input
+# → btop resumes. /proc mounted hidepid=2,gid=proc means btop's process pane
+# shows only lockuser's own procs (graphs still work). tom is added to the
+# proc group so his own btop/htop/ps aren't gimped by the same hidepid.
+log "Lockscreen-tty: lockuser, /proc hidepid, wrapper, drop-in..."
+
+if ! id lockuser >/dev/null 2>&1; then
+    sudo useradd --system --home-dir /var/lib/lockuser --create-home \
+        --shell /usr/sbin/nologin lockuser
+fi
+
+sudo usermod -aG proc tom
+
+# /proc hidepid takes effect on next boot (remount-on-live would gut tom's
+# already-running shell/Hyprland visibility until he re-logged in).
+if ! grep -qE '^proc.*hidepid' /etc/fstab; then
+    echo 'proc /proc proc rw,nosuid,nodev,noexec,relatime,hidepid=2,gid=proc 0 0' | \
+        sudo tee -a /etc/fstab >/dev/null
+fi
+
+sudo install -m 755 -D \
+    "$SCRIPT_DIR/system-files/lockscreen/lockscreen-tty" \
+    /usr/local/bin/lockscreen-tty
+
+sudo install -m 644 -D \
+    "$SCRIPT_DIR/system-files/lockscreen/getty@tty1-lockscreen.conf" \
+    /etc/systemd/system/getty@tty1.service.d/lockscreen.conf
+
+sudo systemctl daemon-reload
+
 # ---------- 2. yay bootstrap ----------
 if ! command -v yay >/dev/null; then
     log "Bootstrapping yay from AUR..."
