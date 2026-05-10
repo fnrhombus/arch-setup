@@ -223,13 +223,19 @@ EOF
 #                                       captured by install.sh §8.5.
 #   rootflags=subvol=@                 — keep root on the @ subvolume.
 #   quiet                              — keep boot logs out of the user's face.
-#   video=DP-1:3840x2160@30           — force native-res console on the 4K TV;
+#   video=DP-1:3840x2160@60           — force native-res console on the 4K TV;
 #                                       without it the kernel comes up at
-#                                       1080p in the top-left quarter. UHD 620
-#                                       caps HDMI at 4K@30 (HDMI 1.4). Per-
+#                                       1080p in the top-left quarter. @60
+#                                       matches what Hyprland negotiates (per
+#                                       hyprctl monitors), avoiding a fb0/DRM
+#                                       mode mismatch when Hyprland releases
+#                                       the master on chvt — which previously
+#                                       caused fb0 to fall back to 1080p,
+#                                       making openvt-spawned VTs render in
+#                                       the top-left quarter again. Per-
 #                                       connector hint, so eDP-1 is unaffected.
 cat > /etc/kernel/cmdline <<EOF
-root=/dev/mapper/cryptroot rootflags=subvol=@ resume=/dev/mapper/cryptroot resume_offset=$SWAP_RESUME_OFFSET rw quiet video=DP-1:3840x2160@30
+root=/dev/mapper/cryptroot rootflags=subvol=@ resume=/dev/mapper/cryptroot resume_offset=$SWAP_RESUME_OFFSET rw quiet video=DP-1:3840x2160@60
 EOF
 chmod 644 /etc/kernel/cmdline
 
