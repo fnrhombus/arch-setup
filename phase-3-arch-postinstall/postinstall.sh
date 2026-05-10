@@ -1786,16 +1786,11 @@ if [[ ! -f "$BW_DESKTOP_DIR/data.json" ]]; then
 EOF
 fi
 
-log "Wiring Bitwarden SSH agent into ~/.ssh/config..."
+# ~/.ssh/config (Bitwarden SSH agent wildcard + per-host shortcuts) is
+# chezmoi-managed in rhombu5/dots at home/private_dot_ssh/private_config —
+# applied at §13. Nothing between here and §13 needs ssh, so no
+# install-time fast-path is required.
 mkdir -p "$HOME/.ssh"; chmod 700 "$HOME/.ssh"
-if ! grep -q bitwarden-ssh-agent.sock "$HOME/.ssh/config" 2>/dev/null; then
-    cat >> "$HOME/.ssh/config" <<'EOF'
-
-Host *
-    IdentityAgent ~/.bitwarden-ssh-agent.sock
-EOF
-    chmod 600 "$HOME/.ssh/config"
-fi
 
 # SSH_AUTH_SOCK export lives in chezmoi-managed ~/.zshenv (rhombu5/dots
 # `dot_zshenv`), not here — .zshenv is sourced by every zsh including

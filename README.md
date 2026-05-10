@@ -210,7 +210,7 @@ Configuration written by `chroot.sh` and `postinstall.sh` (sources under
 - Bitwarden Desktop pre-seeded with self-hosted server URL + tray behaviour
 - Fingerprint enrollment (5 fingers, idempotent)
 - §7.5 stage-2 PCR 7 reseal (one passphrase prompt; silent thereafter)
-- SSH `~/.ssh/config` wired to Bitwarden agent socket; `authorized_keys` seeded
+- `~/.ssh/authorized_keys` seeded (Callisto + Ganymede). `~/.ssh/config` itself is chezmoi-managed in `rhombu5/dots` (Bitwarden agent wildcard + per-host shortcuts like `Host callisto`)
 - `~/.local/share/arch-setup-bootstraps/` — first-login planters (self-deleting):
   - `first-login.sh` — `bw login` + `gh auth login`
   - `ssh-signing.sh` — pull SSH pubkey from Bitwarden, set `allowedSignersFile`
