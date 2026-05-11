@@ -19,8 +19,13 @@ export TARGET_USER
 # the configured "login" program, then exits when that program exits.
 # --no-issue: skip /etc/issue display.
 # --font-size 32: at-a-distance readability on the 4K TV.
-# --mode 3840x2160 + --no-use-original-mode: force native panel resolution.
-# Default auto-pick lands on 1080p, leaving btop in a centered quarter.
+# --multi-monitor=largest: kmscon's default is `clone`, which mirrors the
+# same output across every connected display — and to share content it picks
+# the smallest common mode. Result on this hardware: kmscon force-enables
+# the lid-closed eDP-1 panel at its preferred 1920x1080 and clamps the text
+# grid to 1080p even though DP-1 is 4K. `largest` makes kmscon use only the
+# biggest display, leaving eDP untouched. See `man 5 kmscon.conf` for
+# multi-monitor options.
 # -- separates kmscon args from arguments to the login program (none).
 #
 # NOT exec'd: we want to run cleanup AFTER kmscon exits (chvt back to tty1
@@ -29,8 +34,7 @@ export TARGET_USER
 /usr/bin/kmscon \
     --no-issue \
     --font-size 32 \
-    --no-use-original-mode \
-    --mode 3840x2160 \
+    --multi-monitor=largest \
     -l /usr/local/bin/btop-lock-inner --
 
 # Belt-and-suspenders return-to-Hyprland once kmscon's fully exited.

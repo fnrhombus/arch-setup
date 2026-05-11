@@ -14,11 +14,12 @@ trap '/usr/bin/physlock -L 2>/dev/null' EXIT
 
 while true; do
     # btop's locale autodetect refuses without LANG=*.UTF-8.
-    LANG=en_US.UTF-8 runuser -u lockuser -- btop --force-utf || true
+    LANG=en_US.UTF-8 runuser -u lockuser -- btop --force-utf --preset 2 || true
 
     # Any single keypress exits read; -t 3 means no input → loop back to btop.
-    if read -t 3 -r -n 1 -p "Press any key to unlock as $TARGET_USER (or wait for btop) > " _; then
-        echo
+    # Blank screen after btop exits; press any key (secret) within 3s to get
+    # to the password prompt. No-input → btop resumes.
+    if read -t 3 -r -n 1 _; then
         if pamtester btop-lock "$TARGET_USER" authenticate; then
             # kmscon respawns its login program when it exits (getty-style),
             # which would put us right back into btop. Signal kmscon itself

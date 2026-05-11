@@ -881,6 +881,12 @@ if ! id lockuser >/dev/null 2>&1; then
         --shell /usr/sbin/nologin lockuser
 fi
 
+# lockuser's btop config — 500ms refresh + disks_filter trimming noise.
+sudo install -d -m 755 -o lockuser -g lockuser /var/lib/lockuser/.config/btop
+sudo install -m 644 -o lockuser -g lockuser \
+    "$SCRIPT_DIR/system-files/lockscreen/lockuser-btop.conf" \
+    /var/lib/lockuser/.config/btop/btop.conf
+
 # tom in `proc` so /proc hidepid=2 doesn't gimp his own btop/htop/ps.
 sudo usermod -aG proc tom
 
