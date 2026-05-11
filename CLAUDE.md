@@ -36,10 +36,10 @@ End-to-end flow from a bare laptop:
 
 ## Repo layout
 
-Markdown files split into two groups by audience:
+Markdown files split into two groups by **audience**:
 
-- **[docs/](docs/)** — Planning and rationale. Read when editing the project; the source of truth for design decisions.
-- **[runbook/](runbook/)** — Claude-coaching docs. The user does NOT print or follow a runbook — they have a Claude session to coach them through. These files brief that Claude session: phase-3 hands off post-install teaching, phase-3.5 lists deferred 2-in-1 hardware work, GLOSSARY + SURVIVAL are reference material.
+- **[docs/](docs/)** — **Documentation of the setup itself.** Primarily (but not exclusively) read by Claude — design decisions, rationale, hardware/parity specs, investigation notes. The source of truth for *why* this repo's choices were made.
+- **[runbook/](runbook/)** — **Help and guides for the user's human eyes, exclusively.** Reference material Tom reads directly: shell cheatsheets, workflow tutorials, rescue cards. Some legacy Claude-coaching handoffs (phase-3-handoff, phase-3.5-hardware-handoff, post-reinstall-followups) still live here and are pending Tom's review against this new partitioning — they may relocate to `docs/` since they brief Claude rather than guide the human.
 
 Everything else at the repo root is a deliverable the install consumes (phase scripts) or dev-machine plumbing (`package.json`, `.mise.toml`, `scripts/`).
 
@@ -51,15 +51,19 @@ Everything else at the repo root is a deliverable the install consumes (phase sc
 - [docs/tpm-luks-bitlocker-parity.md](docs/tpm-luks-bitlocker-parity.md) — Full design of the LUKS+TPM seal: signed-PCR-11 policy at install time + stage-2 PCR 7 binding from postinstall. Trust-anchor shift, threat model, recovery procedures.
 - [docs/wsl-setup-lessons.md](docs/wsl-setup-lessons.md) — Hard-won WSL pitfalls harvested from a prior `fnwsl` repo (MTU 1350 before any network op, `GIT_TEMPLATE_DIR=""` on every clone, `ZGEN_DIR` must be set before sourcing zgenom, never use raw.githubusercontent.com, etc.). **Consult before touching any setup script** — these gotchas are silent and expensive.
 
-### runbook/ — Claude-coaching handoffs
-- [runbook/phase-3-handoff.md](runbook/phase-3-handoff.md) — The document fed to the next Claude session *inside Arch after install*. Describes the user, hardware, installed stack, and what Claude is expected to teach (Hyprland, Helix, tmux). Keep in sync with `docs/decisions.md`.
-- [runbook/phase-3.5-hardware-handoff.md](runbook/phase-3.5-hardware-handoff.md) — Handoff between phases 3 and 4 — tracks which requirements in `docs/decisions.md` still need fingerprint/pen/tablet/RDP validation on real hardware.
+### runbook/ — human-facing reference + legacy handoffs
+- [runbook/zsh-cheatsheet.md](runbook/zsh-cheatsheet.md) — Dense one-page reference for the customized zsh setup (keybinds, fzf/fzf-tab, extract, p10k). Paired with the tutorial.
+- [runbook/zsh-tutorial.md](runbook/zsh-tutorial.md) — Workflow tutorial for the customized zsh setup: how to navigate (cd/z/zi/Alt-C), find things (fd, rg, fzf), reuse past commands, and use the modern CLI utilities the postinstall installs (bat, eza, jq, etc.).
 - [runbook/GLOSSARY.md](runbook/GLOSSARY.md) — Every non-obvious tool/utility/package that shows up in decisions.md + postinstall.sh, with a brief full-name / what-it-does / when-you-care blurb.
 - [runbook/SURVIVAL.md](runbook/SURVIVAL.md) — Minimum-viable rescue card. What to do if the desktop is broken or Claude isn't running: TTY login, Wi-Fi from `iwctl`, launch a terminal/browser, start Claude.
+- [runbook/keybinds.md](runbook/keybinds.md) — Hyprland and tmux keybinding reference.
+- [runbook/phase-3-handoff.md](runbook/phase-3-handoff.md) — *Legacy Claude-coaching*: fed to the next Claude session inside Arch after install. Describes the user, hardware, installed stack, and what Claude is expected to teach (Hyprland, Helix, tmux). Pending Tom's review — may move to `docs/`.
+- [runbook/phase-3.5-hardware-handoff.md](runbook/phase-3.5-hardware-handoff.md) — *Legacy Claude-coaching*: tracks which requirements in `docs/decisions.md` still need fingerprint/pen/tablet/RDP validation on real hardware. Pending Tom's review.
+- [runbook/post-reinstall-followups.md](runbook/post-reinstall-followups.md) — *Legacy Claude-coaching*: post-install checklist. Pending Tom's review.
 
 ### Phase 0 — boot-medium prep
 - [package.json](package.json) — Minimal pnpm wrapper. Two scripts: `prepare` (wires up the git pre-commit hook) and `pdf` (renders `runbook/*.md` → PDFs). Phase 0 is otherwise tool-free: download the Arch ISO from archlinux.org, write to USB with Rufus or `dd`. No staging script, no Ventoy.
-- [scripts/runbook-pdf.mjs](scripts/runbook-pdf.mjs) — `pnpm pdf` entry point. Renders every `runbook/*.md` → `runbook/<name>.pdf` via `marked` + Edge headless (`--print-to-pdf`). 5.5"×8.5" pages, 0.5" margins, 12pt body.
+- [scripts/runbook-pdf.sh](scripts/runbook-pdf.sh) — `pnpm pdf` entry point. Renders every `runbook/*.md` → `runbook/<name>.pdf` via pandoc + typst. 8.5"×5.5" landscape pages, 0.5" margins, 10pt body, page numbers, title page + TOC per doc. Requires `pandoc-cli` + `typst` (both installed by `phase-3-arch-postinstall/postinstall.sh` §1).
 - [assets/](assets/) — Directory where the Arch ISO can be cached if you want a local copy (not required — the live USB is enough). `.gitignore` covers the ISO + sigs + sumfile so they never get committed.
 
 ### Phase 2 — Arch install
@@ -132,6 +136,7 @@ There is no build, lint, or test target. Work is almost entirely **editing markd
 - Markdown checkboxes (`- [ ]`) in `docs/decisions.md` track unmet requirements — tick them as work completes, don't delete them.
 - Platform-specific notes in prose should stay plain; the `[Windows]`/`[WSL]` annotation convention is for the user's global `~/.claude/CLAUDE.md`, not for this repo's content.
 - **Keep the README "What gets set up" inventory current.** Whenever you add, remove, or rename a pacman/AUR package, systemd unit, system file, pacman hook, PAM stack entry, planter, or any other observable thing this repo installs or configures, update [`README.md`](README.md) in the same commit. The README is the human-facing index of "what does this install" — if it lies, the next reinstall surprises Tom. Mirror equivalent changes in [`docs/decisions.md`](docs/decisions.md) when the change reflects a *decision*, not just an addition.
+- **Keep the user-facing zsh docs in sync with installed tools.** Whenever you add, remove, or rename a CLI utility Tom interacts with daily (`eza`, `fd`, `rg`, `bat`, `jq`, `sd`, `xh`, `tldr`, `zoxide`, `fzf`, etc.) or a zsh plugin that affects keybinds / completion / autosuggestions, audit [`runbook/zsh-cheatsheet.md`](runbook/zsh-cheatsheet.md) and [`runbook/zsh-tutorial.md`](runbook/zsh-tutorial.md) for stale references and update in the same commit. These two docs are Tom's reference for daily shell use; drift makes them lie to him.
 
 ## Working style
 

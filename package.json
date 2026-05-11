@@ -5,15 +5,12 @@
   "description": "Single-OS Arch Linux bootstrap for Dell Inspiron 7786. Decision records, install/post-install scripts, runbook.",
   "scripts": {
     "prepare": "node scripts/setup-hooks.mjs",
-    "pdf": "node scripts/runbook-pdf.mjs"
+    "pdf": "bash scripts/runbook-pdf.sh"
   },
   "repository": {
     "type": "git",
     "url": "git@github.com:fnrhombus/arch-setup.git"
   },
   "author": "fnrhombus",
-  "license": "MIT",
-  "devDependencies": {
-    "marked": "^18.0.1"
-  }
+  "license": "MIT"
 }
