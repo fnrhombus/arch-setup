@@ -1,0 +1,34 @@
+#!/bin/bash
+# Inner loop for btop-lock. Runs INSIDE kmscon as its login program.
+# kmscon owns the VT + font + framebuffer; this script is just the lockscreen
+# logic: btop loop ↔ pamtester auth.
+
+set -u
+TARGET_USER=${TARGET_USER:-tom}
+
+# Lock VT switching now that kmscon has already switched us. (Doing this
+# before kmscon's VT switch would deadlock.) `-l` exits immediately after
+# locking; the trap below runs `physlock -L` to undo it on any exit.
+/usr/bin/physlock -l
+trap '/usr/bin/physlock -L 2>/dev/null' EXIT
+
+while true; do
+    # btop's locale autodetect refuses without LANG=*.UTF-8.
+    LANG=en_US.UTF-8 runuser -u lockuser -- btop --force-utf || true
+
+    # Any single keypress exits read; -t 3 means no input → loop back to btop.
+    if read -t 3 -r -n 1 -p "Press any key to unlock as $TARGET_USER (or wait for btop) > " _; then
+        echo
+        if pamtester btop-lock "$TARGET_USER" authenticate; then
+            # kmscon respawns its login program when it exits (getty-style),
+            # which would put us right back into btop. Signal kmscon itself
+            # to terminate so the outer wrapper can chvt back to Hyprland.
+            pkill -TERM kmscon 2>/dev/null
+            break
+        fi
+        sleep 2
+    fi
+done
+
+# Don't chvt here — it races kmscon's VT hold. The outer btop-lock does
+# chvt 1 after kmscon has fully exited.

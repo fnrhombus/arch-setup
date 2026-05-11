@@ -1,0 +1,11 @@
+# Allow tom to invoke /usr/local/bin/btop-lock without a password prompt
+# (hypridle invokes it as tom; it needs root for openvt's VT switch).
+# SETENV: lets the user's terminal-emulator env vars (ghostty's TERMINFO,
+# etc.) pass through without sudo refusing them. The wrapper drops to
+# lockuser via runuser anyway, so the inherited env doesn't escalate.
+tom ALL=(root) NOPASSWD: SETENV: /usr/local/bin/btop-lock
+# Recovery hook: `sudo escape-lock` over SSH (or in person) kills btop-lock
+# + kmscon, releases physlock's VT lock, and chvts back to tty1 / Hyprland.
+# NOPASSWD because fprintd doesn't work over SSH and typing the password
+# under duress is hostile UX.
+tom ALL=(root) NOPASSWD: /usr/local/sbin/escape-lock

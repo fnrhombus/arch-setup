@@ -115,10 +115,16 @@ later by chezmoi are catalogued separately in the
   - `~/.zprofile` execs `uwsm start hyprland-uwsm.desktop`
   - `numlock-on.service` enables NumLock before login
   - `logind.conf.d/10-lid.conf` delegates lid handling to the user session
-- **Lockscreen-tty** — `getty@tty1.service` ExecStart overridden to `/usr/local/bin/lockscreen-tty`,
-  which loops btop (running as a non-privileged `lockuser`) ↔ a 30s-timeout login prompt. `/proc`
-  mounted `hidepid=2,gid=proc` so btop's process pane shows only lockuser's own procs;
-  `tom` is in the `proc` group so his own btop/htop/ps aren't gimped
+- **btop-lock lockscreen** — invoked by hypridle via `lock_cmd = sudo /usr/local/bin/btop-lock`
+  (the hypridle config lives in `rhombu5/dots`). The wrapper launches `kmscon` on a free VT at
+  4K with a 32px font; kmscon's "login" program is `/usr/local/bin/btop-lock-inner`, which loops
+  btop running as non-privileged `lockuser` ↔ a 3s-timeout `pamtester btop-lock tom authenticate`
+  (password-only via `/etc/pam.d/btop-lock` → `pam_unix`). On auth success the inner signals
+  kmscon to terminate and the outer wrapper `chvt`s back to tty1. `/proc` mounted
+  `hidepid=2,gid=proc` so btop's process pane shows only `lockuser`'s own procs; `tom` is in
+  the `proc` group so his own btop/htop/ps aren't gimped. Emergency recovery:
+  `sudo /usr/local/sbin/escape-lock` (NOPASSWD'd via `/etc/sudoers.d/btop-lock`) kills the lock
+  + chvts back, intended for SSH-from-phone when the user can't reach the keyboard.
 - **greetd + ReGreet** — installed but **disabled** (kept inert as a recoverable fallback;
   see memory note `project_greetd_not_in_use.md`)
 - Hyprland session entry shipped by the `hyprland` pacman package; configs come from `rhombu5/dots` via chezmoi
@@ -138,7 +144,7 @@ Grouped by purpose. Full list lives in `install.sh`/`chroot.sh`/`postinstall.sh`
 - **Desktop shell / UI** — `waybar-git` (AUR; tracking master for post-0.15.0 GdkMonitor crash fixes), `swaync`, `swayosd`, `fuzzel`, `cliphist`, `wl-clipboard`, `grim`, `slurp`, `satty`, `hyprshot`
 - **File managers / viewers** — `nautilus`, `yazi`, `imv`, `zathura`, `zathura-pdf-poppler`, `vlc`
 - **Terminal / editors** — `ghostty`, `helix`, `vim`, `tmux`, `zsh`
-- **CLI utilities** — `bat`, `fd`, `ripgrep`, `eza`, `lsd`, `btop`, `jq`, `fzf`, `zoxide`, `direnv`, `sd`, `go-yq`, `xh`, `glow`, `tldr`, `pkgfile`, `man-db`, `man-pages`
+- **CLI utilities** — `bat`, `fd`, `ripgrep`, `eza`, `lsd`, `btop`, `jq`, `fzf`, `zoxide`, `direnv`, `sd`, `go-yq`, `xh`, `glow`, `tldr`, `pkgfile`, `man-db`, `man-pages`, `kmscon` (DRM-aware VT terminal; powers the btop-lock lockscreen)
 - **Fonts / icons** — `noto-fonts`, `noto-fonts-emoji`, `ttf-jetbrains-mono-nerd`, `ttf-firacode-nerd`, `ttf-material-symbols-variable`, `terminus-font`, `papirus-icon-theme`
 - **Theming** — `nwg-look`, `nwg-displays`, `qt5ct`, `qt6ct`
 - **2-in-1 hardware** — `iio-sensor-proxy`, `libwacom`, `wtype`
@@ -162,6 +168,7 @@ Grouped by purpose. Full list lives in `install.sh`/`chroot.sh`/`postinstall.sh`
 - **Terminal / shell** — `sesh-bin`, `powershell-bin`
 - **Bluetooth** — `overskride`
 - **Pacman / boot** — `pacseek`, `limine-snapper-sync`
+- **PAM tooling** — `pamtester` (used by the btop-lock auth loop)
 - **NVIDIA compute (display blacklisted)** — `nvidia-470xx-dkms`, `nvidia-470xx-utils` (CUDA only — MX250 Pascal can't drive Wayland)
 - **Forked / pinned** (in `phase-3-arch-postinstall/aur-overrides/`)
   - `pinpam-fnrhombus` — adds `try_first_pass` / `use_first_pass` for concurrent PIN auth
@@ -187,7 +194,7 @@ Configuration written by `chroot.sh` and `postinstall.sh` (sources under
 - **Hardware quirks**
   - `/etc/modprobe.d/blacklist-nvidia.conf` — display modules blacklisted, CUDA modules allowed
   - `/etc/modprobe.d/rtl8723be.conf` — `aspm=0 ant_sel=2 fwlps=N ips=N` (PCIe AER storm fix)
-- **Login / session** — `/etc/systemd/logind.conf.d/10-lid.conf`, PAM stacks (`sudo`, `hyprlock`, `polkit-1`, `physlock`, `login`, `greetd`), `/usr/local/bin/lockscreen-tty`, `/etc/systemd/system/getty@tty1.service.d/lockscreen.conf`
+- **Login / session** — `/etc/systemd/logind.conf.d/10-lid.conf`, PAM stacks (`sudo`, `hyprlock`, `polkit-1`, `physlock`, `login`, `greetd`, `btop-lock`), `/usr/local/bin/btop-lock`, `/usr/local/bin/btop-lock-inner`, `/usr/local/sbin/escape-lock`, `/etc/sudoers.d/btop-lock`
 - **Network** — `/etc/NetworkManager/system-connections/*.nmconnection` (pre-seeded Wi-Fi)
 - **Pacman** — `/etc/pacman.conf` + the three hooks above in `/etc/pacman.d/hooks/`
 - **journald** — `/etc/systemd/journald.conf.d/10-size.conf`

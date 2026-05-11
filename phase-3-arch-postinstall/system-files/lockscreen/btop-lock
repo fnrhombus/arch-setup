@@ -1,0 +1,38 @@
+#!/bin/bash
+# Lockscreen replacement for `physlock -d`. Spawns kmscon on a free VT;
+# kmscon does the DRM/font work itself (full panel resolution unlike fbcon),
+# and runs btop-lock-inner as its "login" process. The inner script handles
+# the btop ↔ PAM-auth loop.
+#
+# Must run as root (kmscon needs CAP_SYS_TTY_CONFIG + DRM access to take a
+# VT and do KMS). Wired via /etc/sudoers.d/btop-lock so tom can invoke
+# without a password prompt.
+
+set -u
+
+# SUDO_USER is the calling user (tom) when invoked via sudo from hypridle or
+# a terminal. Fallback to tom for direct-as-root invocation.
+TARGET_USER=${SUDO_USER:-tom}
+export TARGET_USER
+
+# kmscon picks a free VT, switches to it (--switchvt on by default), runs
+# the configured "login" program, then exits when that program exits.
+# --no-issue: skip /etc/issue display.
+# --font-size 32: at-a-distance readability on the 4K TV.
+# --mode 3840x2160 + --no-use-original-mode: force native panel resolution.
+# Default auto-pick lands on 1080p, leaving btop in a centered quarter.
+# -- separates kmscon args from arguments to the login program (none).
+#
+# NOT exec'd: we want to run cleanup AFTER kmscon exits (chvt back to tty1
+# only works once kmscon has released its VT hold; doing it inside the
+# inner script raced kmscon's tty2 ownership).
+/usr/bin/kmscon \
+    --no-issue \
+    --font-size 32 \
+    --no-use-original-mode \
+    --mode 3840x2160 \
+    -l /usr/local/bin/btop-lock-inner --
+
+# Belt-and-suspenders return-to-Hyprland once kmscon's fully exited.
+/usr/bin/physlock -L 2>/dev/null || true
+/usr/bin/chvt 1 2>/dev/null || true

@@ -1,0 +1,14 @@
+#!/bin/bash
+# Emergency unwedge for a stuck btop-lock invocation. Granted NOPASSWD to
+# tom via /etc/sudoers.d/btop-lock so it can be run from a phone-side SSH
+# session without prompting (no fprintd over SSH anyway).
+#
+# Action: kill the lockscreen process tree, release physlock's VT-switch
+# lock, return foreground to tty1 (Hyprland). Prints the final fgconsole
+# so the caller can see whether recovery worked.
+
+pkill -9 -f 'btop-lock|kmscon' 2>/dev/null || true
+sleep 0.3
+physlock -L 2>/dev/null || true
+chvt 1
+echo "recovered: fgconsole=$(fgconsole)"

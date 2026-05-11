@@ -1,0 +1,14 @@
+#%PAM-1.0
+# PAM stack for the btop-lock lockscreen — invoked via pamtester from inside
+# kmscon (running as root, with no logind user session). Password-only.
+#
+# Why not grosshack: tried `pam_fprintd_grosshack + libpinpam + pam_unix`
+# (mirror of hyprlock's stack). The auth modules work, but pamtester's
+# basic PAM conv function doesn't drive grosshack's interleaved fingerprint
+# listener + multi-stage prompts correctly — typed input ended up buffered
+# in stdin and leaked back to zsh after pamtester returned. Use case here
+# is "across the room with the laptop closed" so fingerprint is useless
+# anyway; physlock (in-person) still has the full stack.
+auth        required     pam_unix.so
+account     required     pam_unix.so
+session     required     pam_unix.so
