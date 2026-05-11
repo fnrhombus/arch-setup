@@ -1002,6 +1002,10 @@ AUR_PACKAGES=(
     # list stay as a safety net if AUR is unreachable on first run.
     ttf-nerd-fonts-meta
     pacseek
+    # tdf: terminal PDF viewer (Rust, kitty graphics protocol). Builds from
+    # source — pulls rust/clang/unzip as makedepends, which --rmdeps cleans up
+    # after the build. ~10 min compile on first install; cached for re-runs.
+    tdf-git
     limine-snapper-sync
     # azure-ddns intentionally NOT here — see §4d below. We build the
     # versioned aur/azure-ddns/PKGBUILD from the source tree (no yay
@@ -1034,7 +1038,13 @@ yay_install_one() {
     local pkg="$1"
     local logf
     logf=$(mktemp -t yay-install-XXXXXX.log)
-    yay -S --noconfirm --needed "$pkg" 2>&1 | tee "$logf"
+    # --rmdeps: auto-uninstall makepkg-installed build deps after the build
+    # completes, preserving the "no system-wide devtool installs" rule from
+    # the user prefs. Without it, AUR packages declaring rust/go/electron
+    # etc. as makedepends leak those compilers/runtimes onto the system
+    # permanently. See CLAUDE.md "yay -S invocations pass --rmdeps" rule
+    # (added 2026-05-11 after the rust-from-Edge-build incident).
+    yay -S --rmdeps --noconfirm --needed "$pkg" 2>&1 | tee "$logf"
     local rc=${PIPESTATUS[0]}
     if grep -qE 'request failed.*EOF|Failed to find AUR package for|No AUR package found' "$logf"; then
         rm -f "$logf"
