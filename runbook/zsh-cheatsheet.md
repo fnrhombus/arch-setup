@@ -72,6 +72,24 @@ File / dir crawl uses `fd` (respects `.gitignore`, includes dotfiles, excludes `
 |---|---|
 | `Esc Esc` | Prepend `sudo ` to the current line; or, if empty, to the previous command |
 
+### Line toggles (zsh-line-toggles)
+
+Toggle common command-line modifiers without retyping. Press once to add, again to remove. Cursor-aware — works on the **pipeline segment containing the cursor** (move to end-of-line with `^E` first if you want whole-line behavior).
+
+| Key | Toggles | Notes |
+|---|---|---|
+| `Alt-2` | ` 2>&1` | merge stderr into stdout |
+| `Alt-1` | ` >/dev/null` | silence stdout |
+| `Alt-0` | ` 2>/dev/null` | silence stderr |
+| `Alt-9` | ` &>/dev/null` | silence both |
+| `Alt-L` | ` \| less` | pipe to pager |
+| `Alt-&` | ` &` | run in background |
+| `Alt-t` | `time ` (prefix) | benchmark the command |
+| `Alt-g` | `noglob ` (prefix) | disable wildcards (URLs with `?`, etc.) |
+| `Alt-w` | `watch '…'` (whole line) | poll every 2s; auto-quotes |
+
+The four redirect binds are mutually exclusive — pressing one replaces another already at the segment end. `make | grep error` with cursor in `make` + `Alt-2` becomes `make 2>&1 | grep error`, not appended to the whole line.
+
 ---
 
 ## Tools
