@@ -251,7 +251,7 @@ sudo pacman -Syu --noconfirm --needed \
     terminus-font \
     bitwarden bitwarden-cli \
     ghostty fuzzel cliphist satty hyprshot \
-    nautilus yazi \
+    nautilus yazi gnome-text-editor \
     hyprland hyprlock hypridle hyprpolkitagent hyprpicker uwsm \
     swaync swayosd \
     xdg-desktop-portal-gtk xdg-desktop-portal-hyprland \
