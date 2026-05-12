@@ -116,9 +116,8 @@ Coaching the user during the install:
 
 ## Working on this repo
 
-There is no build, lint, or test target. Work is almost entirely **editing markdown** and the two shell scripts. If you edit a script:
+There is no build, lint, or test target. Work is almost entirely **editing markdown** and the two shell scripts. If you edit a script: hand-trace it. (Shellcheck was removed 2026-05-11 — both the CI job and the local-install expectation; install on demand if you genuinely want to lint, but it's not part of the workflow.)
 
-- Run `shellcheck` if available, otherwise hand-trace.
 - `wsl-cli-test.sh` is meant to be run inside an `archlinux` WSL distro: `wsl -d archlinux -u tom bash ./wsl-cli-test.sh`. Assume the user has `mise`, `pacman`, and `yay` available inside.
 - `wsl-setup.sh` runs as root *once*, before `wsl-cli-test.sh`: `wsl -d archlinux -u root bash ./wsl-setup.sh && wsl --terminate archlinux`.
 

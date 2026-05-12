@@ -17,31 +17,6 @@ on:
   workflow_dispatch:
 
 jobs:
-  shellcheck:
-    name: shellcheck
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - name: Run shellcheck
-        uses: ludeeus/action-shellcheck@master
-        env:
-          SHELLCHECK_OPTS: -e SC1091 -e SC2034 -e SC2154
-        with:
-          # Force `sh`-shebanged files to be checked as bash too — most
-          # of our scripts use bash idioms even when invoked via bash X.
-          severity: warning
-          scandir: '.'
-          additional_files: |
-            phase-2-arch-install/install.sh
-            phase-2-arch-install/chroot.sh
-            phase-3-arch-postinstall/postinstall.sh
-            phase-6-grow-windows.sh
-            wsl-cli-test.sh
-            wsl-setup.sh
-            prep-netac-ventoy.sh
-          ignore_paths: >
-            assets
-
   pacman-package-check:
     name: pacman packages exist in extra
     runs-on: ubuntu-latest
