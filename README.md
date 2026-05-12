@@ -178,7 +178,7 @@ Grouped by purpose. Full list lives in `install.sh`/`chroot.sh`/`postinstall.sh`
 ### Services enabled
 
 - **System** — `systemd-timesyncd`, `NetworkManager`, `bluetooth`, `fprintd`, `fstrim.timer`, `smartd`, `sshd`, `ufw`, `cups.socket`, `docker`, `waydroid-container`, `libvirtd.socket`, `numlock-on`, `lego-renew.timer`, `azure-ddns.timer`
-- **User (`tom`)** — `hyprpolkitagent`, `hyprmural`, `hypridle`, `cliphist`, `swayosd-server`, `iio-hyprland`, `display-watchdog`, `wallpaper-rotate.timer`, `tablet-mode-watcher`, `rclone-gdrive-bisync.timer`, `dropbox` (the latter two stay no-op until first-login planters auth them)
+- **User (`tom`)** — `hyprpolkitagent`, `hyprmural`, `hypridle`, `cliphist`, `swayosd-server`, `iio-hyprland`, `display-watchdog`, `tablet-mode-watcher`, `rclone-gdrive-bisync.timer`, `dropbox` (the latter two stay no-op until first-login planters auth them)
 - **Disabled / masked**
   - `greetd.service` — disabled (TTY login active)
   - `systemd-tpm2-setup.service` — masked (benign unseal failure on fresh install)

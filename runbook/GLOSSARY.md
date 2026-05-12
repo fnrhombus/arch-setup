@@ -178,7 +178,7 @@ Organized by category so you can skim. Nothing here is install instructions — 
 
 ## Theme / fonts
 
-- **matugen / Material You** — Wallpaper-derived dynamic palette. Replaces the prior fixed Catppuccin choice. Re-rendered on every wallpaper change (every 6h via the user systemd timer, or manually via `wallpaper-rotate`). Master dark/light flip via Super+Shift+T (`theme-toggle`).
+- **matugen / Material You** — Wallpaper-derived dynamic palette. Replaces the prior fixed Catppuccin choice. Re-rendered on every wallpaper change. Wallpaper rotation is user-initiated only — Super+Shift+W, control-panel button, or manual `wallpaper-rotate` invocation (background timer disabled because the resulting waybar reload was intrusive while working). Master dark/light flip via Super+Shift+T (`theme-toggle`).
 - **Catppuccin Mocha** — Older fixed palette we used to ship. Replaced by matugen. Listed for context if you find legacy references in old branches/notes.
 - **Bibata-Modern-Classic** — Cursor theme. Installed as `bibata-cursor-theme` (Xcursor format) — Hyprland renders via Xcursor as the fallback. The hyprcursor-native variant has no clean AUR package as of 2026-04; if you want it, postinstall §3 has the manual git-clone recipe (LOSEARDES77/Bibata-Cursor-hyprcursor).
 - **Papirus-Dark** — Icon theme. Maximum app coverage of the modern flat-style themes.

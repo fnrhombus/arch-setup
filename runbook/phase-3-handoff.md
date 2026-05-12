@@ -205,7 +205,7 @@ This document is meant to be fed to Claude Code once you're inside Arch Linux. I
 
 ### Theme & Appearance
 - **matugen** (Material You) generates a full color palette from the current wallpaper. Templates render to: waybar, swaync, fuzzel, ghostty, Hyprland colors.conf, hyprlock, GTK 3+4 CSS, qt5ct/qt6ct color schemes, yazi theme, helix theme, zathura colors, ReGreet CSS.
-- Wallpaper rotation: `~/.local/bin/wallpaper-rotate` (every 6h via systemd user timer). Wallpapers live in `~/Pictures/Wallpapers/` (bootstrapped from `fnrhombus/callisto`'s `static/wallpaper/linux/` on first chezmoi apply).
+- Wallpaper rotation: `~/.local/bin/wallpaper-rotate`, user-initiated only (Super+Shift+W, control-panel "Wallpaper: rotate now", or manual). Background timer was disabled because the resulting waybar reload was intrusive while working; the `wallpaper-rotate.timer` unit still ships from dots without an `[Install]` section, so it can be re-armed manually if desired. Wallpapers live in `~/Pictures/Wallpapers/` (bootstrapped from `fnrhombus/callisto`'s `static/wallpaper/linux/` on first chezmoi apply).
 - Master dark/light flip: Super+Shift+T → `~/.local/bin/theme-toggle` flips matugen mode + broadcasts via the freedesktop color-scheme portal so GTK4/Qt6.9+/Firefox/Chromium follow.
 - Cursor: Bibata-Modern-Classic in hyprcursor format (~6.6 MB) + the Xcursor build for Xwayland app fallback.
 - Icons: Papirus-Dark (best app coverage).

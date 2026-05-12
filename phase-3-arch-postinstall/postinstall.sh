@@ -2026,13 +2026,14 @@ if command -v matugen >/dev/null && [[ -d "$HOME/Pictures/Wallpapers" ]]; then
     fi
 fi
 
-# Enable user systemd timer for wallpaper rotation (every 6h).
-if [[ -f "$HOME/.config/systemd/user/wallpaper-rotate.timer" ]]; then
-    log "Enabling wallpaper-rotate.timer..."
-    systemctl --user daemon-reload
-    systemctl --user enable --now wallpaper-rotate.timer 2>/dev/null \
-        || warn "wallpaper-rotate.timer enable failed — re-run inside a graphical session."
-fi
+# Wallpaper rotation is strictly user-initiated (Super+Shift+W, control-panel
+# "Wallpaper: rotate now", or manual `wallpaper-rotate`). The timer unit
+# ships from dots without an [Install] section — background rotations
+# cause a visible waybar reload that's intrusive while working. The
+# unit file remains in place so it can be re-armed later if you change
+# your mind: `systemctl --user link <unit-path> && systemctl --user
+# enable --now wallpaper-rotate.timer` after editing dots to restore
+# the [Install] block.
 
 # Enable user-level tablet-mode-watcher (the angle-polling daemon — see §1d).
 # Shipped via chezmoi from rhombu5/dots:
