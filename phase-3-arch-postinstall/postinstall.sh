@@ -259,7 +259,7 @@ sudo pacman -Syu --noconfirm --needed \
     network-manager-applet pavucontrol hyprpwcenter ttf-material-symbols-variable blueman udiskie \
     nwg-look nwg-displays \
     qt5ct qt6ct papirus-icon-theme \
-    imv zathura zathura-pdf-poppler vlc \
+    imv zathura zathura-pdf-poppler vlc vlc-plugin-ffmpeg \
     qbittorrent \
     waydroid \
     iio-sensor-proxy libwacom wtype \
