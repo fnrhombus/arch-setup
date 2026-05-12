@@ -144,7 +144,7 @@ Grouped by purpose. Full list lives in `install.sh`/`chroot.sh`/`postinstall.sh`
 - **Desktop shell / UI** — `waybar-git` (AUR; tracking master for post-0.15.0 GdkMonitor crash fixes), `swaync`, `swayosd`, `fuzzel`, `cliphist`, `wl-clipboard`, `grim`, `slurp`, `satty`, `hyprshot`
 - **File managers / viewers** — `nautilus`, `yazi`, `imv`, `zathura`, `zathura-pdf-poppler`, `vlc`
 - **Terminal / editors** — `ghostty`, `helix`, `vim`, `tmux`, `zsh`
-- **CLI utilities** — `bat`, `fd`, `ripgrep`, `eza`, `lsd`, `btop`, `jq`, `fzf`, `zoxide`, `direnv`, `sd`, `go-yq`, `xh`, `glow`, `tldr`, `pkgfile`, `man-db`, `man-pages`, `kmscon` (DRM-aware VT terminal; powers the btop-lock lockscreen)
+- **CLI utilities** — `bat`, `fd`, `ripgrep`, `eza`, `lsd`, `btop`, `jq`, `fzf`, `zoxide`, `direnv`, `sd`, `go-yq`, `xh`, `glow`, `tldr`, `pkgfile`, `man-db`, `man-pages`, `pandoc-cli`, `typst` (markdown → PDF, powers `runbook/*.pdf` gen), `kmscon` (DRM-aware VT terminal; powers the btop-lock lockscreen)
 - **Fonts / icons** — `noto-fonts`, `noto-fonts-emoji`, `ttf-jetbrains-mono-nerd`, `ttf-firacode-nerd`, `ttf-material-symbols-variable`, `terminus-font`, `papirus-icon-theme`
 - **Theming** — `nwg-look`, `nwg-displays`, `qt5ct`, `qt6ct`
 - **2-in-1 hardware** — `iio-sensor-proxy`, `libwacom`, `wtype`
@@ -165,7 +165,7 @@ Grouped by purpose. Full list lives in `install.sh`/`chroot.sh`/`postinstall.sh`
 - **Cursors / fonts** — `bibata-cursor-theme`, `ttf-nerd-fonts-meta`
 - **Cloud / sync** — `dropbox`, `dropbox-cli`
 - **Touch / 2-in-1** — `wvkbd` (mobintl on-screen keyboard)
-- **Terminal / shell** — `sesh-bin`, `powershell-bin`
+- **Terminal / shell** — `sesh-bin`, `powershell-bin`, `tdf-git` (terminal PDF viewer; kitty graphics protocol)
 - **Bluetooth** — `overskride`
 - **Pacman / boot** — `pacseek`, `limine-snapper-sync`
 - **PAM tooling** — `pamtester` (used by the btop-lock auth loop)
