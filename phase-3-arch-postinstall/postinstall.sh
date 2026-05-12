@@ -260,6 +260,7 @@ sudo pacman -Syu --noconfirm --needed \
     nwg-look nwg-displays \
     qt5ct qt6ct papirus-icon-theme \
     imv zathura zathura-pdf-poppler vlc \
+    qbittorrent \
     waydroid \
     iio-sensor-proxy libwacom wtype \
     mission-center \
