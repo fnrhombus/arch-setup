@@ -93,6 +93,40 @@ station wlan0 connect <YourSSID>
 exit
 ```
 
+## 3.5 If the `btop-lock` lockscreen wedged
+
+The idle-lock — `btop-lock` (kmscon-rendered btop + password unlock) — holds
+VT switching via `physlock -l` while it owns its virtual terminal. If
+something goes wrong (auth keeps failing, kmscon hangs, the prompt won't
+appear), **`Ctrl+Alt+F<N>` won't work** because VT switching is locked.
+
+The escape hatch is `escape-lock` — a NOPASSWD'd helper at
+`/usr/local/sbin/escape-lock` that pkills `btop-lock` + `kmscon`, releases
+the VT lock, and `chvt`s back to tty1 (Hyprland).
+
+You need to reach metis via SSH from your phone, then run it:
+
+```bash
+# In Termux on the phone:
+metis                    # one-word connect (gist-installed earlier)
+# Once connected:
+sudo escape-lock         # prints "recovered: fgconsole=1"
+```
+
+If `metis` itself is missing on the phone (fresh Termux, key not loaded),
+re-bootstrap from the gist:
+
+```
+curl -fsSL https://is.gd/4TXyqG | bash
+```
+
+That self-installs `metis` to `$PREFIX/bin/` and connects. After SSH'ing
+in, run `sudo escape-lock` as above.
+
+**No phone-side recovery script** — only the local one on metis, executed
+from a phone SSH session. (An earlier phone-side gist was abandoned;
+SSH + `sudo escape-lock` proved simpler.)
+
 ## 4. Start Claude
 
 Claude Code is installed globally via `npm` (managed by `mise`). From any TTY login:
