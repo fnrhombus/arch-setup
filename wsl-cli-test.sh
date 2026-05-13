@@ -74,7 +74,6 @@ source "${ZGEN_DIR}/zgenom.zsh"
 
 if ! zgenom saved; then
   # --- Plugins ---
-  zgenom ohmyzsh
   zgenom ohmyzsh plugins/sudo
   zgenom ohmyzsh plugins/colored-man-pages
   zgenom ohmyzsh plugins/extract
@@ -296,7 +295,6 @@ if [[ ! -f ~/.zgenom/init.zsh ]]; then
   GIT_TEMPLATE_DIR="" zsh -c '
     ZGEN_DIR="${HOME}/.zgenom"
     source "${ZGEN_DIR}/zgenom.zsh"
-    zgenom ohmyzsh
     zgenom ohmyzsh plugins/sudo
     zgenom ohmyzsh plugins/colored-man-pages
     zgenom ohmyzsh plugins/extract

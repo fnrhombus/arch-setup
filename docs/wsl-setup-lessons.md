@@ -52,7 +52,6 @@ source "${ZGEN_DIR}/zgenom.zsh"
 GIT_TEMPLATE_DIR="" zsh -c '
   ZGEN_DIR="${HOME}/.zgenom"
   source "${ZGEN_DIR}/zgenom.zsh"
-  zgenom ohmyzsh
   zgenom ohmyzsh plugins/sudo
   # ... all plugins ...
   zgenom save
@@ -60,7 +59,7 @@ GIT_TEMPLATE_DIR="" zsh -c '
 ```
 Check for `~/.zgenom/init.zsh` to verify it worked. If that file doesn't exist, the pre-build failed.
 
-**oh-my-zsh bootstrap**: `zgenom ohmyzsh` (no args) must be called before any `zgenom ohmyzsh plugins/...` — it clones the oh-my-zsh repo that plugins are loaded from.
+**Don't call bare `zgenom ohmyzsh`**: it sources OMZ's `oh-my-zsh.sh` — the full framework, including `tools/check_for_upgrade.sh` which fires the `Would you like to update? [Y/n]` prompt at every new shell. We only want individual OMZ plugins, not the framework. `zgenom ohmyzsh plugins/X` clones the OMZ repo on its own if needed; the bare bootstrap is not required by modern zgenom.
 
 ## Bitwarden CLI
 
