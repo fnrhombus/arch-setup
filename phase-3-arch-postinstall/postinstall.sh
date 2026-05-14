@@ -867,9 +867,10 @@ sudo systemctl disable greetd.service 2>/dev/null || true
 #       - btop running as non-privileged `lockuser` (de-elevated; hidden by
 #         /proc hidepid=2,gid=proc so the process pane shows only lockuser's
 #         own procs — tom is in `proc` so his own btop/htop/ps aren't gimped),
-#       - any keypress → `pamtester btop-lock tom authenticate` (password
-#         only via pam_unix; fingerprint+PIN don't work via pamtester's basic
-#         conv — in-person physlock still has the full grosshack stack);
+#       - press `e` within 0.5s of btop exiting → `pamtester btop-lock tom
+#         authenticate` (password only via pam_unix; fingerprint+PIN don't
+#         work via pamtester's basic conv — in-person physlock still has
+#         the full grosshack stack). Any other key or no input → btop resumes;
 #   • on auth success the inner signals kmscon to terminate (otherwise kmscon
 #     getty-style respawns the login program), and the outer wrapper chvts
 #     back to tty1 / Hyprland.

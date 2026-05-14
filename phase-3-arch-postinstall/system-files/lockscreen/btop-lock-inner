@@ -20,10 +20,9 @@ while true; do
     LANG=en_US.UTF-8 runuser -u lockuser -- \
         env HOME=/var/lib/lockuser btop --force-utf --preset 2 || true
 
-    # Any single keypress exits read; -t 3 means no input → loop back to btop.
-    # Blank screen after btop exits; press any key (secret) within 3s to get
-    # to the password prompt. No-input → btop resumes.
-    if read -t 3 -r -n 1 _; then
+    # Blank screen after btop exits; press `e` (secret) within 0.5s to get to
+    # the password prompt. Any other key or no-input → btop resumes.
+    if read -t 0.5 -r -n 1 key && [[ $key == e ]]; then
         if pamtester btop-lock "$TARGET_USER" authenticate; then
             # kmscon respawns its login program when it exits (getty-style),
             # which would put us right back into btop. Signal kmscon itself
