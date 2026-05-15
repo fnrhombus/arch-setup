@@ -14,6 +14,7 @@
 set -euo pipefail
 
 cd "$(dirname "$(readlink -f "$0")")/.."   # repo root
+repo_root=$PWD
 runbook_dir="runbook"
 
 for tool in pandoc typst pdfjam pdfinfo; do
@@ -21,7 +22,11 @@ for tool in pandoc typst pdfjam pdfinfo; do
 done
 
 template=$(mktemp --suffix=.typ)
-trap 'rm -f "$template"' EXIT
+# pdfjam writes intermediate `toPdfViaTempFile<PID>-*.{source,pdf}` files into
+# its CWD; on a clean run --tidy removes them, but on abort they leak. Run it
+# from a per-invocation temp dir so debris can't land in the repo root.
+pdf_workdir=$(mktemp -d)
+trap 'rm -f "$template"; rm -rf "$pdf_workdir"' EXIT
 
 cat > "$template" <<'TYPST'
 // --- Pandoc helpers (kept from the default typst template) ---
@@ -214,8 +219,8 @@ for md in "${mds[@]}"; do
   # Booklet imposition: 2 logical pages per side of letter landscape, ordered
   # so a folded stack reads as a booklet. pdfjam pads to a multiple of 4 with
   # trailing blanks automatically.
-  if ! pdfjam --quiet --booklet true --paper letterpaper --landscape \
-        --outfile "$out" "$tmp_logical"; then
+  if ! ( cd "$pdf_workdir" && pdfjam --quiet --booklet true --paper letterpaper \
+          --landscape --outfile "$repo_root/$out" "$tmp_logical" ); then
     echo "  FAIL pdfjam: $md"
     failures=$((failures + 1))
   fi
