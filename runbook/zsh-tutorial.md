@@ -469,7 +469,3 @@ fd -e txt -x mv {} {.}.md
 ```
 
 (`{.}` is fd's substitution for "the match with extension stripped.")
-
----
-
-That's the working set. Everything else (zgenom, plugins, fpath, instant-prompt) is plumbing — covered briefly in the cheatsheet's "where files live" section if you need it. Keep this open in a tab for a week and most of it will turn into muscle memory.
