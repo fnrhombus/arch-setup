@@ -63,7 +63,7 @@ Everything else at the repo root is a deliverable the install consumes (phase sc
 
 ### Phase 0 — boot-medium prep
 - [package.json](package.json) — Minimal pnpm wrapper. Two scripts: `prepare` (wires up the git pre-commit hook) and `pdf` (renders `runbook/*.md` → PDFs). Phase 0 is otherwise tool-free: download the Arch ISO from archlinux.org, write to USB with Rufus or `dd`. No staging script, no Ventoy.
-- [scripts/runbook-pdf.sh](scripts/runbook-pdf.sh) — `pnpm pdf` entry point. Renders every `runbook/*.md` → `runbook/<name>.pdf` via pandoc + typst. 8.5"×5.5" landscape pages, 0.5" margins, 10pt body, page numbers, title page + TOC per doc. Requires `pandoc-cli` + `typst` (both installed by `phase-3-arch-postinstall/postinstall.sh` §1).
+- [scripts/runbook-pdf.sh](scripts/runbook-pdf.sh) — `pnpm pdf` entry point. Renders every `runbook/*.md` → `runbook/<name>.pdf` as a booklet: 5.5"×8.5" portrait logical pages (0.5" margins, 10pt body, page numbers, per-doc TOC) imposed 2-up onto letter landscape via `pdfjam --booklet`, so a folded stack of letter sheets reads as a booklet. `zsh-cheatsheet` is the one exception — no TOC, no cover. A cover page is added only when page count `% 4 == 3` (to clear the single trailing blank imposition would otherwise leave). Pipeline: pandoc → typst → pdfjam. Requires `pandoc-cli` + `typst` + `pdfjam` (from `texlive-binextra`) + `pdfinfo` (from `poppler`), all pulled in by `phase-3-arch-postinstall/postinstall.sh` §1.
 - [assets/](assets/) — Directory where the Arch ISO can be cached if you want a local copy (not required — the live USB is enough). `.gitignore` covers the ISO + sigs + sumfile so they never get committed.
 
 ### Phase 2 — Arch install
