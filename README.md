@@ -41,7 +41,7 @@ later by chezmoi are catalogued separately in the
   - LUKS2 root partition (~475 GiB, single volume — designed for `dd`-style migration)
 - **btrfs subvolumes** on `cryptroot`: `@`, `@home`, `@snapshots`, `@swap`
   - Mount options: `noatime,compress=zstd:3,space_cache=v2,ssd`
-  - 16 GiB NoCOW swapfile on `@swap` (hibernation-ready, `resume_offset` captured at install)
+  - 24 GiB NoCOW swapfile on `@swap` (hibernation-ready, `resume_offset` captured at install — sized at RAM + headroom because hibernate images can exceed RAM with zswap in play)
 - **Bootloader: limine** (replaced systemd-boot 2026-04-22)
   - UEFI fallback at `/boot/EFI/BOOT/BOOTX64.EFI` + NVRAM entry
   - `/boot/limine.conf` uses a nested `/+Arch Linux` parent with three sub-entries:

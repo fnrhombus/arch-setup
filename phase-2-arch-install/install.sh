@@ -8,7 +8,7 @@
 #       @          → /
 #       @home      → /home
 #       @snapshots → /.snapshots
-#       @swap      → /swap (holds a 16 GiB NoCOW swapfile, hibernate-ready)
+#       @swap      → /swap (holds a 24 GiB NoCOW swapfile, hibernate-ready)
 #
 # Full-disk encryption per decisions.md §Q11. Recovery key is auto-generated
 # (BitLocker model: 48 numeric digits, displayed once for the user to
@@ -246,7 +246,7 @@ About to:
   - Lay out 2 partitions on it:
       - EFI System partition, 1 GiB FAT32 (mounted at /boot — UKIs land here)
       - LUKS2 + btrfs (rest, ~475 GiB) with subvolumes @, @home, @snapshots, @swap
-  - Inside the btrfs, create a 16 GiB NoCOW swapfile (hibernate-ready)
+  - Inside the btrfs, create a 24 GiB NoCOW swapfile (hibernate-ready)
   - CLEAR the TPM2 (storage hierarchy) so any stale state from prior install
     attempts — old LUKS seals, leftover pinutil PINs, BitLocker NV slots — is
     wiped. Subsequent install steps then enroll fresh.
@@ -332,11 +332,17 @@ mount "$SAMSUNG_EFI" /mnt/boot
 #     against this)
 #   - mount option `compress` must NOT cover the swapfile
 #
-# Size = 16 GiB (matches RAM, hibernate-image-fits requirement).
-log "Creating 16 GiB swapfile at /mnt/swap/swapfile..."
+# Size = 24 GiB (RAM is 15 GiB; need ~RAM+headroom because the hibernate
+# image can exceed RAM size when zswap is in play — observed empirically
+# 2026-05-18 when a 16 GiB swapfile hit ENOSPC at 80% image save).
+# The manual truncate+chattr+C+fallocate dance is fine here because the
+# FS is brand new — single-extent allocation succeeds. If you ever need
+# to GROW this later on a populated FS, use `btrfs filesystem mkswapfile`
+# instead (handles single-extent allocation in fragmented free space).
+log "Creating 24 GiB swapfile at /mnt/swap/swapfile..."
 truncate -s 0 /mnt/swap/swapfile
 chattr +C /mnt/swap/swapfile
-fallocate -l 16G /mnt/swap/swapfile
+fallocate -l 24G /mnt/swap/swapfile
 chmod 600 /mnt/swap/swapfile
 mkswap /mnt/swap/swapfile
 
@@ -546,7 +552,7 @@ genfstab -U /mnt >> /mnt/etc/fstab
 # Append the swapfile entry. genfstab can't infer it (the swapfile isn't
 # active during install) — write it explicitly. The btrfs subvol option
 # isn't needed (kernel resolves the file by inode under @swap's mount).
-printf '\n# btrfs swapfile at /swap/swapfile (NoCOW, 16 GiB, hibernate-ready)\n' >> /mnt/etc/fstab
+printf '\n# btrfs swapfile at /swap/swapfile (NoCOW, 24 GiB, hibernate-ready)\n' >> /mnt/etc/fstab
 printf '/swap/swapfile\tnone\tswap\tdefaults\t0 0\n' >> /mnt/etc/fstab
 
 # ---------- 11. chroot config ----------
