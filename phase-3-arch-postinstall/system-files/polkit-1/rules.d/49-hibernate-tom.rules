@@ -1,0 +1,14 @@
+// Allow user 'tom' (laptop owner) to hibernate without authentication.
+//
+// Without this, display-watchdog's `systemctl hibernate` dispatch fails:
+// when the display is off (the very situation the watchdog responds to),
+// the polkit prompt has no surface to render, fingerprint/PIN auth times
+// out, and the call returns "Access denied". This rule unblocks the
+// blackout-recovery path.
+polkit.addRule(function(action, subject) {
+    if (subject.user !== "tom") return;
+    if (action.id.indexOf("org.freedesktop.login1.hibernate") === 0 ||
+        action.id.indexOf("org.freedesktop.login1.suspend-then-hibernate") === 0) {
+        return polkit.Result.YES;
+    }
+});

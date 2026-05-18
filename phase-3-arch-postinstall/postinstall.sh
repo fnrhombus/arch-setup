@@ -920,6 +920,17 @@ sudo install -m 440 -D "$SCRIPT_DIR/system-files/lockscreen/sudoers-btop-lock" \
     /etc/sudoers.d/btop-lock
 sudo visudo -c -f /etc/sudoers.d/btop-lock >/dev/null
 
+# ---------- 1h. Allow tom to hibernate without polkit auth ----------
+# display-watchdog dispatches `systemctl hibernate` when the screen blacks
+# out + the lid is closed. With the polkit defaults, this fails: the
+# blacked-out display can't render the polkit auth prompt, fingerprint/PIN
+# agents time out, and the call returns "Access denied". A polkit rule
+# grants the laptop owner unauthenticated hibernate so the recovery path
+# completes. See rule file header for the full why.
+log "Installing /etc/polkit-1/rules.d/49-hibernate-tom.rules..."
+sudo install -m 644 -D "$SCRIPT_DIR/system-files/polkit-1/rules.d/49-hibernate-tom.rules" \
+    /etc/polkit-1/rules.d/49-hibernate-tom.rules
+
 # ---------- 2. yay bootstrap ----------
 if ! command -v yay >/dev/null; then
     log "Bootstrapping yay from AUR..."

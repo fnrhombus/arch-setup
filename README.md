@@ -194,7 +194,7 @@ Configuration written by `chroot.sh` and `postinstall.sh` (sources under
 - **Hardware quirks**
   - `/etc/modprobe.d/blacklist-nvidia.conf` — display modules blacklisted, CUDA modules allowed
   - `/etc/modprobe.d/rtl8723be.conf` — `aspm=0 ant_sel=2 fwlps=N ips=N` (PCIe AER storm fix)
-- **Login / session** — `/etc/systemd/logind.conf.d/10-lid.conf`, PAM stacks (`sudo`, `hyprlock`, `polkit-1`, `physlock`, `login`, `greetd`, `btop-lock`), `/usr/local/bin/btop-lock`, `/usr/local/bin/btop-lock-inner`, `/usr/local/sbin/escape-lock`, `/etc/sudoers.d/btop-lock`, `/var/lib/lockuser/.config/btop/btop.conf` (lockuser's btop tuning)
+- **Login / session** — `/etc/systemd/logind.conf.d/10-lid.conf`, PAM stacks (`sudo`, `hyprlock`, `polkit-1`, `physlock`, `login`, `greetd`, `btop-lock`), `/usr/local/bin/btop-lock`, `/usr/local/bin/btop-lock-inner`, `/usr/local/sbin/escape-lock`, `/etc/sudoers.d/btop-lock`, `/var/lib/lockuser/.config/btop/btop.conf` (lockuser's btop tuning), `/etc/polkit-1/rules.d/49-hibernate-tom.rules` (lets `tom` hibernate without polkit auth — required for `display-watchdog`'s blackout-recovery `systemctl hibernate` dispatch, since the polkit prompt has no screen to render on)
 - **Network** — `/etc/NetworkManager/system-connections/*.nmconnection` (pre-seeded Wi-Fi)
 - **Pacman** — `/etc/pacman.conf` + the three hooks above in `/etc/pacman.d/hooks/`
 - **journald** — `/etc/systemd/journald.conf.d/10-size.conf`
