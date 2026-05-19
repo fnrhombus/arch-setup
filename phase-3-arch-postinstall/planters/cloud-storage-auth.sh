@@ -20,14 +20,31 @@ _gdrive_done=0
 _claude_done=0
 
 # --- Dropbox: link account on first run ---
+# Convention: keep \$HOME tidy by hosting the actual Dropbox sync at
+# ~/.local/share/dropbox/Dropbox (Dropbox always appends "Dropbox" to
+# whatever parent the GUI picks); a chezmoi-managed symlink ~/dbox →
+# ~/.local/share/dropbox/Dropbox is what the user actually browses to.
+# After link, also exclude the `.claude` folder from Selective Sync —
+# that folder is bisynced separately via rclone (see below), and having
+# both the daemon and rclone touch it is asking for conflicts.
 if command -v dropbox &>/dev/null; then
     if [[ -f "$HOME/.dropbox/info.json" ]]; then
         _dbox_done=1
     else
+        # Pre-create the parent so the GUI file picker has a target to navigate to.
+        mkdir -p "$HOME/.local/share/dropbox"
         echo ""
         echo "=== arch: Dropbox first-link ==="
         echo "Starting the Dropbox daemon — it will print a https://www.dropbox.com/cli_link?... URL."
-        echo "Open it in a browser, log in, and the daemon picks up sync automatically."
+        echo "Open it in a browser and log in. THEN, in the Dropbox tray icon:"
+        echo "  1. Preferences → Sync → 'Dropbox folder location' → Move…"
+        echo "     → pick: $HOME/.local/share/dropbox/"
+        echo "     (Dropbox will sync to $HOME/.local/share/dropbox/Dropbox — the chezmoi"
+        echo "      symlink ~/dbox already points there.)"
+        echo "  2. Preferences → Sync → Selective Sync → uncheck '.claude'"
+        echo "     (rclone bisyncs that folder separately; daemon-sync would duplicate."
+        echo "      If the folder is named 'claude' instead, rename it to '.claude' first"
+        echo "      via the Dropbox web UI, or just exclude 'claude' for now.)"
         # `dropbox start -i` downloads the bundled daemon on first run, prints the
         # link URL, and starts dropboxd in the background. info.json appears once
         # the user has actually clicked the link.
@@ -93,7 +110,7 @@ if command -v rclone &>/dev/null; then
     # --- rclone Dropbox: claude memory + plans bisync ---
     # Hybrid setup: official Dropbox daemon (above) handles general
     # ~/Dropbox sync; this rclone remote selectively bisyncs just the
-    # Claude memory dirs + plans dir to dropbox:claude/ for cross-machine
+    # Claude memory dirs + plans dir to dropbox:.claude/ for cross-machine
     # continuity, gated by ~/.config/rclone/claude-filters.txt.
     _claude_marker="$HOME/.local/state/rclone-dropbox-claude-bisync-initialized"
     _claude_filter="$HOME/.config/rclone/claude-filters.txt"
@@ -113,11 +130,11 @@ if command -v rclone &>/dev/null; then
 
     if grep -q '^\[dropbox\]' "$_rclone_conf" 2>/dev/null && [[ -f "$_claude_filter" ]]; then
         if [[ ! -f "$_claude_marker" ]]; then
-            echo "arch: seeding rclone bisync baseline (dropbox:claude → ~/.claude memory+plans)..."
+            echo "arch: seeding rclone bisync baseline (dropbox:.claude → ~/.claude memory+plans)..."
             # --resync-mode path2: local ~/.claude wins on the initial
-            # baseline. Without it, an empty dropbox:claude/ would wipe
+            # baseline. Without it, an empty dropbox:.claude/ would wipe
             # any local memories on first sync.
-            if rclone bisync dropbox:claude "$HOME/.claude" \
+            if rclone bisync dropbox:.claude "$HOME/.claude" \
                     --filter-from "$_claude_filter" \
                     --resync --resync-mode path2 \
                     --resilient --max-delete 25 --create-empty-src-dirs; then
@@ -127,7 +144,7 @@ if command -v rclone &>/dev/null; then
                 _claude_done=1
                 echo "arch: claude bisync seeded — timer will sync every 5 min."
             else
-                echo "arch: dropbox:claude bisync --resync failed — start a new shell to retry."
+                echo "arch: dropbox:.claude bisync --resync failed — start a new shell to retry."
             fi
         else
             _claude_done=1
