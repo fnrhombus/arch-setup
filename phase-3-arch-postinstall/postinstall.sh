@@ -2875,3 +2875,16 @@ cat <<'POSTINSTALL_OUTRO'
 
 ====================================================================
 POSTINSTALL_OUTRO
+
+# ---------- Self-cleanup ----------
+# Only the staged copy at $HOME/postinstall.sh (placed there by phase-2-
+# arch-install/install.sh §-stage) self-deletes after a successful run.
+# If we're running from the arch-setup checkout (~/src/arch-setup@.../
+# phase-3-arch-postinstall/postinstall.sh) — i.e. the source-of-truth —
+# leave it alone; any re-run from there means the user actively wants
+# the file in place.
+if [[ "$(realpath "$0")" == "$HOME/postinstall.sh" ]]; then
+    log "Removing the one-shot staged copy at \$HOME/postinstall.sh."
+    log "(Re-run from ~/src/arch-setup@fnrhombus/phase-3-arch-postinstall/postinstall.sh if needed.)"
+    rm -- "$0"
+fi
