@@ -40,3 +40,15 @@ export TARGET_USER
 # Belt-and-suspenders return-to-Hyprland once kmscon's fully exited.
 /usr/bin/physlock -L 2>/dev/null || true
 /usr/bin/chvt 1 2>/dev/null || true
+
+# Signal logind that the user's session is unlocked. Without this, hypridle
+# (which listens for the dbus Unlock signal) never fires its unlock_cmd, and
+# Hyprland's outputs stay in their pre-lock DPMS-off state until the user
+# presses a key — `key_press_enables_dpms` is the only mechanism left in
+# the chain that wakes them, which is the unwanted "extra press" symptom.
+# This also clears the LockedHint=yes that loginctl lock-session set on
+# entry, so the session's lock state reflects reality.
+# Runs AFTER chvt 1: hypridle's unlock_cmd uses hyprctl, and Hyprland needs
+# DRM master back (from the chvt) before the dpms-on dispatch can take effect.
+session_id=$(/usr/bin/loginctl show-user "$TARGET_USER" -p Display --value 2>/dev/null)
+[ -n "$session_id" ] && /usr/bin/loginctl unlock-session "$session_id" 2>/dev/null || true
