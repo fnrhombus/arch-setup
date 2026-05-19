@@ -1,6 +1,6 @@
 #!/usr/bin/env zsh
 # arch: cloud-storage planter — link Dropbox (official daemon, general
-# sync) + OAuth rclone gdrive (~/GoogleDrive bisync) + OAuth rclone
+# sync) + OAuth rclone gdrive (~/gdrive bisync) + OAuth rclone
 # Dropbox (~/.claude memory+plans bisync) + seed each baseline.
 # Self-deleting once all three sections succeed.
 # Skipped during postinstall's zgenom warmup (which sources this file too) so
@@ -58,19 +58,19 @@ if command -v rclone &>/dev/null; then
 
     if grep -q '^\[gdrive\]' "$_rclone_conf" 2>/dev/null; then
         if [[ ! -f "$_bisync_marker" ]]; then
-            mkdir -p "$HOME/GoogleDrive"
+            mkdir -p "$HOME/gdrive"
             # Safety: only --resync when the local dir is empty (fresh install).
-            # If the user has unrelated files in ~/GoogleDrive that this planter
+            # If the user has unrelated files in ~/gdrive that this planter
             # didn't put there, refuse — bisync's first --resync would push them
             # to gdrive, which is rarely what's wanted.
-            if [[ -z "$(ls -A "$HOME/GoogleDrive" 2>/dev/null)" ]]; then
-                echo "arch: seeding rclone bisync baseline (gdrive → ~/GoogleDrive)..."
+            if [[ -z "$(ls -A "$HOME/gdrive" 2>/dev/null)" ]]; then
+                echo "arch: seeding rclone bisync baseline (gdrive → ~/gdrive)..."
                 # --filter-from: exclude Google Photos videos (MD5 mismatch on
                 # transfer because Google transcodes them server-side, breaking
                 # bisync's hash check). Photos sync fine; videos don't. The
                 # filter file lives in dots (chezmoi) and stays in sync with
                 # rclone-gdrive-bisync.service.
-                if rclone bisync gdrive: "$HOME/GoogleDrive" \
+                if rclone bisync gdrive: "$HOME/gdrive" \
                         --filter-from "$HOME/.config/rclone/gdrive-filters.txt" \
                         --resync --resilient \
                         --max-delete 25 --create-empty-src-dirs; then
@@ -83,7 +83,7 @@ if command -v rclone &>/dev/null; then
                     echo "arch: bisync --resync failed — start a new shell to retry."
                 fi
             else
-                echo "arch: ~/GoogleDrive is non-empty; skipping bisync --resync."
+                echo "arch: ~/gdrive is non-empty; skipping bisync --resync."
                 echo "      Move existing files aside, then start a new shell to seed."
             fi
         else
