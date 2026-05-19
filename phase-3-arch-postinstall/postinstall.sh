@@ -1001,6 +1001,7 @@ log "Installing AUR-exclusive apps (VSCode, Edge, Claude, awww, matugen, overskr
 # nothing slips through silently.
 AUR_PACKAGES=(
     visual-studio-code-bin
+    github-desktop-bin
     microsoft-edge-stable-bin
     claude-desktop-native
     # dropbox: official Dropbox Linux daemon. Tray icon under Wayland is
