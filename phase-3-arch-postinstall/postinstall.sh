@@ -932,6 +932,33 @@ log "Installing /etc/polkit-1/rules.d/49-hibernate-tom.rules..."
 sudo install -m 644 -D "$SCRIPT_DIR/system-files/polkit-1/rules.d/49-hibernate-tom.rules" \
     /etc/polkit-1/rules.d/49-hibernate-tom.rules
 
+# ---------- 1i. systemd-oomd: kill cgroups under memory pressure ----------
+# Without this, a memory spike triggers the kernel OOM killer which can fire
+# inside the Hyprland session's cgroup (wayland-wm@hyprland-uwsm.desktop.service)
+# and tear the whole desktop down to TTY — observed 2026-05-19 when an electron
+# autostart got killed and uwsm collapsed the session along with it.
+#
+# systemd-oomd watches PSI on user.slice and global swap usage on -.slice; when
+# the configured thresholds are crossed, it picks the heaviest leaf cgroup under
+# the monitored slice and SIGKILLs that one cgroup. For this to land on a
+# single app (not the compositor), each XDG-launched app must live in its own
+# scope under app-graphical.slice — see the `uwsm app -a NAME --` wrapper in
+# rhombu5/dots' hypr/exec.conf and hypr/binds.conf.
+#
+# Drop-ins:
+#   /etc/systemd/oomd.conf.d/10-thresholds.conf — global thresholds (50% PSI / 20s, 85% swap)
+#   /etc/systemd/system/-.slice.d/10-oomd.conf — ManagedOOMSwap=kill on the root slice
+#   /etc/systemd/system/user.slice.d/10-oomd.conf — ManagedOOMMemoryPressure=kill on the user slice
+log "Installing systemd-oomd drop-ins + enabling systemd-oomd.service..."
+sudo install -m 644 -D "$SCRIPT_DIR/system-files/systemd/oomd.conf.d/10-thresholds.conf" \
+    /etc/systemd/oomd.conf.d/10-thresholds.conf
+sudo install -m 644 -D "$SCRIPT_DIR/system-files/systemd/system/-.slice.d/10-oomd.conf" \
+    /etc/systemd/system/-.slice.d/10-oomd.conf
+sudo install -m 644 -D "$SCRIPT_DIR/system-files/systemd/system/user.slice.d/10-oomd.conf" \
+    /etc/systemd/system/user.slice.d/10-oomd.conf
+sudo systemctl daemon-reload
+sudo systemctl enable --now systemd-oomd.service
+
 # ---------- 2. yay bootstrap ----------
 if ! command -v yay >/dev/null; then
     log "Bootstrapping yay from AUR..."

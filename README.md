@@ -177,7 +177,7 @@ Grouped by purpose. Full list lives in `install.sh`/`chroot.sh`/`postinstall.sh`
 
 ### Services enabled
 
-- **System** — `systemd-timesyncd`, `NetworkManager`, `bluetooth`, `fprintd`, `fstrim.timer`, `smartd`, `sshd`, `ufw`, `cups.socket`, `docker`, `waydroid-container`, `libvirtd.socket`, `numlock-on`, `lego-renew.timer`, `azure-ddns.timer`
+- **System** — `systemd-timesyncd`, `NetworkManager`, `bluetooth`, `fprintd`, `fstrim.timer`, `smartd`, `sshd`, `ufw`, `cups.socket`, `docker`, `waydroid-container`, `libvirtd.socket`, `numlock-on`, `systemd-oomd`, `lego-renew.timer`, `azure-ddns.timer`
 - **User (`tom`)** — `hyprpolkitagent`, `hyprmural`, `hypridle`, `cliphist`, `swayosd-server`, `iio-hyprland`, `display-watchdog`, `tablet-mode-watcher`, `rclone-gdrive-bisync.timer`, `dropbox` (the latter two stay no-op until first-login planters auth them)
 - **Disabled / masked**
   - `greetd.service` — disabled (TTY login active)
@@ -198,6 +198,7 @@ Configuration written by `chroot.sh` and `postinstall.sh` (sources under
 - **Network** — `/etc/NetworkManager/system-connections/*.nmconnection` (pre-seeded Wi-Fi)
 - **Pacman** — `/etc/pacman.conf` + the three hooks above in `/etc/pacman.d/hooks/`
 - **journald** — `/etc/systemd/journald.conf.d/10-size.conf`
+- **Memory / OOM** — `/etc/systemd/oomd.conf.d/10-thresholds.conf` (50% PSI / 20s, 85% swap), `/etc/systemd/system/-.slice.d/10-oomd.conf` (`ManagedOOMSwap=kill` on root), `/etc/systemd/system/user.slice.d/10-oomd.conf` (`ManagedOOMMemoryPressure=kill` on user.slice) — userspace OOM killer that picks the heaviest leaf cgroup before the kernel OOM can fire inside the compositor's cgroup and collapse the whole session. Pairs with the `uwsm app -a NAME --` wrappers in rhombu5/dots' Hyprland configs that give each app its own scope
 - **Bluetooth** — `/etc/bluetooth/main.conf` (`AutoEnable=true`)
 - **SSH** — `/etc/ssh/sshd_config.d/10-arch-setup.conf`
 - **Firewall** — UFW default rules
