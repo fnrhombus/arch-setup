@@ -593,14 +593,18 @@ arch-chroot /mnt /root/chroot.sh
 unset LUKS_PW
 
 # ---------- 13. post-install hook ----------
-# Stage phase-3 script + setup-azure-ddns where the user can run them
-# after first login. (The full repo is already at /mnt/root/arch-setup/
-# from the staging step in §11.)
+# Stage phase-3 script in $HOME for the user's first-login run; install
+# setup-azure-ddns into /usr/local/bin so it's permanently on PATH
+# (needs to be re-runnable yearly to rotate the SP secret).
+# (The full repo is already at /mnt/root/arch-setup/ from §11.)
 install -d -m 755 /mnt/home/tom
 cp "$SOURCE_DIR/phase-3-arch-postinstall/postinstall.sh"     /mnt/home/tom/postinstall.sh 2>/dev/null \
     || warn "phase-3 script missing — copy it later from /root/arch-setup."
-cp "$SOURCE_DIR/phase-3-arch-postinstall/setup-azure-ddns.sh" /mnt/home/tom/setup-azure-ddns.sh 2>/dev/null || true
-chmod +x /mnt/home/tom/postinstall.sh /mnt/home/tom/setup-azure-ddns.sh 2>/dev/null || true
+chmod +x /mnt/home/tom/postinstall.sh 2>/dev/null || true
+install -D -m 755 -o root -g root \
+    "$SOURCE_DIR/phase-3-arch-postinstall/setup-azure-ddns.sh" \
+    /mnt/usr/local/bin/setup-azure-ddns \
+    || warn "setup-azure-ddns: install into /mnt/usr/local/bin failed — wire it up later from /root/arch-setup."
 # Dotfiles (Claude-authored, chezmoi-managed) live in the rhombu5/dots
 # repo and are fetched + applied by postinstall via `chezmoi init --apply`.
 arch-chroot /mnt chown -R tom:tom /home/tom

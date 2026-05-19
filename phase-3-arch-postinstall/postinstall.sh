@@ -18,7 +18,8 @@
 #     bash + systemd timer that keeps metis.rhombus.rocks A+AAAA in sync
 #     with this host's public IPs against Azure DNS (no maintained off-
 #     the-shelf option exists). The package ships a stub /etc/azure-ddns.env;
-#     `setup-azure-ddns.sh` fills in SP creds and enables the timer.
+#     `setup-azure-ddns` (installed to /usr/local/bin/ by install.sh §13)
+#     fills in SP creds and enables the timer.
 #   - Claude Code CLI + bash completion
 #   - Goodix-aware fingerprint enrollment (VID 27C6 detected → detailed diag on fail)
 #   - pinpam TPM-PIN + PAM wiring for sudo/polkit/hyprlock
@@ -1240,7 +1241,7 @@ fi
 # eventually issues their first cert.
 log "Setting up lego renewal pipeline..."
 sudo install -d -m 750 -o root -g root /etc/lego
-# /etc/lego/lego.env is written by setup-azure-ddns.sh — service starts
+# /etc/lego/lego.env is written by setup-azure-ddns — service starts
 # disabled until that file exists.
 LEGO_EMAIL="${LEGO_EMAIL:-goliyth@gmail.com}"
 LEGO_DOMAINS="${LEGO_DOMAINS:-metis.rhombus.rocks}"
@@ -1356,10 +1357,11 @@ sudo rm -f /etc/keyd/default.conf
 #   /usr/lib/NetworkManager/dispatcher.d/90-azure-ddns
 #   /etc/azure-ddns.env (template; mode 600, root-owned, placeholder values)
 #
-# `setup-azure-ddns.sh` (staged at /home/tom/) does the Azure-side
-# provisioning + writes real values into /etc/azure-ddns.env. We just
-# enable the timer here; first tick no-op-fails until creds are filled in,
-# which is fine — we just don't want a FAILED state screaming at first boot.
+# `setup-azure-ddns` (installed to /usr/local/bin/ by install.sh §13)
+# does the Azure-side provisioning + writes real values into
+# /etc/azure-ddns.env. We just enable the timer here; first tick
+# no-op-fails until creds are filled in, which is fine — we just don't
+# want a FAILED state screaming at first boot.
 log "Building azure-ddns from aur/azure-ddns/PKGBUILD..."
 AZDDNS_BUILD=$(mktemp -d)
 trap "rm -rf '$AZDDNS_BUILD'" RETURN 2>/dev/null || true
@@ -1374,7 +1376,7 @@ if retry git clone --depth 1 https://github.com/fnrhombus/azure-ddns "$AZDDNS_BU
             warn "azure-ddns: makepkg -si failed; falling back to AUR's published azure-ddns."
             popd >/dev/null
             retry_soft yay -S --noconfirm --rebuild --noprovides azure-ddns || \
-                warn "azure-ddns: AUR fallback also failed. Run setup-azure-ddns.sh anyway — it'll surface the missing pieces."
+                warn "azure-ddns: AUR fallback also failed. Run setup-azure-ddns anyway — it'll surface the missing pieces."
         else
             popd >/dev/null
         fi
@@ -1388,7 +1390,7 @@ else
 fi
 rm -rf "$AZDDNS_BUILD"
 
-log "Enabling azure-ddns timer (real creds filled in by setup-azure-ddns.sh)..."
+log "Enabling azure-ddns timer (real creds filled in by setup-azure-ddns)..."
 sudo install -d -m 755 /var/lib/azure-ddns
 sudo systemctl daemon-reload
 sudo systemctl enable azure-ddns.timer
@@ -2647,7 +2649,7 @@ fi
 #
 # Order matters: gh first (small, fast, fails locally if no browser),
 # then bw, then azure-ddns (which needs az login), then lego (depends
-# on /etc/lego/lego.env which setup-azure-ddns.sh writes).
+# on /etc/lego/lego.env which setup-azure-ddns writes).
 if [[ -t 0 ]]; then
     echo
     echo "=== Interactive follow-up ==="
@@ -2686,23 +2688,23 @@ if [[ -t 0 ]]; then
         fi
     fi
 
-    # --- 20c. setup-azure-ddns.sh (Azure DNS provisioning + creds) ---
-    if [[ -x "$HOME/setup-azure-ddns.sh" ]]; then
+    # --- 20c. setup-azure-ddns (Azure DNS provisioning + creds) ---
+    if [[ -x /usr/local/bin/setup-azure-ddns ]]; then
         # Check if creds are already filled in — env file present + non-empty
-        # AZ_TENANT_ID means setup-azure-ddns.sh has run successfully at least once.
+        # AZ_TENANT_ID means setup-azure-ddns has run successfully at least once.
         if sudo grep -qE '^AZ_TENANT_ID=.+' /etc/azure-ddns.env 2>/dev/null; then
-            log "Azure DDNS env already populated — skipping. (Re-run ~/setup-azure-ddns.sh manually to rotate secret.)"
+            log "Azure DDNS env already populated — skipping. (Re-run \`setup-azure-ddns\` manually to rotate secret.)"
         else
-            log "Running setup-azure-ddns.sh (browser/device-code auth for az login)..."
-            bash "$HOME/setup-azure-ddns.sh" || \
-                warn "setup-azure-ddns.sh failed — re-run manually after fixing the underlying issue."
+            log "Running setup-azure-ddns (browser/device-code auth for az login)..."
+            /usr/local/bin/setup-azure-ddns || \
+                warn "setup-azure-ddns failed — re-run manually after fixing the underlying issue."
         fi
     else
-        warn "~/setup-azure-ddns.sh not found — Azure DDNS not provisioned. Stage it from arch-setup/phase-3-arch-postinstall/setup-azure-ddns.sh."
+        warn "/usr/local/bin/setup-azure-ddns not found — Azure DDNS not provisioned. Install it from arch-setup/phase-3-arch-postinstall/setup-azure-ddns.sh."
     fi
 
     # --- 20d. lego run (initial Let's Encrypt cert via azuredns) ---
-    # Auto-issue if creds are wired (setup-azure-ddns.sh wrote
+    # Auto-issue if creds are wired (setup-azure-ddns wrote
     # /etc/lego/lego.env in §20c) and we haven't already issued.
     # Renewal is handled by lego-renew.timer (set up in §3a).
     if command -v lego >/dev/null && sudo test -s /etc/lego/lego.env; then
@@ -2715,9 +2717,9 @@ if [[ -t 0 ]]; then
                     --email '${LEGO_EMAIL}' \
                     --domains '${LEGO_DOMAINS}' \
                     --dns azuredns --path /etc/lego run" \
-                || warn "lego run failed — see output. Re-run setup-azure-ddns.sh and retry."
+                || warn "lego run failed — see output. Re-run setup-azure-ddns and retry."
         else
-            log "/etc/lego/lego.env missing creds — skipping. Run setup-azure-ddns.sh first."
+            log "/etc/lego/lego.env missing creds — skipping. Run setup-azure-ddns first."
         fi
     fi
 else
@@ -2755,10 +2757,10 @@ cat <<'POSTINSTALL_OUTRO'
       Already wired if the first-login planter ran (see ~/.gitconfig.local).
       Otherwise: open a new terminal and `gh auth login` once.
 
-[4] Azure DDNS (metis.rhombus.rocks) — one-time wiring via setup-azure-ddns.sh:
+[4] Azure DDNS (metis.rhombus.rocks) — one-time wiring via setup-azure-ddns:
 
         az login
-        ~/setup-azure-ddns.sh           # idempotent; rotates secret on each run
+        setup-azure-ddns                # /usr/local/bin/; idempotent; rotates secret on re-run
 
       The script writes /etc/azure-ddns.env + /etc/lego/lego.env and
       restarts azure-ddns. First call may 403 (role propagation, ~30s–5min)

@@ -227,7 +227,7 @@ Configuration written by `chroot.sh` and `postinstall.sh` (sources under
 
 ### Ancillary one-shots
 
-- **[`setup-azure-ddns.sh`](phase-3-arch-postinstall/setup-azure-ddns.sh)** — creates / rotates the `metis-ddns` Azure SP, assigns DNS Zone Contributor on `rhombus.rocks`, writes credential envfiles, issues first Let's Encrypt cert via `lego`
+- **[`setup-azure-ddns.sh`](phase-3-arch-postinstall/setup-azure-ddns.sh)** — creates / rotates the `metis-ddns` Azure SP, assigns DNS Zone Contributor on `rhombus.rocks`, writes credential envfiles, issues first Let's Encrypt cert via `lego`. Installed to `/usr/local/bin/setup-azure-ddns` by phase-2 `install.sh` §13 so it stays on PATH for the yearly secret rotation.
 - **Windows VM** (optional, `--skip-windows-install` to opt out)
   - `dockur/windows` compose stack at `/etc/dockur-windows/`
   - Win11 + VS Enterprise unattended install via OEM scripts
