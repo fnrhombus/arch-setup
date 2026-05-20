@@ -75,7 +75,7 @@ this plan, not open-ended.
   - `/boot/EFI/Linux/arch-linux.efi` (152 MiB UKI)
   - `/boot/EFI/Linux/arch-linux-lts.efi` (151 MiB UKI)
   - `/usr/share/limine/BOOTX64.EFI` (340 KiB, source for `limine-redeploy.hook`)
-- Pacman hooks installed: `95-limine-redeploy.hook`, `95-tpm2-reseal.hook`. Both already SB-aware (no-op when sbctl isn't enrolled; resign + reseal on upgrade once it is).
+- Pacman hook installed: `95-limine-redeploy.hook` (SB-aware: no-op when sbctl isn't enrolled, resigns on upgrade once it is). The companion `95-tpm2-reseal.hook` was removed 2026-05-20 — see `docs/tpm-luks-bitlocker-parity.md` "Implementation map" for the rationale. PCR 7 changes (which the SB enablement dance triggers) are handled by manually running `sudo /usr/local/sbin/tpm2-reseal-luks` in Phase D.1.
 - `sbctl` package: installed (`/usr/bin/sbctl` present); no keys created yet (`Installed: ✗`).
 
 ## Pre-flight checklist
@@ -271,9 +271,11 @@ sideways and you can't recover the TPM, the system is still unlockable;
 re-running the dance from a known-good post-recovery-key state is fine.
 
 **Do not run `pacman -Syu` during the dance.** A kernel/mkinitcpio/systemd
-upgrade in the middle would rebuild the UKI (rewriting `.pcrsig`) and fire
-the reseal hook (which always uses `--tpm2-pcrs=7`). Both effects can wedge
-you mid-dance. Schedule a clean window. If a kernel upgrade is overdue,
+upgrade in the middle would rebuild the UKI (rewriting `.pcrsig`). With
+A.4 having dropped the PCR 7 binding, the rebuilt UKI still unseals
+silently — but if the rebuild lands between Phase C (SB on, PCR 7
+changed) and Phase D (rebind to new PCR 7), it complicates the
+verification. Schedule a clean window. If a kernel upgrade is overdue,
 do it *before* starting Phase A.
 
 ## What about the LUKS recovery key?
@@ -304,8 +306,10 @@ This plan is **execution-only**. No script changes are required:
 - `tpm2-reseal-luks` already does the right thing for Phase D (always
   re-enrolls signed-PCR-11 + PCR 7).
 - `sbctl` is already installed.
-- The pacman hooks are already SB-aware and will keep things signed +
-  resealed across upgrades from Phase D onward.
+- The `95-limine-redeploy.hook` is already SB-aware and will keep
+  limine signed across upgrades from Phase D onward. Kernel/UKI updates
+  need no reseal (the UKI's own `.pcrsig` covers it); the user only
+  reaches for `tpm2-reseal-luks` again on the next PCR 7 event.
 
 The "drop PCR 7" step (A.4) is the one operation that has no ergonomic
 helper script. If we ever automate this dance end-to-end, the only piece

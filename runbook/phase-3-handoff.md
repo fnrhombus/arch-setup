@@ -335,6 +335,6 @@ Everything listed below is installed automatically by the phase-2 + phase-3 scri
      sudo /usr/local/sbin/tpm2-reseal-luks
      sudo reboot
      ```
-  10. Boot is silent again. Secure Boot is wired; TPM seals against signed PCR 11 + PCR 7=SB-on. Subsequent kernel/limine upgrades stay silent (sbctl pacman hook re-signs binaries; TPM2 reseal hook keeps the seal current).
+  10. Boot is silent again. Secure Boot is wired; TPM seals against signed PCR 11 + PCR 7=SB-on. Subsequent kernel/limine upgrades stay silent (sbctl pacman hook re-signs binaries; the UKI's own `.pcrsig` covers PCR 11 on every rebuild, so no reseal is needed).
 
   **Recovery if anything goes wrong:** in BIOS, **Reset All Keys** restores Dell's factory PK/KEK/db; turn off Custom Mode + Secure Boot Enable; you're back to the install baseline. The `.auth` files stay on the ESP for retry.

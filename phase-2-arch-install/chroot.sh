@@ -521,82 +521,60 @@ rm -rf "$SBTMP"
 unset SBGUID SBTMP
 log "  staged at /boot/EFI/sbctl-keys/{PK,KEK,db}.auth — ready for BIOS file-load."
 
-# ---------- Pacman hook: TPM2 PCR re-enrolment after kernel/UKI/limine upgrades ----------
-# Kernel / mkinitcpio / systemd / limine upgrades regenerate UKIs (which
-# rewrites the .pcrsig section). The seal still unseals because the policy
-# is "signed by our key", which holds across rebuilds — but if postinstall
-# §7.5 added stage-2 PCR 7 binding, we ALSO need to refresh the PCR 7
-# binding when firmware/SB state changes. This hook re-runs
-# systemd-cryptenroll on every TPM2-enrolled LUKS device using the
-# saved policy (signed PCR 11 + optional PCR 7), no-op'ing safely when
-# nothing actually drifted.
+# ---------- Manual recovery tool: TPM2 PCR re-enrolment ----------
+# Installs /usr/local/sbin/tpm2-reseal-luks as a manual-only recovery tool.
+# Run it after BIOS update / TPM clear / Secure Boot toggle / real PCR 7
+# drift — the rare cases where the install-time TPM seal needs to be
+# rebound. UKI rebuilds on kernel upgrades do NOT need this: each new UKI
+# carries its own embedded `.pcrsig` for enter-initrd PCR 11, so the
+# signed-PCR-11 policy continues to unseal silently at boot.
 #
-# Auto-discovers devices by scanning /etc/crypttab(.initramfs) for entries
-# with tpm2-device=auto.
-log "Installing pacman post-upgrade TPM2 reseal hook..."
-cat > /etc/pacman.d/hooks/95-tpm2-reseal.hook <<'EOF'
-[Trigger]
-Operation = Upgrade
-Type = Package
-Target = linux
-Target = linux-lts
-Target = mkinitcpio
-Target = systemd
-Target = limine
-Target = sbctl
-
-[Action]
-Description = Re-enrolling TPM2 PCR slots on TPM-sealed LUKS volumes...
-When = PostTransaction
-Exec = /usr/local/sbin/tpm2-reseal-luks
-EOF
-
+# There used to be a pacman post-upgrade hook (`95-tpm2-reseal.hook`)
+# that called this script after every kernel/UKI/limine/systemd/sbctl
+# upgrade. It was structurally broken: by the time the hook fires (post-
+# transaction, userspace), `systemd-pcrphase-initrd.service` has already
+# extended PCR 11 past the enter-initrd value the UKI signs for, so no
+# signature matches current PCR 11, the TPM unseal fails, cryptenroll
+# falls back to an interactive passphrase prompt, the 30s timeout bails,
+# and the hook SKIPs. Killed 2026-05-20 — UKI updates don't need a
+# reseal; the signed-PCR-11 policy already handles them at early-initrd.
 install -d -m 755 /usr/local/sbin
 cat > /usr/local/sbin/tpm2-reseal-luks <<'BASH'
 #!/usr/bin/env bash
-# Re-enrol every TPM2-sealed LUKS device with the install-time policy
-# (signed PCR 11 + PCR 7). Triggered by
-# /etc/pacman.d/hooks/95-tpm2-reseal.hook after kernel/UKI/limine/systemd/
-# sbctl upgrades, plus manually after Secure-Boot toggle / firmware
-# update / TPM clear.
+# Manual TPM2 LUKS reseal — re-enrols every TPM2-sealed LUKS device with
+# the install-time policy (signed PCR 11 + PCR 7).
 #
-# Stage-1 / stage-2 sentinel logic was removed 2026-04-28 — install.sh
-# now enrolls signed-PCR-11 + PCR 7 together, so the reseal hook always
-# applies the same policy.
+# When to run:
+#   - After enabling/disabling Secure Boot (PCR 7 changed)
+#   - After a BIOS / firmware update (PCR 7 may change)
+#   - After a TPM clear in BIOS (wrapped keys gone; full re-enroll)
+#   - After motherboard replacement (new TPM SRK; full re-enroll)
+#
+# When NOT to run:
+#   - After a routine kernel / mkinitcpio / systemd / limine / sbctl
+#     upgrade. The signed-PCR-11 policy already handles UKI rebuilds —
+#     each new UKI ships its own `.pcrsig` signed against the same
+#     install-time keypair.
+#
+# If the existing TPM2 slot can't auto-unlock (which is the expected
+# case when you're running this after PCR 7 drift), systemd-cryptenroll
+# falls back to prompting interactively for a LUKS passphrase. Type the
+# 48-digit recovery key from your photograph.
 set -euo pipefail
 
 PUB=/etc/systemd/tpm2-pcr-public.pem
-[[ -f "$PUB" ]] || { echo "tpm2-reseal: $PUB missing — skipping (was the install half-done?)" >&2; exit 0; }
+[[ -f "$PUB" ]] || { echo "tpm2-reseal: $PUB missing — was the install half-done?" >&2; exit 1; }
 
 reseal_one() {
     local dev="$1"
-    [[ -b "$dev" ]] || { echo "tpm2-reseal: $dev not present (yet?); skipping" >&2; return; }
+    [[ -b "$dev" ]] || { echo "tpm2-reseal: $dev not present; skipping" >&2; return; }
     echo "tpm2-reseal: re-enrolling TPM2 slot on $dev..."
-    # Single atomic command: cryptenroll uses the existing TPM2
-    # binding to unlock LUKS (still valid post kernel/UKI rebuild
-    # via the signed-PCR-11 policy — same install-time keypair
-    # signs the new .pcrsig section), wipes the old slot, adds the
-    # new one. The two-command form (wipe-then-add) used to wedge
-    # the pacman transaction here: command #1 wiped the only TPM2
-    # slot, command #2 had no auth left and fell back to a
-    # passphrase prompt routed through systemd-ask-password —
-    # which has no agent to answer it in a pacman-hook context.
-    #
-    # If the existing TPM2 still can't auto-unlock (firmware
-    # update / TPM clear / PCR 7 drift past the policy / first run
-    # before any TPM2 is enrolled), `timeout` bails out instead of
-    # hanging forever. The pacman transaction completes cleanly;
-    # next boot prompts for the recovery key, user re-runs this
-    # script manually to re-bind.
-    if ! timeout 30 systemd-cryptenroll \
-            --wipe-slot=tpm2 \
-            --tpm2-device=auto \
-            --tpm2-public-key="$PUB" --tpm2-public-key-pcrs=11 \
-            --tpm2-pcrs=7 \
-            "$dev"; then
-        echo "tpm2-reseal: SKIPPED $dev — existing TPM2 couldn't auto-unlock (firmware change / TPM clear / PCR 7 drift / first enrollment). Recover with: sudo /usr/local/sbin/tpm2-reseal-luks  (will prompt for the LUKS recovery key)" >&2
-        return 0
-    fi
+    systemd-cryptenroll \
+        --wipe-slot=tpm2 \
+        --tpm2-device=auto \
+        --tpm2-public-key="$PUB" --tpm2-public-key-pcrs=11 \
+        --tpm2-pcrs=7 \
+        "$dev"
 }
 
 scan() {

@@ -28,14 +28,15 @@ PCR 11 is the systemd-stoked phase register. The UKI measures itself into PCR 11
 
 Install-time enrollment cannot bind to PCR 7 because PCR 7 is not measurable from the live ISO in a way that matches the installed system — the live ISO boots through its own EFI stub with its own Secure Boot policy measurements. Install-time gets the signed-PCR-11 policy only.
 
-Postinstall §7.5 runs once the installed system is up, measures the real PCR 7, and re-enrolls each TPM2 slot with `--tpm2-pcrs=7` *added* to the existing `--tpm2-public-key-pcrs=11` policy. From then on the unseal predicate is "valid signed PCR 11 prediction AND PCR 7 matches enrolled value". That restores BitLocker semantics around Secure Boot toggling: flip SB on or off and the TPM refuses to unseal until the user types the recovery key and reseals. Without §7.5, SB toggling would be silent — which is a security regression, not a feature. §7.5 drops a sentinel at `/var/lib/tpm-luks-stage2` so the chroot reseal hook knows to include `--tpm2-pcrs=7` on every future reseal.
+Postinstall §7.5 runs once the installed system is up, measures the real PCR 7, and re-enrolls each TPM2 slot with `--tpm2-pcrs=7` *added* to the existing `--tpm2-public-key-pcrs=11` policy. From then on the unseal predicate is "valid signed PCR 11 prediction AND PCR 7 matches enrolled value". That restores BitLocker semantics around Secure Boot toggling: flip SB on or off and the TPM refuses to unseal until the user types the recovery key and reseals. Without §7.5, SB toggling would be silent — which is a security regression, not a feature.
 
 ## Implementation map
 
 - `phase-2-arch-install/install.sh` §5a — generates the RSA-2048 keypair at `/mnt/etc/systemd/tpm2-pcr-{private,public}.pem` (mode 600 / 644) before chroot.
 - `phase-2-arch-install/install.sh` §5b — `systemd-cryptenroll --tpm2-public-key=… --tpm2-public-key-pcrs=11` against cryptroot and cryptswap. No specific PCR values bound at install.
-- `phase-2-arch-install/chroot.sh` — UKI mode: `mkinitcpio.d/linux.preset` writes UKIs into `/boot/EFI/Linux/arch-{linux,linux-lts}{,-fallback}.efi`. `/etc/kernel/uki.conf` carries `PCRPrivateKey=/etc/systemd/tpm2-pcr-private.pem`, `PCRPublicKey=…public.pem`, `PCRBanks=sha256`, `Phases=enter-initrd`. `/etc/kernel/cmdline` holds the kernel cmdline (no longer in `limine.conf`). `limine.conf` Linux entries use `protocol: efi_chainload` against the UKI paths. The pacman post-upgrade reseal hook re-runs `systemd-cryptenroll` after every kernel update so newly-built UKIs unseal silently.
-- `phase-3-arch-postinstall/postinstall.sh` §7.5 — stage-2 PCR 7 binding. Adds PCR 7 to the existing signed-PCR-11 policy, drops the `/var/lib/tpm-luks-stage2` sentinel.
+- `phase-2-arch-install/chroot.sh` — UKI mode: `mkinitcpio.d/linux.preset` writes UKIs into `/boot/EFI/Linux/arch-{linux,linux-lts}{,-fallback}.efi`. `/etc/kernel/uki.conf` carries `PCRPrivateKey=/etc/systemd/tpm2-pcr-private.pem`, `PCRPublicKey=…public.pem`, `PCRBanks=sha256`, `Phases=enter-initrd`. `/etc/kernel/cmdline` holds the kernel cmdline (no longer in `limine.conf`). `limine.conf` Linux entries use `protocol: efi_chainload` against the UKI paths. Kernel updates need no reseal: ukify re-signs the PCR 11 prediction into a fresh `.pcrsig` PE section on every UKI rebuild, and the signed-PCR-11 policy unseals against whichever signed UKI is running.
+- `phase-3-arch-postinstall/postinstall.sh` §7.5 — stage-2 PCR 7 binding. Adds PCR 7 to the existing signed-PCR-11 policy.
+- `/usr/local/sbin/tpm2-reseal-luks` — manual recovery tool, installed by `chroot.sh`. Run after BIOS / TPM / SB events that actually move PCR 7. **Not invoked automatically.** A pacman post-upgrade hook (`95-tpm2-reseal.hook`) used to call it after every kernel/UKI/limine/systemd/sbctl upgrade; killed 2026-05-20 because the hook fires in userspace where PCR 11 has already been extended past enter-initrd, so the signed-PCR-11 policy can't unseal, cryptenroll falls back to an interactive passphrase prompt, and the hook bails. The UKI's own `.pcrsig` already handles the kernel-update case at early-initrd, making the hook redundant as well as broken.
 
 ## Threat model
 
@@ -49,7 +50,7 @@ Postinstall §7.5 runs once the installed system is up, measures the real PCR 7,
 | BIOS / firmware update | Recovery key on next boot only | PCR 7 bank changes; user reseals with `tpm2-reseal-luks` |
 | Secure Boot toggle | Recovery key on next boot only | Same — PCR 7 changes; intentional |
 | TPM clear | Recovery key prompt; full re-enroll required | Wrapped key is gone; postinstall §7.5 re-runs cleanly |
-| Kernel update (silent) | Silent boot, no prompt | mkinitcpio rebuilds UKI, ukify re-signs PCR 11 prediction, reseal hook re-binds |
+| Kernel update (silent) | Silent boot, no prompt | mkinitcpio rebuilds UKI; ukify embeds a fresh `.pcrsig` for enter-initrd PCR 11; signed-PCR-11 policy unseals against it at early-initrd — no reseal needed |
 | Private signing key stolen | Catastrophic — attacker can mint UKIs that unseal | Mitigated by LUKS protecting the key at rest; rotation procedure in §Recovery |
 
 ## Recovery procedures
@@ -99,7 +100,7 @@ sudo /usr/local/sbin/tpm2-reseal-luks                       # re-enroll with new
 | Key | Location | Protection | Lifecycle |
 |---|---|---|---|
 | LUKS recovery key (48 hex digits) | User's photo + Bitwarden | User's responsibility | Generated at install; immutable |
-| Sealed cryptroot TPM2 slot | LUKS header on Samsung `ArchRoot` | TPM SRK + signed PCR 11 + PCR 7 | Re-sealed after every kernel update via reseal hook |
+| Sealed cryptroot TPM2 slot | LUKS header on Samsung `ArchRoot` | TPM SRK + signed PCR 11 + PCR 7 | Stable across kernel updates (UKI's own `.pcrsig` covers it); rebound manually via `tpm2-reseal-luks` on PCR 7 events (BIOS / SB / TPM clear) |
 | Sealed cryptswap TPM2 slot | LUKS header on Netac `ArchSwap` | TPM SRK + signed PCR 11 + PCR 7 | Same lifecycle as cryptroot |
 | PCR signing private key | `/etc/systemd/tpm2-pcr-private.pem` (mode 600, root) on LUKS root | LUKS at rest; root-only at runtime | Generated at install; rotation procedure above |
 | PCR signing public key | `/etc/systemd/tpm2-pcr-public.pem` (mode 644) on LUKS root | None needed (public) | Embedded in LUKS metadata at enroll time |

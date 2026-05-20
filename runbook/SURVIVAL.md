@@ -221,16 +221,13 @@ If `limine.conf.pre-recovery.bak` doesn't exist on the ESP (postinstall §16b ne
    umount -R /mnt; cryptsetup close cryptroot
    ```
 
-### Boot prompts for LUKS passphrase after a kernel/limine update
+### Boot prompts for LUKS passphrase
 
-PCR 4 (bootloader/kernel measurement) shifted; the TPM2-sealed slot can't unlock anymore. **Type the passphrase to get in**, then re-seal:
+Routine kernel / limine / mkinitcpio upgrades should NOT prompt — the UKI ships its own `.pcrsig` and the signed-PCR-11 policy unseals against it. If a prompt appears anyway, PCR 7 has shifted (BIOS update / Secure Boot toggle / TPM clear). **Type the 48-digit recovery key to get in**, then rebind:
 ```bash
 sudo /usr/local/sbin/tpm2-reseal-luks    # auto-discovers TPM-sealed devices
-# Or manually for one device:
-sudo systemd-cryptenroll --wipe-slot=tpm2 /dev/disk/by-partlabel/ArchRoot
-sudo systemd-cryptenroll --tpm2-device=auto --tpm2-pcrs=0+7 /dev/disk/by-partlabel/ArchRoot
 ```
-The pacman post-upgrade hook at `/etc/pacman.d/hooks/95-tpm2-reseal.hook` is supposed to do this automatically. If it didn't fire, check `pacman.log` for hook failures.
+The script will fall through to a passphrase prompt if the existing TPM2 slot can't auto-unlock — type the recovery key again to authorise the reseal.
 
 ### Hibernate / resume gone wrong
 

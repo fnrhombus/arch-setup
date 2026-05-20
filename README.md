@@ -69,7 +69,6 @@ later by chezmoi are catalogued separately in the
   - `MODULES=(btrfs)` explicit
 - **Pacman hooks** for boot integrity
   - `95-limine-redeploy.hook` — re-deploy + re-sign limine on package upgrade
-  - `95-tpm2-reseal.hook` — re-enroll TPM2 LUKS seal on `linux`/`mkinitcpio`/`systemd`/`limine`/`sbctl` upgrades
   - `zz-sbctl.hook` (shipped with sbctl) — keep signed binaries signed across upgrades
 
 ### Security and authentication
@@ -79,7 +78,7 @@ later by chezmoi are catalogued separately in the
   - Stage 1 (install): signed PCR 11 policy (covers initrd UKI self-measurement)
   - Stage 2 (postinstall §7.5): PCR 7 binding layered on top
   - Signing keypair: `/etc/systemd/tpm2-pcr-{private,public}.pem`
-  - Auto re-seals across kernel/firmware updates via the pacman hook above
+  - Kernel/UKI updates need no reseal (UKI ships its own `.pcrsig`); manual `tpm2-reseal-luks` rebinds after BIOS / SB / TPM-clear events
 - **48-digit LUKS recovery key** auto-generated, BitLocker-style display (red banner, photo-and-typeback gate)
 - **Secure Boot scaffolding** (pre-staged, manual BIOS enrollment)
   - `sbctl` keypair at `/var/lib/sbctl/keys/`
