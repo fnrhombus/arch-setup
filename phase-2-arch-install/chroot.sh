@@ -748,13 +748,14 @@ sed -i 's/^#VerbosePkgLists$/VerbosePkgLists/'   /etc/pacman.conf
 sed -i -E 's/^#?ParallelDownloads.*$/ParallelDownloads = 10/' /etc/pacman.conf
 grep -q '^ILoveCandy' /etc/pacman.conf || sed -i '/^ParallelDownloads/a ILoveCandy' /etc/pacman.conf
 
-# ---------- journald: cap size (Netac /var is ~110 GB but log bloat is free to avoid) ----------
-log "Capping journald to 200M..."
+# ---------- journald: cap size (Netac /var is ~110 GB; 16G gives months of retention
+# for intermittent-bug forensics without making /var feel tight). ----------
+log "Capping journald to 16G..."
 mkdir -p /etc/systemd/journald.conf.d
 cat > /etc/systemd/journald.conf.d/10-size.conf <<EOF
 [Journal]
-SystemMaxUse=200M
-SystemMaxFileSize=50M
+SystemMaxUse=16G
+SystemMaxFileSize=200M
 EOF
 
 # ---------- bluetooth: auto-enable on boot ----------
