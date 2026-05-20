@@ -177,3 +177,114 @@ sudo rm /boot/limine.conf.pre-recovery.bak
 ```
 
 **Trigger date:** 2026-05-23 (two weeks after 2026-05-09).
+
+## 6. aquamarine PR #291 release — retry DisplayLink dock + Hyprland
+
+**Background.** The Inspiron 7786's DisplayLink dock (`17e9:6000` "DisplayLink
+USB3.0 5K Graphic Docking") can drive the TV's HDMI input via the dock's own
+video chip — useful when the TV's stuck-asserted HPD on the laptop's native
+HDMI makes Linux think a powered-off TV is still connected. The dock path
+needs `displaylink` (AUR) + `evdi-dkms` (AUR) plus working evdi support in
+Hyprland's backend, `aquamarine`.
+
+DisplayLink/evdi worked under aquamarine through ~v0.9.x, then regressed in
+[aquamarine#235](https://github.com/hyprwm/aquamarine/pull/235) ("drm: use
+parent device matching for render nodes", merged 2026-02-04, shipped in
+v0.10.0+). PR #235 explicitly removed the EVDI render-node skip — the PR
+description literally says *"Also remove EVDI check since it wont be needed
+after this change"* — and removed the fallback-to-first-render-node
+behavior. For evdi (a virtual platform device with no PCI parent and no
+co-located render node), the parent-syspath search finds nothing and
+`renderNodeFd` stays `-1`, so Hyprland can't enumerate DisplayLink outputs.
+
+Three competing fix PRs were filed:
+
+- [aquamarine#279](https://github.com/hyprwm/aquamarine/pull/279) (sgtaziz)
+  — CPU-copy fallback, NVIDIA-focused. OPEN.
+- [aquamarine#289](https://github.com/hyprwm/aquamarine/pull/289) (cornedor)
+  — unconditional fallback to any render node. OPEN. **Tested locally
+  2026-05-04 by building the branch and swapping `libaquamarine.so` —
+  dropped Hyprland into safe mode on the i915 + DisplayLink combo. Reverted
+  via cached `aquamarine-0.11.0-2-x86_64.pkg.tar.zst`. Recipe is in the auto
+  memory file `project_aquamarine_pr289_safemode.md`.**
+- [aquamarine#291](https://github.com/hyprwm/aquamarine/pull/291) (jwbron)
+  — fall back to first render node on single-renderD systems when
+  parent-syspath match fails. **MERGED 2026-05-11**, merge commit
+  `f44fecf278a4b7f03e26592db1aba88edd8e51b6`. Headline test bed was Asahi
+  M1; whether it covers i915+evdi cleanly is untested. One PR comment
+  (waltmck, 2026-05-13) reports a still-open OpenGL issue on Hyprland
+  0.55.1, so PR #291 may not be a full win for every configuration.
+
+**Catch — the fix is master-only as of writing (2026-05-20).** Latest
+aquamarine release is `v0.11.0` (2026-04-25), which predates the #291 merge.
+The installed system has `aquamarine 0.11.0-2`, which does NOT contain the
+fix. The next tagged release after 2026-05-11 should pick it up.
+
+**Schedule prompt to give Claude:**
+
+> `/schedule` a weekly agent: query
+> <https://api.github.com/repos/hyprwm/aquamarine/releases?per_page=5>. For
+> each release tag newer than `v0.11.0`, check whether
+> `git -C ~/.local/src/aquamarine@hyprwm` (or via the GitHub compare API:
+> `gh api repos/hyprwm/aquamarine/compare/v0.11.0...<new-tag>`) contains
+> commit `f44fecf278a4b7f03e26592db1aba88edd8e51b6` (PR #291's merge
+> commit). If yes, ping the user with a `notify-send -u critical` and a
+> short summary (which release tag, when published). User will then
+> manually re-attempt the dock test using the recipe in the auto memory
+> file `project_aquamarine_pr289_safemode.md`. If still no new tag, no
+> notification — just confirm status in the agent's summary.
+>
+> While checking, also briefly note the state of
+> [aquamarine#294](https://github.com/hyprwm/aquamarine/issues/294)
+> ("Giant errorlog when using Displaylink displays") — if closed, mention
+> it in the summary since it's a known issue that affects the same path.
+
+**Local references — how to find this investigation after a wipe.**
+
+This whole thread is reconstructable from Dropbox-synced
+`~/.claude/projects/` (the auto-memory + the transcript). Without those, the
+GitHub links above are still enough — but the build recipe and the safe-mode
+data point only live locally.
+
+- **Auto memory file (the test recipe, including the `cmake` invocation
+  and the `.bak` recovery one-liner):**
+  ```
+  ~/.claude/projects/-home-tom-src-arch-setup-fnrhombus/memory/project_aquamarine_pr289_safemode.md
+  ```
+- **Session transcript with the deep code-level discussion** (root-cause
+  walkthrough, three-PR comparison, decision to build PR #289):
+  ```
+  ~/.claude/projects/-home-tom-src-arch-setup-fnrhombus/c1edcbaf-52d3-490d-973a-bfb192f385c8.jsonl
+  ```
+  Quick grep recipes:
+  ```sh
+  # find the regression-discovery exchange
+  grep -nE 'PR #235|aquamarine.*235|EVDI check|wont be needed' \
+      ~/.claude/projects/-home-tom-src-arch-setup-fnrhombus/c1edcbaf-52d3-490d-973a-bfb192f385c8.jsonl
+
+  # find the three-PR comparison
+  grep -nE 'pull/(279|289|291)|cornedor|jwbron|sgtaziz' \
+      ~/.claude/projects/-home-tom-src-arch-setup-fnrhombus/c1edcbaf-52d3-490d-973a-bfb192f385c8.jsonl
+  ```
+- **System-level timeline confirmation** (when displaylink/evdi were
+  installed and reverted):
+  ```sh
+  grep -E 'aquamarine|displaylink|evdi-dkms' /var/log/pacman.log
+  # Expect: aquamarine installed 2026-04-30, displaylink + evdi-dkms
+  # installed 2026-05-04 01:13 and removed 02:45 — same-night rollback.
+  ```
+- **Build clone** (`~/.local/src/aquamarine@hyprwm`) — **gone**, deleted
+  after the failed test. Re-create from the auto-memory recipe.
+
+**Files / paths to clean up when fixed (dock confirmed working):**
+
+- Update `docs/decisions.md` Q4 ("DisplayLink / External Monitor") — the
+  "Monitor via HDMI direct to laptop (bypasses DisplayLink video — avoids
+  Wayland issues)" rationale no longer holds in the post-#291 world.
+  Document that DisplayLink-via-dock works on aquamarine ≥ `<new-tag>`.
+- Update `runbook/GLOSSARY.md` "DisplayLink" entry similarly.
+- Update `runbook/phase-3-handoff.md` line 20 ("DisplayLink dock used only
+  for ethernet + USB hub, not video").
+- Consider adding `displaylink` + `evdi-dkms` to postinstall.sh §3
+  `AUR_PACKAGES`, gated on a check that aquamarine has the fix.
+- Delete this entry.
