@@ -26,6 +26,14 @@ export TARGET_USER
 # grid to 1080p even though DP-1 is 4K. `largest` makes kmscon use only the
 # biggest display, leaving eDP untouched. See `man 5 kmscon.conf` for
 # multi-monitor options.
+# --dpms-timeout=1800: kmscon DPMS-offs the panel after 30 min of no
+# keyboard/mouse input inside the lockscreen (≈60 min total wall-clock
+# from session-idle, given hypridle locks at 30). Wake-on-keypress is
+# kmscon's built-in behavior — confirmed by `man kmscon` for this flag.
+# Replaces hypridle's Hyprland-side `hyprctl dispatch dpms off` at 28 min,
+# which fired BEFORE kmscon took the VT and left the panel DPMS-off with
+# no path back to wake (Hyprland had released DRM master). See dots'
+# hypridle.conf comment for the trap story.
 # -- separates kmscon args from arguments to the login program (none).
 #
 # NOT exec'd: we want to run cleanup AFTER kmscon exits (chvt back to tty1
@@ -35,6 +43,7 @@ export TARGET_USER
     --no-issue \
     --font-size 32 \
     --multi-monitor=largest \
+    --dpms-timeout=1800 \
     -l /usr/local/bin/btop-lock-inner --
 
 # Belt-and-suspenders return-to-Hyprland once kmscon's fully exited.
