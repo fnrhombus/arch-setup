@@ -159,10 +159,11 @@ Grouped by purpose. Full list lives in `install.sh`/`chroot.sh`/`postinstall.sh`
 
 ### AUR packages (postinstall §3, via yay)
 
-- **IDEs / browsers** — `visual-studio-code-bin`, `microsoft-edge-stable-bin`, `claude-desktop-native`
+- **IDEs / browsers** — `visual-studio-code-bin`, `github-desktop-bin`, `microsoft-edge-stable-bin`, `claude-desktop-native`
 - **Hyprland ecosystem** — `iio-hyprland-git`, `hyprmural`, `matugen-bin`, `wleave`, `hyprshutdown`, `physlock`, `awww-git` (swww successor)
 - **Cursors / fonts** — `bibata-cursor-theme`, `ttf-nerd-fonts-meta`
 - **Cloud / sync** — `dropbox`, `dropbox-cli`
+- **Remote** — `nomachine` (player + server; nxnode binds Intel VPL Quick Sync — used to reach Callisto's 4K desktop where MS-RDP can't engage HD 4600 HW encode)
 - **Touch / 2-in-1** — `wvkbd` (mobintl on-screen keyboard)
 - **Terminal / shell** — `sesh-bin`, `powershell-bin`, `tdf-git` (terminal PDF viewer; kitty graphics protocol)
 - **Bluetooth** — `overskride`
