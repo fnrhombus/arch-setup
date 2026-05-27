@@ -1010,6 +1010,15 @@ AUR_PACKAGES=(
     # for status/control from the terminal — pairs with the daemon.
     dropbox
     dropbox-cli
+    # Remote desktop client+server. NoMachine's nxnode binds Intel VPL
+    # directly (Quick Sync HW encode); the player side picks it up on the
+    # other end. Used to reach Callisto's 4K desktop because MS-RDP's GFX
+    # pipeline can't usefully engage the HD 4600's encoder (Event 162
+    # negotiates AVC down to software, ~50% CPU bottleneck on the host).
+    # Player config knob "Enable active keyboard grabbing" defaults to
+    # false and breaks XGrabKeyboard under XWayland — flipped by the
+    # nomachine-keyboard-grab planter on first interactive shell.
+    nomachine
     # pinpam-git: replaced by pinpam-fnrhombus in §3-overrides below (carries
     # a try_first_pass / use_first_pass patch needed by §7a's concurrent
     # PAM stack). Drop the override and restore pinpam-git here when
