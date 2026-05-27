@@ -93,3 +93,104 @@ jobs:
               exit 1
           fi
           echo "All AUR packages in postinstall.sh §3 resolve on aur.archlinux.org."
+
+  pam-stack-syntax:
+    name: PAM stacks parse
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Shape-check PAM stacks under phase-3 system-files/pam.d/
+        shell: bash
+        run: |
+          set -euo pipefail
+          # Valid PAM types (optionally `-` prefix to suppress log on missing module).
+          VALID_TYPES='^-?(auth|account|session|password)$'
+          # Single-word controls. Bracket form `[name=value ...]` is handled separately.
+          VALID_CONTROLS='^(required|requisite|sufficient|optional|include|substack)$'
+          errors=0
+          for file in phase-3-arch-postinstall/system-files/pam.d/*; do
+              [[ -f "$file" ]] || continue
+              line_no=0
+              while IFS= read -r raw || [[ -n "$raw" ]]; do
+                  line_no=$((line_no+1))
+                  line="${raw%%#*}"
+                  line="${line%"${line##*[![:space:]]}"}"
+                  [[ -z "${line// }" ]] && continue
+                  line="${line#"${line%%[![:space:]]*}"}"
+                  type="${line%%[[:space:]]*}"
+                  if ! [[ "$type" =~ $VALID_TYPES ]]; then
+                      echo "$file:$line_no: unknown PAM type '$type'"
+                      errors=$((errors+1)); continue
+                  fi
+                  rest="${line#"$type"}"
+                  rest="${rest#"${rest%%[![:space:]]*}"}"
+                  if [[ "$rest" == "["* ]]; then
+                      if ! [[ "$rest" == *"]"* ]]; then
+                          echo "$file:$line_no: unclosed bracket-form control"
+                          errors=$((errors+1)); continue
+                      fi
+                      rest="${rest#*]}"
+                      rest="${rest#"${rest%%[![:space:]]*}"}"
+                  else
+                      control="${rest%%[[:space:]]*}"
+                      if ! [[ "$control" =~ $VALID_CONTROLS ]]; then
+                          echo "$file:$line_no: invalid control '$control'"
+                          errors=$((errors+1)); continue
+                      fi
+                      rest="${rest#"$control"}"
+                      rest="${rest#"${rest%%[![:space:]]*}"}"
+                  fi
+                  module="${rest%%[[:space:]]*}"
+                  if [[ -z "$module" ]]; then
+                      echo "$file:$line_no: missing module"
+                      errors=$((errors+1)); continue
+                  fi
+              done < "$file"
+          done
+          if (( errors > 0 )); then
+              echo
+              echo "Found $errors PAM stack syntax issue(s)."
+              exit 1
+          fi
+          echo "All PAM stacks parse cleanly."
+
+  docs-link-check:
+    name: docs/runbook internal links resolve
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify every internal markdown link in docs/ + runbook/ + README.md resolves
+        shell: bash
+        run: |
+          set -euo pipefail
+          errors=0
+          while IFS= read -r match; do
+              file="${match%%:*}"
+              rest="${match#*:}"
+              line_no="${rest%%:*}"
+              capture="${rest#*:}"
+              # Skip external + anchor-only links.
+              case "$capture" in
+                  http://*|https://*|mailto:*|\#*) continue ;;
+              esac
+              # Strip anchor and query suffixes.
+              target="${capture%%#*}"
+              target="${target%%\?*}"
+              [[ -z "$target" ]] && continue
+              if [[ "$target" == /* ]]; then
+                  resolved=".$target"
+              else
+                  resolved="$(dirname "$file")/$target"
+              fi
+              resolved="$(realpath -m --relative-to=. "$resolved" 2>/dev/null || echo "$resolved")"
+              if [[ ! -e "$resolved" ]]; then
+                  echo "$file:$line_no: broken link → $target"
+                  errors=$((errors+1))
+              fi
+          done < <(grep -RnoP '(?<=\]\()[^)]+(?=\))' docs/ runbook/ README.md)
+          if (( errors > 0 )); then
+              echo
+              echo "Found $errors broken internal link(s)."
+              exit 1
+          fi
+          echo "All internal links in docs/ + runbook/ + README.md resolve."
