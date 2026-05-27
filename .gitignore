@@ -1,10 +1,3 @@
-# Arch ISO + sigs + sumfile — manually downloaded into assets/ for staging
-# onto the install USB (Rufus or `dd`). Not committed because they roll
-# monthly and are large.
-/assets/archlinux-x86_64.iso
-/assets/archlinux-x86_64.iso.sig
-/assets/archlinux-sha256sums.txt
-
 # npm/pnpm
 /node_modules/
 
@@ -26,5 +19,3 @@
 
 # Generated PDFs — `pnpm pdf` re-renders from runbook/*.md.
 /runbook/*.pdf
-assets/Win11_25H2_English_x64_v2.iso
-assets/ventoy-1.1.11*

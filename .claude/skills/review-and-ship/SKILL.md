@@ -58,7 +58,6 @@ Only once the loop has converged:
 ## What to leave alone
 
 - `debug.log` — treat as stray output, don't commit.
-- `assets/*.iso` — gitignored, populated by `pnpm restore`.
 - `node_modules/` — gitignored.
 
 ## Tone
