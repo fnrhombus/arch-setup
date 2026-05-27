@@ -375,7 +375,7 @@ present.
 - **Audio**: `pipewire`, `pipewire-pulse`, `pipewire-jack`, `wireplumber`.
 
 **AUR (yay):**
-- **Wallpaper + theme**: `awww-bin`, `matugen-bin`.
+- **Wallpaper + theme**: `awww-git`, `matugen-bin`.
 - **Bluetooth + power UIs**: `overskride`, `wleave`.
 - **Cursor**: `bibata-cursor-theme` (Xcursor; hyprcursor variant unpackaged — see §Desktop component picks).
 - **AUR-only utils**: `pacseek`, `wvkbd` (on-screen keyboard for tablet mode).

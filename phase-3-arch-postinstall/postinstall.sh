@@ -980,7 +980,10 @@ log "Installing AUR-exclusive apps (VSCode, Edge, Claude, awww, matugen, overskr
 # actual AUR slugs, NOT the upstream project names.
 #
 # Notes per package:
-#   - awww-bin       — continuation of archived swww (LGFae, Codeberg);
+#   - awww-git       — continuation of archived swww (LGFae, Codeberg).
+#                      Switched from awww-bin 2026-05-27 — the -bin variant
+#                      was orphaned and removed from AUR; -git is the only
+#                      remaining slug. Builds from source (~30s), still
 #                      provides=awww so binaries `awww` + `awww-daemon`
 #                      end up on PATH.
 #   - sesh-bin       — was once available as bare `sesh` somewhere;
@@ -1027,7 +1030,7 @@ AUR_PACKAGES=(
     wvkbd
     iio-hyprland-git
     powershell-bin
-    awww-bin
+    awww-git
     # hyprlax retired 2026-05-06 — replaced by hyprmural (per-workspace
     # static wallpapers + Hyprland IPC).
     hyprmural

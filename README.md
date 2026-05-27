@@ -160,7 +160,7 @@ Grouped by purpose. Full list lives in `install.sh`/`chroot.sh`/`postinstall.sh`
 ### AUR packages (postinstall §3, via yay)
 
 - **IDEs / browsers** — `visual-studio-code-bin`, `microsoft-edge-stable-bin`, `claude-desktop-native`
-- **Hyprland ecosystem** — `iio-hyprland-git`, `hyprmural`, `matugen-bin`, `wleave`, `hyprshutdown`, `physlock`, `awww-bin` (swww successor)
+- **Hyprland ecosystem** — `iio-hyprland-git`, `hyprmural`, `matugen-bin`, `wleave`, `hyprshutdown`, `physlock`, `awww-git` (swww successor)
 - **Cursors / fonts** — `bibata-cursor-theme`, `ttf-nerd-fonts-meta`
 - **Cloud / sync** — `dropbox`, `dropbox-cli`
 - **Touch / 2-in-1** — `wvkbd` (mobintl on-screen keyboard)

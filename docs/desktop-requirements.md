@@ -67,8 +67,8 @@ iio-hyprland-git                 # AUR (no tagged release)
 hyprgrass                        # via hyprpm, not pacman
 wvkbd                            # AUR — on-screen keyboard
 
-# Wallpaper engine — awww-bin in AUR (provides=awww). Replaces archived swww.
-awww-bin matugen-bin             # AUR
+# Wallpaper engine — awww-git in AUR (provides=awww). Replaces archived swww.
+awww-git matugen-bin             # AUR
 
 # Cursors — both packages: Xcursor for Xwayland, hyprcursor variant manually
 # from LOSEARDES77/Bibata-Cursor-hyprcursor (no AUR pkg as of 2026-04).
