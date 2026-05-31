@@ -1082,6 +1082,13 @@ AUR_PACKAGES=(
     # pamtester: tiny CLI for invoking PAM ops from scripts; btop-lock's
     # auth loop uses it to test password against /etc/pam.d/btop-lock.
     pamtester
+    # bemoji: emoji/symbol picker for the super+; bind (binds.conf). Pure
+    # POSIX shell, no compile. Auto-detects the installed menu — fuzzel here
+    # (§F decisions.md) — and self-downloads its emoji db from unicode.org on
+    # first run into ~/.local/share/bemoji, so no seed planter is needed.
+    # Replaced an unbuilt `fuzzel < ~/.cache/emoji-list` TODO that never had
+    # a list generator, so the bind was silently dead.
+    bemoji
 )
 # yay -S --needed exits 0 even when its AUR RPC query EOFs out — it
 # treats "couldn't query AUR" as "package not selected, nothing to do"

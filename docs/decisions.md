@@ -233,6 +233,7 @@
 #### F) App launcher: fuzzel
 - Wayland-native, lightweight, fuzzy matching
 - Also used as the picker for clipboard history (cliphist)
+- **Emoji picker (`super+;`)**: bemoji (AUR, §3) drives the picker. It auto-detects fuzzel as its menu and self-downloads its emoji db from unicode.org into `~/.local/share/bemoji` on first run, so no seed step is needed. Replaced an unbuilt `fuzzel < ~/.cache/emoji-list` bind whose list generator was never written — the keybind was silently dead until 2026-05-31.
 - **Upgrade path**: rofi-wayland if you want scripting, custom modes (calculator, emoji, SSH picker, window switcher)
 
 #### G) Screenshots: hyprshot + satty
