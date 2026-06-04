@@ -307,6 +307,7 @@ and accepted on the "clean-slate, no bias" principle. See
 
 #### R) Windows VM: dockur/windows on Docker + WinApps
 - **Why a VM**: occasional Windows-only apps (primarily Visual Studio Enterprise) surfaced as Coherence-style native Hyprland windows via WinApps + FreeRDP — they feel like Linux apps in Fuzzel + the taskbar.
+- **Update 2026-06-04 — WinApps retargeted to physical hardware**: the VM's 8G resident QEMU process was the standing memory pressure behind a systemd-oomd kill of the entire Hyprland session (metis has 16G; oomd killed the compositor cgroup at 95% mem / 85% swap). WinApps now points at the physical Windows 10 Pro box `callisto.rhombus.rocks` (`WAFLAVOR=manual`, MS-account login, password via the `winapps-rdp-pass.sh` planter from Bitwarden). The VM stays fully installed as a dormant fallback — `restart: "no"`, never auto-starts; `sudo docker start WinApps` + repoint `winapps.conf` at `127.0.0.1` to use it (e.g. when callisto is unreachable). Callisto prerequisite (reapply on its reinstall): `fAllowUnlistedRemotePrograms=1` under `HKLM\SOFTWARE\Policies\Microsoft\Windows NT\Terminal Services`.
 - **Orchestrator: dockur/windows on Docker (chosen 2026-05-02)**. Reasons:
   - Declarative `compose.yaml` reproduces the entire VM on reinstall — no virt-manager point-and-click recipe to remember.
   - Unattended Windows install (~15-30 min hands-off, ISO downloaded from Microsoft, OEM `install.bat` winget-installs VS 2022 Enterprise IDE).
@@ -321,7 +322,7 @@ and accepted on the "clean-slate, no bias" principle. See
     - `debloat.ps1` — removes 26 consumer AppX (Bing/Maps/Xbox/Solitaire/etc.), the `Print.Fax.Scan` capability (just the Fax+Scan accessory app — print spooler, Print to PDF, IPP-to-CUPS still work), and Recall (the Win11 24H2 screenshot-everything feature).
     - `UserOnce.ps1` — fires once at first logon: Explorer→ThisPC, hide taskbar searchbox, remove Edge desktop shortcut, restart explorer.exe.
   - **Defender fully disabled** (Group Policy regs + service Start=4 + scheduled-task Disable + SmartScreen off + `Set-MpPreference`). Threat model = local-only dev VM behind LUKS-encrypted host, not an internet-facing server. Tamper Protection caveat: enabled by Win11 24H2 shortly after first user interaction; SetupComplete runs before that, so the writes stick. If a future ISO enables TP earlier, manual workaround = Settings > Privacy > Windows Security > Tamper Protection > Off, then re-run setup.cmd.
-  - WinApps cloned to `/opt/winapps`, setup script symlinked onto PATH as `winapps-setup`, `WAFLAVOR=docker` written to `~/.config/winapps/winapps.conf`.
+  - WinApps cloned to `/opt/winapps`, setup script symlinked onto PATH as `winapps-setup`; `~/.config/winapps/winapps.conf` targets callisto (see 2026-06-04 update above).
   - Postinstall §15-windows blocks on `docker compose up -d` + `health=healthy` (~15-30 min on first run, fast on re-runs). Skippable via `--skip-windows-install`.
 
 #### S) NVIDIA Container Toolkit: GPU containers via Docker

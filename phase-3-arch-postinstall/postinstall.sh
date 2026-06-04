@@ -388,6 +388,14 @@ fi
 # (§3-winapps) bridges via FreeRDP to surface individual Windows apps
 # as Hyprland windows (Parallels-Coherence-equivalent).
 #
+# NOTE (2026-06-04): WinApps now targets the physical Windows box
+# callisto.rhombus.rocks by default (§3-winapps) — the 8G resident QEMU
+# guest was the standing memory pressure behind a systemd-oomd kill of the
+# whole Hyprland session. The VM here is still fully installed and kept as
+# a dormant fallback: restart policy "no" so it never auto-starts at boot;
+# bring it up manually with `sudo docker start WinApps` and repoint
+# winapps.conf at 127.0.0.1 when needed.
+#
 # We write the compose file + OEM first-boot script here. The actual
 # `docker compose up -d` + 30-min wait happens in §15-windows below
 # (skippable via --skip-windows-install). Splitting the write from the
@@ -430,7 +438,9 @@ services:
     volumes:
       - windows_data:/storage
       - /etc/dockur-windows/oem:/oem
-    restart: unless-stopped
+    # Dormant fallback — WinApps targets callisto.rhombus.rocks (§3-winapps).
+    # Never auto-start; `sudo docker start WinApps` when actually needed.
+    restart: "no"
     stop_grace_period: 2m
 
 volumes:
@@ -723,6 +733,8 @@ if (( SKIP_WINDOWS_INSTALL == 1 )); then
     log "  sudo docker compose -f /etc/dockur-windows/compose.yaml up -d"
 else
     log "Starting dockur/windows VM in background (install runs in parallel)..."
+    log "  (VM is a dormant fallback — restart=no, won't auto-start after reboot;"
+    log "   WinApps targets callisto.rhombus.rocks — see §3-winapps.)"
     sudo docker compose -f /etc/dockur-windows/compose.yaml up -d \
         || warn "docker compose up failed — see 'docker logs WinApps'."
 fi
@@ -1177,16 +1189,22 @@ done
 unset _override _ovr_dir _upstream
 
 # ---------- 3-winapps. WinApps from upstream (winapps-org/winapps) ----------
-# WinApps lets you launch Windows apps from a Win11 VM as native Hyprland
-# windows via RDP — the Parallels-Coherence equivalent. The VM itself is
-# the dockur/windows container defined in §1a-dockur (compose at
-# /etc/dockur-windows/compose.yaml); WinApps just talks to its RDP port.
+# WinApps lets you launch Windows apps as native Hyprland windows via RDP —
+# the Parallels-Coherence equivalent. The RDP target is the physical
+# Windows 10 Pro box callisto.rhombus.rocks (WAFLAVOR=manual); the local
+# dockur/windows VM from §1a-dockur is kept installed as a dormant fallback
+# (repoint RDP_IP at 127.0.0.1 + creds Docker/Docker to use it).
+#
+# Callisto-side prerequisites (already applied there 2026-06-04; reapply if
+# callisto is ever reinstalled): RDP enabled, and RemoteApp unlisted-
+# programs allowed for app-scoped windows:
+#   reg add "HKLM\SOFTWARE\Policies\Microsoft\Windows NT\Terminal Services" \
+#       /v fAllowUnlistedRemotePrograms /t REG_DWORD /d 1 /f
 #
 # WinApps is NOT on AUR (the prior `winapps-git` package referenced
 # Fmstrat/winapps which has migrated to winapps-org/winapps). We install
 # from upstream source: clone to /opt/winapps, symlink the setup script
-# onto PATH, and write ~/.config/winapps/winapps.conf with WAFLAVOR=docker
-# so winapps-setup talks to the dockur container instead of libvirt.
+# onto PATH, and write ~/.config/winapps/winapps.conf pointed at callisto.
 #
 # Idempotent: subsequent runs `git pull` to refresh; the symlink is
 # unconditional (ln -sf); the conf file is first-run only so user
@@ -1203,22 +1221,28 @@ if [[ -x /opt/winapps/setup.sh ]]; then
     sudo ln -sf /opt/winapps/setup.sh /usr/local/bin/winapps-setup
 fi
 
-# Write WinApps config pointing at the dockur container. RDP creds match
-# the compose USERNAME/PASSWORD; IP is loopback because compose binds
-# 3389 to 127.0.0.1 only.
+# Write WinApps config pointing at callisto. RDP_PASS is deliberately
+# empty — the winapps-rdp-pass.sh planter fills it from Bitwarden
+# (item "MicrosoftAccount" matching RDP_USER) on first interactive shell
+# with an unlocked vault, then chmods the file 600.
 install -d -m 755 "$XDG_CONFIG_HOME/winapps"
 if [[ ! -f "$XDG_CONFIG_HOME/winapps/winapps.conf" ]]; then
     cat >"$XDG_CONFIG_HOME/winapps/winapps.conf" <<'WACONFEOF'
 # First-run default written by postinstall §3-winapps. Edit freely —
 # postinstall won't clobber this on re-runs (delete the file to regen).
-RDP_USER="Docker"
-RDP_PASS="Docker"
+# RDP_PASS is filled from Bitwarden by the winapps-rdp-pass.sh planter.
+RDP_USER="thomas@butler.software"
+RDP_PASS=""
 RDP_DOMAIN=""
-RDP_IP="127.0.0.1"
-WAFLAVOR="docker"
+RDP_IP="callisto.rhombus.rocks"
+RDP_PORT=3389
+WAFLAVOR="manual"
+RDP_SCALE=140
+FREERDP_COMMAND="xfreerdp3"
 WACONFEOF
+    chmod 600 "$XDG_CONFIG_HOME/winapps/winapps.conf"
 fi
-log "  WinApps installed (backend=docker). Run 'winapps-setup --user' once the dockur VM is up to wire desktop entries."
+log "  WinApps installed (target=callisto.rhombus.rocks). Run 'winapps-setup --user' to wire desktop entries."
 
 # ---------- 3-edge. Microsoft Edge: suppress OOBE, set sensible defaults ----------
 # Edge's default first-launch flow drops the user into a multi-page welcome
@@ -2438,6 +2462,8 @@ else
         health=$(sudo docker inspect --format='{{if .State.Health}}{{.State.Health.Status}}{{else}}no-healthcheck{{end}}' WinApps 2>/dev/null || echo "missing")
         if [[ "$health" == "healthy" ]]; then
             log "  Windows VM is up (container health=healthy)."
+            log "  VM stays up for first-boot app installs but won't auto-start"
+            log "  after reboot (restart=no) — WinApps targets callisto instead."
             break
         fi
         if [[ "$health" != "$last_health" ]]; then
@@ -2643,11 +2669,12 @@ check "dockur OEM debloat.ps1"   "sudo test -f /etc/dockur-windows/oem/debloat.p
 check "dockur OEM UserOnce.ps1"  "sudo test -f /etc/dockur-windows/oem/UserOnce.ps1"
 check "winapps source"       "test -d /opt/winapps/.git"
 check "winapps-setup PATH"   "command -v winapps-setup"
-check "winapps.conf docker"  "grep -q '^WAFLAVOR=\"docker\"' $HOME/.config/winapps/winapps.conf"
+check "winapps.conf → callisto" "grep -q '^RDP_IP=\"callisto.rhombus.rocks\"' $HOME/.config/winapps/winapps.conf && grep -q '^WAFLAVOR=\"manual\"' $HOME/.config/winapps/winapps.conf"
 # Container may be absent if user passed --skip-windows-install — pass if
-# absent OR if it exists and is currently running. sudo because tom may
-# not be in the docker group yet in this shell.
-check "windows VM (if present)" "! sudo docker ps -a --format '{{.Names}}' 2>/dev/null | grep -q '^WinApps$' || sudo docker ps --format '{{.Names}}' 2>/dev/null | grep -q '^WinApps$'"
+# absent OR if it exists with restart policy "no" (dormant fallback; it must
+# never auto-start at boot). sudo because tom may not be in the docker
+# group yet in this shell.
+check "windows VM dormant (if present)" "! sudo docker ps -a --format '{{.Names}}' 2>/dev/null | grep -q '^WinApps$' || sudo docker inspect --format '{{.HostConfig.RestartPolicy.Name}}' WinApps 2>/dev/null | grep -qx 'no'"
 
 echo "-- snapshots / udev / planters --"
 check "snapper config /"    "sudo test -f /etc/snapper/configs/root"
@@ -2857,20 +2884,25 @@ cat <<'POSTINSTALL_OUTRO'
             UserOnce.ps1  — fires at first logon: Explorer→ThisPC, hide
                             taskbar searchbox, restart explorer.exe
         - WinApps cloned to /opt/winapps; winapps-setup on PATH
-        - ~/.config/winapps/winapps.conf set to WAFLAVOR=docker, RDP
-          creds Docker/Docker, RDP_IP=127.0.0.1
+        - ~/.config/winapps/winapps.conf targets the physical box
+          callisto.rhombus.rocks (WAFLAVOR=manual, MS-account login;
+          RDP_PASS filled from Bitwarden by the winapps-rdp-pass.sh
+          planter on first unlocked shell)
         - Unless --skip-windows-install was passed: VM brought up via
           'sudo docker compose up -d' EARLY in postinstall (§1a-dockur),
           so the ~15-30 min Windows install runs in parallel with the
           rest of postinstall (yay AUR builds, fingerprint enrollment,
           chezmoi apply, etc.). §15-windows blocks at end-of-postinstall
-          waiting on container health=healthy.
+          waiting on container health=healthy. The VM is a dormant
+          fallback: restart=no, so it never auto-starts after reboot —
+          'sudo docker start WinApps' + repoint winapps.conf to use it.
 
-      Verify the VM is up:
-        docker ps                       # 'WinApps' container, healthy
-        # OR open http://127.0.0.1:8006/ — direct VM display (noVNC).
+      Verify the VM installed (it's fine for it to be stopped later):
+        docker ps -a                    # 'WinApps' container present
+        # OR open http://127.0.0.1:8006/ — direct VM display (noVNC),
+        # only while the container is running.
 
-      Configure WinApps (one-time, after VM is up):
+      Configure WinApps (one-time; callisto must be reachable):
         winapps-setup --user --setupAllOfficiallySupportedApps
         # Non-interactive — auto-detects installed Windows apps and
         # writes ~/.local/bin/winapps + ~/.local/share/applications/

@@ -224,15 +224,16 @@ Configuration written by `chroot.sh` and `postinstall.sh` (sources under
   - `ssh-signing.sh` — pull SSH pubkey from Bitwarden, set `allowedSignersFile`
   - `cloud-storage-auth.sh` — Dropbox + rclone bisync setup
   - `callisto-rdp.sh` — Callisto RDP password into GNOME keyring for Remmina
-  - `windows-rdp.sh` — WinApps VM RDP password (from `~/.config/winapps/winapps.conf`) into GNOME keyring for Remmina
+  - `windows-rdp.sh` — dockur VM RDP password (from `/etc/dockur-windows/compose.yaml`) into GNOME keyring for Remmina
+  - `winapps-rdp-pass.sh` — fill `RDP_PASS` in `~/.config/winapps/winapps.conf` from Bitwarden (callisto MS-account login)
 
 ### Ancillary one-shots
 
 - **[`setup-azure-ddns.sh`](phase-3-arch-postinstall/setup-azure-ddns.sh)** — creates / rotates the `metis-ddns` Azure SP, assigns DNS Zone Contributor on `rhombus.rocks`, writes credential envfiles, issues first Let's Encrypt cert via `lego`. Installed to `/usr/local/bin/setup-azure-ddns` by phase-2 `install.sh` §13 so it stays on PATH for the yearly secret rotation.
 - **Windows VM** (optional, `--skip-windows-install` to opt out)
-  - `dockur/windows` compose stack at `/etc/dockur-windows/`
+  - `dockur/windows` compose stack at `/etc/dockur-windows/` — installed as a dormant fallback (`restart: "no"`, never auto-starts)
   - Win11 + VS Enterprise unattended install via OEM scripts
-  - WinApps cloned to `/opt/winapps` for seamless RDP integration
+  - WinApps cloned to `/opt/winapps`; targets the physical box `callisto.rhombus.rocks` by default, not the VM
 
 ## Repo layout
 
