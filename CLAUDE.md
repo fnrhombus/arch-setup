@@ -39,7 +39,7 @@ End-to-end flow from a bare laptop:
 Markdown files split into two groups by **audience**:
 
 - **[docs/](docs/)** — **Documentation of the setup itself.** Primarily (but not exclusively) read by Claude — design decisions, rationale, hardware/parity specs, investigation notes. The source of truth for *why* this repo's choices were made.
-- **[runbook/](runbook/)** — **Help and guides for the user's human eyes, exclusively.** Reference material Tom reads directly: shell cheatsheets, workflow tutorials, rescue cards. Some legacy Claude-coaching handoffs (phase-3-handoff, phase-3.5-hardware-handoff, post-reinstall-followups) still live here and are pending Tom's review against this new partitioning — they may relocate to `docs/` since they brief Claude rather than guide the human.
+- **[runbook/](runbook/)** — **Help and guides for the user's human eyes, exclusively.** Reference material Tom reads directly: shell cheatsheets, workflow tutorials, rescue cards. Some legacy Claude-coaching handoffs (phase-3-handoff, phase-3.5-hardware-handoff) still live here and are pending Tom's review against this new partitioning — they may relocate to `docs/` since they brief Claude rather than guide the human.
 
 Everything else at the repo root is a deliverable the install consumes (phase scripts) or dev-machine plumbing (`package.json`, `.mise.toml`, `scripts/`).
 
@@ -59,7 +59,6 @@ Everything else at the repo root is a deliverable the install consumes (phase sc
 - [runbook/keybinds.md](runbook/keybinds.md) — Hyprland and tmux keybinding reference.
 - [runbook/phase-3-handoff.md](runbook/phase-3-handoff.md) — *Legacy Claude-coaching*: fed to the next Claude session inside Arch after install. Describes the user, hardware, installed stack, and what Claude is expected to teach (Hyprland, Helix, tmux). Pending Tom's review — may move to `docs/`.
 - [runbook/phase-3.5-hardware-handoff.md](runbook/phase-3.5-hardware-handoff.md) — *Legacy Claude-coaching*: tracks which requirements in `docs/decisions.md` still need fingerprint/pen/tablet/RDP validation on real hardware. Pending Tom's review.
-- [runbook/post-reinstall-followups.md](runbook/post-reinstall-followups.md) — *Legacy Claude-coaching*: post-install checklist. Pending Tom's review.
 
 ### Phase 0 — boot-medium prep
 - [package.json](package.json) — Minimal pnpm wrapper. Two scripts: `prepare` (wires up the git pre-commit hook) and `pdf` (renders `runbook/*.md` → PDFs). Phase 0 is otherwise tool-free: download the Arch ISO from archlinux.org, write to USB with Rufus or `dd`. No staging script, no Ventoy.
