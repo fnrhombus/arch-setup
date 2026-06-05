@@ -1221,17 +1221,20 @@ if [[ -x /opt/winapps/setup.sh ]]; then
     sudo ln -sf /opt/winapps/setup.sh /usr/local/bin/winapps-setup
 fi
 
-# Write WinApps config pointing at callisto. RDP_PASS is deliberately
-# empty — the winapps-rdp-pass.sh planter fills it from Bitwarden
-# (item "MicrosoftAccount" matching RDP_USER) on first interactive shell
-# with an unlocked vault, then chmods the file 600.
+# Write WinApps config pointing at callisto. RDP_USER and RDP_PASS are
+# deliberately empty (no account PII in this public repo) — the
+# winapps-rdp-pass.sh planter fills both from Bitwarden (item
+# "MicrosoftAccount") on first interactive shell with an unlocked vault,
+# then chmods the file 600.
 install -d -m 755 "$XDG_CONFIG_HOME/winapps"
 if [[ ! -f "$XDG_CONFIG_HOME/winapps/winapps.conf" ]]; then
     cat >"$XDG_CONFIG_HOME/winapps/winapps.conf" <<'WACONFEOF'
 # First-run default written by postinstall §3-winapps. Edit freely —
 # postinstall won't clobber this on re-runs (delete the file to regen).
-# RDP_PASS is filled from Bitwarden by the winapps-rdp-pass.sh planter.
-RDP_USER="thomas@butler.software"
+# RDP_USER + RDP_PASS are filled from Bitwarden by the winapps-rdp-pass.sh
+# planter (item "MicrosoftAccount"; set RDP_USER yourself to disambiguate
+# if the vault holds several).
+RDP_USER=""
 RDP_PASS=""
 RDP_DOMAIN=""
 RDP_IP="callisto.rhombus.rocks"

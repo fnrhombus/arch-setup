@@ -225,7 +225,7 @@ Configuration written by `chroot.sh` and `postinstall.sh` (sources under
   - `cloud-storage-auth.sh` — Dropbox + rclone bisync setup
   - `callisto-rdp.sh` — Callisto RDP password into GNOME keyring for Remmina
   - `windows-rdp.sh` — dockur VM RDP password (from `/etc/dockur-windows/compose.yaml`) into GNOME keyring for Remmina
-  - `winapps-rdp-pass.sh` — fill `RDP_PASS` in `~/.config/winapps/winapps.conf` from Bitwarden (callisto MS-account login)
+  - `winapps-rdp-pass.sh` — fill `RDP_USER` + `RDP_PASS` in `~/.config/winapps/winapps.conf` from Bitwarden (callisto MS-account login; postinstall writes both empty so no account PII lands in this repo)
 
 ### Ancillary one-shots
 
