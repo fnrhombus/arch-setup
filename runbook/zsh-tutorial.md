@@ -270,7 +270,51 @@ $ <Esc Esc>    # line becomes: sudo pacman -Syu
 
 ---
 
-## 5. Tab completion
+## 5. Line toggles — mutate the command you're typing
+
+`zsh-line-toggles` binds a handful of `Alt`-keys that insert or remove common command-line modifiers — the stderr/stdout redirects, a `| less` pipe, `&` to background, `time`/`noglob` prefixes, a `watch` wrapper — without retyping them. Press a key once to add the modifier, again to toggle it back off. The toggles are cursor-aware: they act on the **pipeline segment containing the cursor**, not the whole line (move to end-of-line with `^E` first for whole-line behavior).
+
+The full bind table lives in `zsh-cheatsheet.md`. Two things it doesn't cover — rebinding, and what default binds the plugin displaces — are below.
+
+### Rebinding the keys
+
+Each toggle reads its keybind from a `ZLT_KEY_*` variable. Set any of them **before** the plugin loads (i.e. ahead of the `zgenom load fnrhombus/zsh-line-toggles` line in `.zshrc`) to override the default. `^[` is the escape prefix that means "Alt":
+
+```zsh
+ZLT_KEY_STDERR_TO_STDOUT='^[r'   # Alt-r instead of Alt-2
+ZLT_KEY_PIPE_LESS='^[p'          # Alt-p instead of Alt-L
+```
+
+The full set of variables and their defaults:
+
+| Variable | Default | Toggles |
+|---|---|---|
+| `ZLT_KEY_STDERR_TO_STDOUT` | `Alt-2` | ` 2>&1` |
+| `ZLT_KEY_SILENCE_STDOUT` | `Alt-1` | ` >/dev/null` |
+| `ZLT_KEY_SILENCE_STDERR` | `Alt-0` | ` 2>/dev/null` |
+| `ZLT_KEY_SILENCE_ALL` | `Alt-9` | ` &>/dev/null` |
+| `ZLT_KEY_PIPE_LESS` | `Alt-L` | ` \| less` |
+| `ZLT_KEY_BACKGROUND` | `Alt-&` | ` &` |
+| `ZLT_KEY_TIME_PREFIX` | `Alt-t` | `time ` (prefix) |
+| `ZLT_KEY_NOGLOB_PREFIX` | `Alt-g` | `noglob ` (prefix) |
+| `ZLT_KEY_WATCH` | `Alt-w` | `watch '…'` (whole-line wrap) |
+
+### What the defaults displace
+
+The default binds override these emacs/viins defaults. Most are rarely used, but if you rely on one, rebind the toggle via its variable above (or bind the original action back after the plugin loads):
+
+| Bind | Default it overrides | Used often? |
+|---|---|---|
+| `Alt-0..9` | `digit-argument` (e.g. `Alt-5 ^D` deletes 5 chars) | rarely |
+| `Alt-L` | `down-case-word` (lowercases the next word) | occasionally |
+| `Alt-t` | `transpose-words` | occasionally |
+| `Alt-g` | unbound by default in emacs mode | — |
+| `Alt-w` | `copy-region-as-kill` | rarely |
+| `Alt-&` | `tilde-expand` | rarely |
+
+---
+
+## 6. Tab completion
 
 Hit `<TAB>` after a partial command, path, option, or argument. If there are multiple candidates, **fzf-tab** opens a fuzzy picker:
 
@@ -301,7 +345,7 @@ Memorize `**<TAB>` for kill and ssh especially — much faster than typing PIDs 
 
 ---
 
-## 6. Archives — `extract`
+## 7. Archives — `extract`
 
 One command for any compressed file:
 
@@ -317,7 +361,7 @@ Replaces the family of `tar xvf` / `tar xvJf` / `unzip` / `7z x` / `unrar x` you
 
 ---
 
-## 7. Per-project tooling
+## 8. Per-project tooling
 
 ### `mise` — language/tool versions per project
 
@@ -349,7 +393,7 @@ Common stdlib `.envrc` patterns: `layout node`, `layout python`, `layout ruby`, 
 
 ---
 
-## 8. Other utilities you have
+## 9. Other utilities you have
 
 ### `jq` — JSON
 
@@ -402,7 +446,7 @@ JSON pretty-printed automatically. Headers separated visually.
 
 ---
 
-## 9. Aliases — see what's defined
+## 10. Aliases — see what's defined
 
 ```sh
 alias              # list every alias currently defined
@@ -414,7 +458,7 @@ Edit `~/.zsh_aliases` to add your own; then `source ~/.zsh_aliases` (no full res
 
 ---
 
-## 10. The prompt
+## 11. The prompt
 
 Powerlevel10k. To re-run the configuration wizard:
 
@@ -428,7 +472,7 @@ After editing: `exec zsh` to reload.
 
 ---
 
-## 11. Quick-reference cheats you'll forget
+## 12. Quick-reference cheats you'll forget
 
 | Forget to... | Workaround |
 |---|---|
@@ -447,7 +491,7 @@ After editing: `exec zsh` to reload.
 
 ---
 
-## 12. Putting it together — three real workflows
+## 13. Putting it together — three real workflows
 
 ### "I need to find every Python file that imports `requests` and check what version is pinned"
 
