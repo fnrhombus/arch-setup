@@ -244,7 +244,7 @@ sudo pacman -Syu --noconfirm --needed \
     zsh tmux helix \
     bat fd ripgrep eza lsd btop jq fzf zoxide direnv \
     kmscon \
-    sd go-yq xh glow \
+    sd go-yq xh glow mermaid-cli \
     man-db man-pages pkgfile tldr \
     pandoc-cli typst \
     texlive-binextra texlive-latexrecommended \
@@ -1111,6 +1111,12 @@ AUR_PACKAGES=(
     # Replaced an unbuilt `fuzzel < ~/.cache/emoji-list` TODO that never had
     # a list generator, so the bind was silently dead.
     bemoji
+    # mdcat: cat for markdown — renders MD to the terminal and draws inline
+    # images via the kitty graphics protocol (Ghostty supports it). Backs the
+    # `md` shell function (dots: dot_zsh_aliases), which pre-renders ```mermaid
+    # fences with mmdc (mermaid-cli, [extra]) and lets mdcat draw them inline.
+    # AUR-only — not in any official repo as of 2026-06.
+    mdcat
 )
 # yay -S --needed exits 0 even when its AUR RPC query EOFs out — it
 # treats "couldn't query AUR" as "package not selected, nothing to do"
