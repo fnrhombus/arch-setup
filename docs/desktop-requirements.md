@@ -264,11 +264,18 @@ popup on every dispatched bind, so an unbound key is visually obvious
   - `HandleLidSwitchDocked=ignore`
 - **Lid handler** (`~/.local/bin/lid-handler`, in [rhombu5/dots](https://github.com/rhombu5/dots)) — wired
   from `~/.config/hypr/binds.conf` via two `binddl` entries on `switch:on:Lid Switch` /
-  `switch:off:Lid Switch`. Owns *all* lid behavior. Rule: hibernate on close, unless
-  on AC AND external monitor attached → then `hyprctl keyword monitor "eDP-1,disable"`.
-  On open: re-enables `eDP-1` at its `monitors.conf` position (`preferred,0x1440,1`).
+  `switch:off:Lid Switch`. On lid close: disables `eDP-1` if an external monitor is attached,
+  then runs `/usr/local/bin/headless-hibernate` to evaluate the hibernate condition. On open:
+  re-enables `eDP-1` at its `monitors.conf` position (`preferred,0x1440,1`).
   Side effect of the all-`ignore` logind config: at the greeter / TTY (no Hyprland) lid
   close is a no-op — fine, since those states only exist with the laptop physically open.
+- **`/usr/local/bin/headless-hibernate`** — condition script; the single source of truth for
+  the hibernate rule: fires iff lid closed AND no external display connected AND on battery.
+  "No external display" is determined by connector *status* (`/sys/class/drm/*/status`), so
+  an idle-blanked (DPMS-off) screen still counts as connected. Also invoked on AC plug/unplug
+  and display hotplug by a udev-triggered oneshot service:
+  - udev rule: `/etc/udev/rules.d/99-headless-hibernate.rules` (matches `power_supply` + `drm` subsystems)
+  - service: `/etc/systemd/system/headless-hibernate-check.service` (root oneshot, runs as root, bypasses polkit)
 - **hypridle** — DPMS-off at **28 min** idle, screen lock at **30 min**.
   No idle-hibernate timer — the user explicitly does not want hibernation
   triggered while on AC regardless of activity.
@@ -289,9 +296,9 @@ hotkey:
 - Same action exposed in the fuzzel control-panel script (Power → Hibernate)
 - Optional waybar power button (custom module) for click-to-hibernate
 
-The lid-handler is unconditionally hibernate-on-battery, so the moment a
-new battery is swapped in, "close the lid and walk away" starts working on
-battery too — no reconfiguration required.
+The headless-hibernate condition script already enforces the battery check, so the moment a
+new battery is swapped in, "close the lid and walk away" starts hibernating when appropriate
+(lid closed, no external display, on battery) — no reconfiguration required.
 
 ### Hibernate, not suspend
 
