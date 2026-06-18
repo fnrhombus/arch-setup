@@ -971,6 +971,16 @@ sudo install -m 644 -D "$SCRIPT_DIR/system-files/systemd/system/user.slice.d/10-
 sudo systemctl daemon-reload
 sudo systemctl enable --now systemd-oomd.service
 
+# ---------- 1j. systemd-coredump: keep more crash history ----------
+# Default MaxUse (~1G of free space) ages cores out quickly — observed
+# 2026-06-17 with msedge SIGSEGV'ing repeatedly (~50M each), losing
+# 13 of 15 cores within a month and leaving only the two most recent
+# for analysis. Bump to 5G so a debugging window survives.
+log "Installing /etc/systemd/coredump.conf.d/10-retain-more.conf..."
+sudo install -m 644 -D "$SCRIPT_DIR/system-files/systemd/coredump.conf.d/10-retain-more.conf" \
+    /etc/systemd/coredump.conf.d/10-retain-more.conf
+sudo systemctl daemon-reload
+
 # ---------- 2. yay bootstrap ----------
 if ! command -v yay >/dev/null; then
     log "Bootstrapping yay from AUR..."
