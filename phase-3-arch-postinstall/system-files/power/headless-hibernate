@@ -1,0 +1,65 @@
+#!/usr/bin/env bash
+# headless-hibernate — hibernate iff the machine is "headless on battery":
+#   lid closed  AND  no external display connected  AND  on battery (AC offline).
+#
+# Re-run on every event that can change one of those three inputs, each from the
+# source already watching it:
+#   - lid close       -> Hyprland binddl -> ~/.local/bin/lid-handler (runs this
+#                        script directly, as the user; polkit lets tom hibernate)
+#   - AC plug/unplug   -> udev power_supply rule -> headless-hibernate-check.service
+#   - display hotplug  -> udev drm rule          -> headless-hibernate-check.service
+# Each invocation re-evaluates the full combined state, so the trigger that fired
+# doesn't matter — whichever event *completes* the condition causes the hibernate.
+#
+# "No external display" is keyed on connector *status* (/sys/class/drm/*/status),
+# which stays "connected" through DPMS-off. An idle screen-blank therefore never
+# counts as headless — that DPMS/disconnect conflation was the old
+# display-watchdog bug that hibernated the docked machine when the TV blanked.
+#
+# The internal panel (eDP/DSI/LVDS) is ignored here and handled by the lid check:
+# eDP reads "connected" even with the lid shut, so only the lid tells us whether
+# the built-in screen is actually usable.
+#
+# --dry-run prints the decision and never hibernates.
+set -euo pipefail
+
+DRY_RUN=0
+[[ "${1:-}" == "--dry-run" ]] && DRY_RUN=1
+
+decide() { logger -t headless-hibernate "$1"; echo "$1"; }
+
+# Debounce: let an undock event flurry (drm + power_supply firing together)
+# settle before reading state, so we evaluate the final configuration once.
+[[ $DRY_RUN -eq 0 ]] && sleep 3
+
+# 1. Lid must be closed — internal panel otherwise usable.
+lid=$(awk '{print $NF; exit}' /proc/acpi/button/lid/*/state 2>/dev/null || true)
+if [[ "$lid" != "closed" ]]; then
+    decide "lid=${lid:-unknown} (not closed) -> no hibernate"
+    exit 0
+fi
+
+# 2. No external display connected. eDP/DSI/LVDS = internal, ignored (see above).
+for st in /sys/class/drm/card*-*/status; do
+    [[ -e "$st" ]] || continue
+    name=${st%/status}; name=${name##*/}
+    case "$name" in *eDP*|*DSI*|*LVDS*) continue ;; esac
+    if [[ "$(cat "$st")" == "connected" ]]; then
+        decide "external display $name connected -> no hibernate"
+        exit 0
+    fi
+done
+
+# 3. On battery — AC adapter offline.
+ac=$(cat /sys/class/power_supply/AC*/online 2>/dev/null | head -1 || true)
+if [[ "$ac" == "1" ]]; then
+    decide "on AC power -> no hibernate"
+    exit 0
+fi
+
+if [[ $DRY_RUN -eq 1 ]]; then
+    decide "headless + on battery -> WOULD hibernate (dry-run)"
+    exit 0
+fi
+decide "headless + on battery -> hibernating"
+exec systemctl hibernate

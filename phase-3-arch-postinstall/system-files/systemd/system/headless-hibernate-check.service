@@ -1,0 +1,7 @@
+[Unit]
+Description=Evaluate headless-on-battery hibernate condition
+Documentation=file:/usr/local/bin/headless-hibernate
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/headless-hibernate

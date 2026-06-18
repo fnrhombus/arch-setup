@@ -1,10 +1,11 @@
 // Allow user 'tom' (laptop owner) to hibernate without authentication.
 //
-// Without this, display-watchdog's `systemctl hibernate` dispatch fails:
-// when the display is off (the very situation the watchdog responds to),
-// the polkit prompt has no surface to render, fingerprint/PIN auth times
-// out, and the call returns "Access denied". This rule unblocks the
-// blackout-recovery path.
+// This covers the *manual* hibernate path — Super+Shift+H / the fuzzel
+// control-panel — which runs `systemctl hibernate` as the user. Without this
+// rule polkit can prompt for auth, and if the display is already off the prompt
+// has no surface to render, fingerprint/PIN auth times out, and the call returns
+// "Access denied". The automatic headless-on-battery hibernate runs as root
+// (headless-hibernate-check.service) and doesn't go through polkit at all.
 polkit.addRule(function(action, subject) {
     if (subject.user !== "tom") return;
     if (action.id.indexOf("org.freedesktop.login1.hibernate") === 0 ||

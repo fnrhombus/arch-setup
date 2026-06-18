@@ -1,0 +1,12 @@
+# Re-evaluate the headless-on-battery hibernate condition on the two system-level
+# events the Hyprland session can't see: AC adapter online/offline (sysfs
+# power_supply) and external display hotplug (drm). The lid-close trigger comes
+# from the Hyprland session instead (~/.local/bin/lid-handler via binddl), which
+# is where this machine's lid behavior lives by design (logind defers). Both
+# rules start the oneshot, which runs /usr/local/bin/headless-hibernate.
+#
+# Restricted to ACTION=="change" so neither rule fires on the "add" uevents at
+# boot — hibernate is a transition response, not a boot-time action.
+
+SUBSYSTEM=="power_supply", ATTR{type}=="Mains", ACTION=="change", RUN+="/usr/bin/systemctl start --no-block headless-hibernate-check.service"
+SUBSYSTEM=="drm", ACTION=="change", RUN+="/usr/bin/systemctl start --no-block headless-hibernate-check.service"

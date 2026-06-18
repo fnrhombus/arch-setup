@@ -934,15 +934,45 @@ sudo install -m 440 -D "$SCRIPT_DIR/system-files/lockscreen/sudoers-btop-lock" \
 sudo visudo -c -f /etc/sudoers.d/btop-lock >/dev/null
 
 # ---------- 1h. Allow tom to hibernate without polkit auth ----------
-# display-watchdog dispatches `systemctl hibernate` when the screen blacks
-# out + the lid is closed. With the polkit defaults, this fails: the
-# blacked-out display can't render the polkit auth prompt, fingerprint/PIN
-# agents time out, and the call returns "Access denied". A polkit rule
-# grants the laptop owner unauthenticated hibernate so the recovery path
-# completes. See rule file header for the full why.
+# Manual hibernate (Super+Shift+H / fuzzel control-panel) runs `systemctl
+# hibernate` as the user; with polkit defaults that can prompt for auth, and if
+# the screen is already blacked out the prompt can't render — fingerprint/PIN
+# agents time out and the call returns "Access denied". A polkit rule grants the
+# laptop owner unauthenticated hibernate. (The automatic headless-on-battery
+# path in 1h-bat below runs as root and doesn't need this.) See rule header.
 log "Installing /etc/polkit-1/rules.d/49-hibernate-tom.rules..."
 sudo install -m 644 -D "$SCRIPT_DIR/system-files/polkit-1/rules.d/49-hibernate-tom.rules" \
     /etc/polkit-1/rules.d/49-hibernate-tom.rules
+
+# ---------- 1h-bat. Headless-on-battery hibernate (udev + condition script) ----------
+# Hibernate iff lid closed AND no external display connected AND on battery.
+# logind can't express this: it treats any connected external display as
+# "docked" and then ignores power state, so its lid handling is monitor-coupled
+# (the opposite of what we want) — hence logind's lid switches are all `ignore`
+# (logind.conf.d/10-lid.conf) and lid behavior lives in the Hyprland session
+# (see decisions.md) while we drive the system-level hibernate triggers here.
+#
+# One condition script (/usr/local/bin/headless-hibernate) is the single source
+# of truth, re-run on every event that can complete the condition, each from the
+# source already watching it:
+#   - lid close       -> Hyprland binddl -> ~/.local/bin/lid-handler (dots)
+#   - AC plug/unplug  -> udev power_supply rule
+#   - display hotplug -> udev drm rule
+# The udev rules start headless-hibernate-check.service (oneshot) so the udev
+# worker isn't blocked by the script's debounce; lid-handler runs the script
+# directly. The script keys "no display" on connector *status*, which stays
+# "connected" through DPMS-off, so an idle screen-blank never counts as headless
+# — the bug that made the old user-level display-watchdog hibernate the docked
+# machine when the TV blanked.
+log "Installing headless-on-battery hibernate (udev + condition script)..."
+sudo install -m 755 -D "$SCRIPT_DIR/system-files/power/headless-hibernate" \
+    /usr/local/bin/headless-hibernate
+sudo install -m 644 -D "$SCRIPT_DIR/system-files/systemd/system/headless-hibernate-check.service" \
+    /etc/systemd/system/headless-hibernate-check.service
+sudo install -m 644 -D "$SCRIPT_DIR/system-files/udev/99-headless-hibernate.rules" \
+    /etc/udev/rules.d/99-headless-hibernate.rules
+sudo systemctl daemon-reload
+sudo udevadm control --reload-rules
 
 # ---------- 1i. systemd-oomd: kill cgroups under memory pressure ----------
 # Without this, a memory spike triggers the kernel OOM killer which can fire
