@@ -255,6 +255,7 @@ sudo pacman -Syu --noconfirm --needed \
     bitwarden bitwarden-cli \
     ghostty fuzzel cliphist satty hyprshot \
     nautilus yazi gnome-text-editor \
+    firefox \
     hyprland hyprlock hypridle hyprpolkitagent hyprpicker uwsm \
     swaync swayosd \
     xdg-desktop-portal-gtk xdg-desktop-portal-hyprland \
@@ -1058,6 +1059,7 @@ AUR_PACKAGES=(
     visual-studio-code-bin
     github-desktop-bin
     microsoft-edge-stable-bin
+    google-chrome
     claude-desktop-native
     # dropbox: official Dropbox Linux daemon. Tray icon under Wayland is
     # degraded (post-May-2025 AppIndicator mandate), but sync still works.
