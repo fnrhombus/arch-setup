@@ -1295,6 +1295,25 @@ WACONFEOF
 fi
 log "  WinApps installed (target=callisto.rhombus.rocks). Run 'winapps-setup --user' to wire desktop entries."
 
+# ---------- 3-cdm. Widevine for Chromium (Netflix/Spotify/DRM playback) ----------
+# Arch's chromium (pulled in transitively by mermaid-cli §1) ships WITHOUT the
+# Widevine CDM — DRM-gated sites (Netflix, Spotify web, Disney+) won't play.
+# google-chrome (§3 AUR) bundles a self-updating WidevineCdm; symlink its tree
+# into chromium's lib dir so chromium loads the same .so. Layout must be the
+# full tree (manifest.json + _platform_specific/linux_x64/libwidevinecdm.so) —
+# copying the bare .so doesn't work. Symlinking the whole dir means Chrome's
+# auto-updates keep chromium's CDM fresh for free. pacman doesn't own this
+# path, so the chromium package won't clobber it.
+# NOTE: even with Widevine, Netflix on Linux chromium caps at 720p (Netflix
+# only serves 1080p+ to whitelisted browsers). Spotify/most others are fine.
+chrome_wv=/opt/google/chrome/WidevineCdm
+if [[ -d "$chrome_wv" && -d /usr/lib/chromium ]]; then
+    log "Linking Widevine CDM into chromium (DRM playback)..."
+    sudo ln -sfn "$chrome_wv" /usr/lib/chromium/WidevineCdm
+else
+    warn "Skipping Widevine link — chrome WidevineCdm or /usr/lib/chromium missing."
+fi
+
 # ---------- 3-edge. Microsoft Edge: suppress OOBE, set sensible defaults ----------
 # Edge's default first-launch flow drops the user into a multi-page welcome
 # wizard ("Make Edge yours" → sign-in prompt → choose appearance → import →
