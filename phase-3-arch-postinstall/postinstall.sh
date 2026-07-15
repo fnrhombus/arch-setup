@@ -262,7 +262,7 @@ sudo pacman -Syu --noconfirm --needed \
     network-manager-applet pavucontrol hyprpwcenter ttf-material-symbols-variable blueman udiskie \
     nwg-look nwg-displays \
     qt5ct qt6ct papirus-icon-theme \
-    imv zathura zathura-pdf-poppler vlc vlc-plugin-ffmpeg \
+    imv zathura zathura-pdf-poppler mpv vlc vlc-plugin-ffmpeg \
     qbittorrent inotify-tools \
     waydroid \
     iio-sensor-proxy libwacom wtype \
@@ -2606,6 +2606,7 @@ check "remmina (RDP)"       "command -v remmina"
 check "freerdp"             "command -v xfreerdp || command -v xfreerdp3"
 check "nautilus"            "command -v nautilus"
 check "yazi"                "command -v yazi"
+check "mpv"                 "command -v mpv"
 check "dropbox (daemon)"    "command -v dropbox"
 check "dropbox-cli"         "pacman -Q dropbox-cli"
 check "rclone"              "command -v rclone"
