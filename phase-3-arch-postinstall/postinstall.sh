@@ -1585,21 +1585,11 @@ fi
 # Claude Code ships its own completions at runtime: `claude --print-completion zsh`
 # is wired in .zshrc below, no fragile external download needed.
 
-# ---------- 5b. Other AI CLIs (Codex, Grok) ----------
-# Codex: npm package, mise-managed like the Claude bootstrap above. The pin
-# also lives in the chezmoi-managed ~/.config/mise/config.toml, but chezmoi
-# applies AFTER this script — installing here guarantees the binary exists
-# on first login, and `mise use -g` writes the same pin chezmoi will enforce.
-if ! command -v codex >/dev/null; then
-    if command -v mise >/dev/null; then
-        log "Installing Codex CLI via mise..."
-        mise use -g npm:@openai/codex@latest >>/tmp/mise-node.log 2>&1 \
-            || warn "Codex CLI install failed — retry: mise use -g npm:@openai/codex@latest"
-    else
-        warn "mise missing; skipping Codex CLI install."
-    fi
-fi
-
+# ---------- 5b. Grok CLI ----------
+# (Other mise-managed CLIs — codex etc. — need no install step here: their
+# pins live in the chezmoi-managed ~/.config/mise/config.toml, and §13a
+# runs `mise install` after chezmoi apply lays that file down.)
+#
 # Grok: xAI's official curl installer — a self-updating binary in ~/.grok.
 # Not distributed via npm or AUR (the npm `grok-cli` is an unrelated
 # third-party tool), so mise can't manage it. The installer appends a PATH
@@ -2167,6 +2157,19 @@ else
         git -C "$DOTS_SRC" remote set-url origin "$DOTS_REPO_SSH"
     else
         warn "chezmoi init --apply failed — Hyprland will start with empty config. Re-run 'chezmoi init --apply $DOTS_REPO_HTTPS' once network is up."
+    fi
+fi
+
+# ---------- 13a-pre. Global mise tools from the dots-managed config ----------
+# chezmoi apply (§13) just laid down ~/.config/mise/config.toml — the single
+# source of truth for global tool pins (codex, fnclaude, bun, go, ...).
+# Materialize it. The Claude bootstrap in §5 stays separate because later
+# sections need `claude` before this point.
+if command -v mise >/dev/null; then
+    log "Installing global mise tools from ~/.config/mise/config.toml..."
+    if ! mise install -y >>/tmp/mise-node.log 2>&1; then
+        warn "mise install failed — tail of /tmp/mise-node.log:"
+        tail -n 10 /tmp/mise-node.log >&2 || true
     fi
 fi
 
