@@ -1585,6 +1585,32 @@ fi
 # Claude Code ships its own completions at runtime: `claude --print-completion zsh`
 # is wired in .zshrc below, no fragile external download needed.
 
+# ---------- 5b. Other AI CLIs (Codex, Grok) ----------
+# Codex: npm package, mise-managed like the Claude bootstrap above. The pin
+# also lives in the chezmoi-managed ~/.config/mise/config.toml, but chezmoi
+# applies AFTER this script — installing here guarantees the binary exists
+# on first login, and `mise use -g` writes the same pin chezmoi will enforce.
+if ! command -v codex >/dev/null; then
+    if command -v mise >/dev/null; then
+        log "Installing Codex CLI via mise..."
+        mise use -g npm:@openai/codex@latest >>/tmp/mise-node.log 2>&1 \
+            || warn "Codex CLI install failed — retry: mise use -g npm:@openai/codex@latest"
+    else
+        warn "mise missing; skipping Codex CLI install."
+    fi
+fi
+
+# Grok: xAI's official curl installer — a self-updating binary in ~/.grok.
+# Not distributed via npm or AUR (the npm `grok-cli` is an unrelated
+# third-party tool), so mise can't manage it. The installer appends a PATH
+# block to ~/.zshrc; the chezmoi-managed dot_zshrc carries the same block,
+# so the live file converges once chezmoi applies.
+if ! command -v grok >/dev/null && [[ ! -x "$HOME/.grok/bin/grok" ]]; then
+    log "Installing Grok CLI (xAI installer)..."
+    curl -fsSL https://x.ai/cli/install.sh | bash \
+        || warn "Grok CLI install failed — retry: curl -fsSL https://x.ai/cli/install.sh | bash"
+fi
+
 # ---------- 6. Fingerprint enrollment (Goodix-aware) ----------
 # Known unsupported Goodix PIDs (Match-On-Chip variants — require proprietary
 # vendor firmware/driver, not covered by stock libfprint OR libfprint-git).
@@ -2592,9 +2618,11 @@ check "direnv/sd/yq/xh"     "command -v direnv && command -v sd && command -v yq
 check "tldr/pkgfile"        "command -v tldr && command -v pkgfile"
 check "JetBrainsMono Nerd"  "fc-list -q 'JetBrainsMono Nerd Font'"
 
-echo "-- mise + node + Claude CLI --"
+echo "-- mise + node + AI CLIs --"
 check "mise node@lts"       "mise exec -- node --version"
 check "claude (CLI)"        "command -v claude"
+check "codex (CLI)"         "mise which codex"
+check "grok (CLI)"          "command -v grok || test -x $HOME/.grok/bin/grok"
 
 echo "-- desktop apps --"
 check "vscode"              "command -v code"
