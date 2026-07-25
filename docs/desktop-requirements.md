@@ -276,13 +276,18 @@ popup on every dispatched bind, so an unbound key is visually obvious
   and display hotplug by a udev-triggered oneshot service:
   - udev rule: `/etc/udev/rules.d/99-headless-hibernate.rules` (matches `power_supply` + `drm` subsystems)
   - service: `/etc/systemd/system/headless-hibernate-check.service` (root oneshot, runs as root, bypasses polkit)
-- **hypridle** — DPMS-off at **28 min** idle, screen lock at **30 min**.
-  No idle-hibernate timer — the user explicitly does not want hibernation
-  triggered while on AC regardless of activity.
-  - `timeout 1680 → hyprctl dispatch dpms off` (display off, 28 min)
-  - `timeout 1800 → loginctl lock-session` (lock, 30 min)
-  - `on-resume → hyprctl dispatch dpms on`
+- **hypridle** — screen lock at **60 min** idle, DPMS-off **30 min after that**
+  (90 min total). No idle-hibernate timer — the user explicitly does not want
+  hibernation triggered while on AC regardless of activity.
+  - `timeout 3600 → loginctl lock-session` (lock, 60 min)
+  - screen-off is *not* a hypridle listener: kmscon's own `--dpms-timeout=1800`
+    (set in `btop-lock`) blanks the panel after 30 min of in-lock idle, and
+    restores wake-on-keypress itself.
   - On `before-sleep` (manual hibernate path): also lock first.
+
+  Hyprland-side DPMS-off was removed 2026-05-21 — it ran 2 min *before* lock,
+  so kmscon inherited the DPMS-off state and couldn't wake it (Hyprland had
+  already released DRM master), trapping the user behind a dead panel.
 
 ### Manual hibernate workflow (current, until battery is replaced)
 
