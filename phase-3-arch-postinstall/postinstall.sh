@@ -2784,6 +2784,12 @@ check "udev usb-serial"     "test -f /etc/udev/rules.d/99-usb-serial.rules"
 check "bootstrap dispatcher (dots)"   "test -f $HOME/.zshrc.d/arch-bootstrap-runner.zsh"
 check "gh-auth bootstrap or done"     "test -f $HOME/.local/share/arch-setup-bootstraps/first-login.sh || test -f $HOME/.gitconfig.local"
 check "ssh-signing bootstrap or done" "test -f $HOME/.local/share/arch-setup-bootstraps/ssh-signing.sh || grep -q allowedSignersFile $HOME/.gitconfig.local 2>/dev/null"
+# Local wiring passing tells you nothing about whether GitHub ever accepted the
+# key: `gh ssh-key add` 404s without admin:public_key / admin:ssh_signing_key,
+# and a host in that state signs commits that every clone reports as
+# `unknown_key`. Compare the pinned signing key against the account's
+# registered ones (public endpoint, so no extra scope needed to verify).
+check "ssh-signing key on github"     "test -f $HOME/.local/share/arch-setup-bootstraps/ssh-signing.sh || gh api /users/\$(gh api user --jq .login)/ssh_signing_keys --jq '.[].key' 2>/dev/null | grep -qxF \"\$(git config -f $HOME/.gitconfig.local user.signingKey 2>/dev/null | sed 's/^key:://')\""
 check "cloud-storage bootstrap or done" "test -f $HOME/.local/share/arch-setup-bootstraps/cloud-storage-auth.sh || (test -f $HOME/.dropbox/info.json && test -f $HOME/.local/state/rclone-bisync-initialized)"
 check "fnpostinstall fn"    "test -f $HOME/.zshrc.d/arch-postinstall.zsh"
 
