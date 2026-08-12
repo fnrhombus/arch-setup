@@ -2269,6 +2269,20 @@ for u in hypridle.service cliphist.service swayosd-server.service \
         || warn "$u enable failed — re-run inside a graphical session (systemctl --user enable --now $u)."
 done
 
+# Bitwarden vault backup watcher (2026-08-11). Both the Bitwarden CLI and
+# the desktop app rewrite their data.json in place with no temp+rename, so
+# a power loss mid-write truncates it at a block boundary. Their own
+# recovery then renames the wreckage to data.json.bak — clobbering the
+# previous good copy — and starts fresh, which on 2026-08-10 left the CLI
+# logged out with nothing to restore from. /home has no snapper config, so
+# there was no second line of defence either.
+#
+# bw-vault-backup.path (dots) archives validated copies on every change.
+# Not in the loop above: WantedBy=default.target, not graphical-session —
+# it should run in any session, including a bare TTY login.
+systemctl --user enable --now bw-vault-backup.path 2>/dev/null \
+    || warn "bw-vault-backup.path enable failed — run 'systemctl --user enable --now bw-vault-backup.path' by hand."
+
 # Hyprland plugins via hyprpm — eager build, lazy enable.
 #
 # Design (rewritten 2026-04-30 after a Hyprspace HEAD crash sent the
