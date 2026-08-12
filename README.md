@@ -204,7 +204,7 @@ Configuration written by `chroot.sh` and `postinstall.sh` (sources under
 - **SSH** — `/etc/ssh/sshd_config.d/10-arch-setup.conf`
 - **Firewall** — UFW default rules
 - **greetd (inert)** — `/etc/greetd/{config.toml,regreet.toml,wallpaper.jpg,regreet.css}`
-- **Snapper** — `/etc/snapper/configs/root`, `/etc/conf.d/snapper`
+- **Snapper** — `/etc/snapper/configs/{root,home}`, `/etc/conf.d/snapper`. Root snapshots on pacman transactions only (`TIMELINE_CREATE=no`, snap-pac does the work); `/home` snapshots on a timeline with tighter retention. `~/.cache` is a nested subvolume so it stays out of `/home` snapshots — it churns ~19 GiB/day against ~1.7 GiB/day for everything else.
 - **Crypto / TPM** — `/etc/systemd/tpm2-pcr-{private,public}.pem`
 - **DDNS / TLS** — `/etc/azure-ddns.env`, `/etc/lego/lego.env` (mode 600), `/etc/systemd/system/lego-renew.{service,timer}`
 - **udev** — `/etc/udev/rules.d/99-usb-serial.rules` (CP210x, CH340, RP2040, FTDI)

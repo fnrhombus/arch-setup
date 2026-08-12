@@ -2383,6 +2383,78 @@ if command -v snapper >/dev/null && [[ ! -f /etc/snapper/configs/root ]]; then
     fi
 fi
 
+# ---------- 16b. Snapper: /home, with ~/.cache excluded ----------
+# Added 2026-08-11 after a power loss destroyed the Bitwarden CLI vault with
+# nothing to roll back to: snapper only covered /, and /home is a separate
+# subvolume (@home), so ~/.config was never snapshotted at all.
+#
+# Unlike / above, `create-config` works here — /home has no pre-existing
+# .snapshots subvolume to collide with. It also appends to SNAPPER_CONFIGS in
+# /etc/conf.d/snapper by itself, so no manual registration is needed.
+#
+# The exclusion is the whole reason this is affordable. Measured on metis:
+#
+#     ~/.cache        18.79 GiB modified per day  (go-build alone is 18 GB)
+#     rest of /home    1.73 GiB modified per day
+#
+# btrfs snapshots are not recursive, so making ~/.cache its own subvolume
+# drops it out of every /home snapshot. Without that, timeline snapshots
+# would pin ~19 GiB/day on a filesystem with ~99 GiB free and 1 GiB
+# unallocated. Verified: ~/.cache reads empty inside a /home snapshot while
+# ~/.config is captured normally.
+#
+# Retention is deliberately tighter than root's — this is "undo the last
+# fortnight", not long-term archival.
+if command -v snapper >/dev/null && [[ ! -f /etc/snapper/configs/home ]]; then
+    log "Creating snapper config for /home..."
+    if ! sudo btrfs subvolume show "$HOME/.cache" >/dev/null 2>&1; then
+        log "Converting $HOME/.cache into a nested subvolume (excluded from snapshots)..."
+        if [[ -d "$HOME/.cache" ]]; then
+            mv "$HOME/.cache" "$HOME/.cache.preconvert"
+        fi
+        sudo btrfs subvolume create "$HOME/.cache"
+        sudo chown "$USER:$USER" "$HOME/.cache"
+        chmod 0700 "$HOME/.cache"
+        if [[ -d "$HOME/.cache.preconvert" ]]; then
+            cp -a "$HOME/.cache.preconvert/." "$HOME/.cache/" 2>/dev/null || true
+            rm -rf "$HOME/.cache.preconvert"
+        fi
+    fi
+
+    sudo snapper -c home create-config /home || \
+        warn "snapper create-config /home failed — /home will not be snapshotted."
+
+    if [[ -f /etc/snapper/configs/home ]]; then
+        sudo sed -i \
+            -e 's|^TIMELINE_LIMIT_HOURLY=.*|TIMELINE_LIMIT_HOURLY="6"|' \
+            -e 's|^TIMELINE_LIMIT_DAILY=.*|TIMELINE_LIMIT_DAILY="7"|' \
+            -e 's|^TIMELINE_LIMIT_WEEKLY=.*|TIMELINE_LIMIT_WEEKLY="2"|' \
+            -e 's|^TIMELINE_LIMIT_MONTHLY=.*|TIMELINE_LIMIT_MONTHLY="0"|' \
+            -e 's|^TIMELINE_LIMIT_QUARTERLY=.*|TIMELINE_LIMIT_QUARTERLY="0"|' \
+            -e 's|^TIMELINE_LIMIT_YEARLY=.*|TIMELINE_LIMIT_YEARLY="0"|' \
+            -e 's|^NUMBER_LIMIT=.*|NUMBER_LIMIT="10"|' \
+            -e "s|^ALLOW_USERS=.*|ALLOW_USERS=\"$USER\"|" \
+            /etc/snapper/configs/home
+        sudo chown -R ":$USER" /home/.snapshots 2>/dev/null || true
+        sudo chmod 750 /home/.snapshots
+    fi
+
+    # Root keeps its existing behaviour: snapshots on pacman transactions via
+    # snap-pac, never on a clock. snapper-timeline.timer is global, so leaving
+    # TIMELINE_CREATE=yes on root would silently start clock snapshots there
+    # the moment the timer is enabled for /home.
+    sudo sed -i 's|^TIMELINE_CREATE=.*|TIMELINE_CREATE="no"|' /etc/snapper/configs/root
+
+    # Both timers ship disabled on Arch. Without them the home config is inert
+    # (nothing creates timeline snapshots) AND retention is never enforced —
+    # observed on metis: root sat at 150 snapshots against its own
+    # NUMBER_LIMIT=50 because snapper-cleanup.timer had never run.
+    sudo systemctl enable --now snapper-timeline.timer snapper-cleanup.timer 2>/dev/null || \
+        warn "snapper timers not enabled — /home snapshots will not be created or pruned."
+
+    sudo systemctl try-restart snapperd 2>/dev/null || true
+fi
+
 # ---------- 16-limine. Point limine-snapper-sync at our subvolume layout ----------
 # Package default is ROOT_SNAPSHOTS_PATH="/@/.snapshots" (assumes
 # .snapshots is nested inside the root subvolume @). Our layout puts
