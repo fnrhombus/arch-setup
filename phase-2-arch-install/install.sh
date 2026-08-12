@@ -549,6 +549,18 @@ done
 log "Generating /etc/fstab..."
 genfstab -U /mnt >> /mnt/etc/fstab
 
+# Tighten the ESP's permissions. genfstab copies the live mount options, and
+# mount.vfat defaults to fmask=0022,dmask=0022 — world-readable. `bootctl
+# status` flags both /boot and /boot/loader/random-seed as "world accessible,
+# which is a security hole", the seed being the real concern: it feeds the
+# kernel entropy pool at boot and any local user could read it.
+#
+# vfat has no on-disk permission bits, so chmod is a silent no-op here and
+# even `mount -o remount` will not re-evaluate the masks — it takes a full
+# umount/mount cycle (or a reboot) to apply. Fixing it in fstab is the only
+# durable form. 0177/0077 leaves the ESP root-only.
+sed -i '/[[:space:]]\/boot[[:space:]]/ s/fmask=0022,dmask=0022/fmask=0177,dmask=0077/' /mnt/etc/fstab
+
 # Append the swapfile entry. genfstab can't infer it (the swapfile isn't
 # active during install) — write it explicitly. The btrfs subvol option
 # isn't needed (kernel resolves the file by inode under @swap's mount).

@@ -852,6 +852,27 @@ fi
 log "Masking systemd-tpm2-setup.service (benign unseal failure on fresh install)..."
 sudo systemctl mask systemd-tpm2-setup.service
 
+# systemd 260 added systemd-pcrproduct.service, which measures a product ID
+# into an NvPCR and fails the same way for the same reason. This machine's
+# TPM is an Intel PTT fTPM (TPM2_PT_MANUFACTURER: INTC) exposing only a SHA1
+# PCR bank -- /sys/class/tpm/tpm0/ has pcr-sha1 and no pcr-sha256 -- with
+# just 3 transient object slots (TPM2_PT_HR_LOADED_AVAIL: 0x3). systemd falls
+# back to SHA1 and then Esys_Create fails 0x921 (TPM_RC_OBJECT_MEMORY). It is
+# a hard capacity limit, not stale handles: the transient list is empty and
+# HR_LOADED reads 0.
+#
+# Mask it for the same reason as the line above -- pure measurement, no boot
+# dependency.
+log "Masking systemd-pcrproduct.service (same TPM limitation, systemd 260+)..."
+sudo systemctl mask systemd-pcrproduct.service
+
+# Deliberately NOT masked: systemd-tpm2-setup-early.service. On metis the
+# root LUKS keyslot carries a systemd-tpm2 token (PCR 7, sha1 bank,
+# tpm2-srk: true), and this unit is what re-provisions the SRK that token
+# depends on. It fails only on the anchor-secret step -- "SRK already stored
+# in the TPM" succeeds first -- so unlock is unaffected today. Masking it
+# would mean a cleared TPM fails silently instead of loudly.
+
 # ---------- 1f. Disable greetd in favour of TTY login ----------
 # Decision (2026-04-30): greetd + ReGreet didn't earn its keep — slow VT
 # handoff, regreet's GTK chrome looks awkward on a 17" panel, and the
