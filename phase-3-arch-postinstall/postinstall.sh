@@ -250,6 +250,7 @@ sudo pacman -Syu --noconfirm --needed \
     texlive-binextra texlive-latexrecommended \
     wl-clipboard grim slurp \
     xdg-user-dirs pipewire pipewire-pulse pipewire-jack pipewire-alsa wireplumber alsa-utils \
+    carla yabridge yabridgectl wine lsp-plugins-lv2 calf qpwgraph \
     noto-fonts noto-fonts-emoji ttf-jetbrains-mono-nerd ttf-firacode-nerd \
     terminus-font \
     bitwarden bitwarden-cli \
@@ -2697,6 +2698,7 @@ check "greetd installed"    "pacman -Q greetd"
 check "greetd-regreet"      "pacman -Q greetd-regreet"
 check "greetd disabled (TTY-login mode)" "! systemctl is-enabled greetd 2>/dev/null"
 check "pipewire"            "pacman -Q pipewire wireplumber"
+check "audio DSP host"      "pacman -Q carla yabridge lsp-plugins-lv2"
 check "bluetooth"           "systemctl is-enabled bluetooth"
 
 echo "-- printing (Canon Pro 9000 Mk II via USB) --"
