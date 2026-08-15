@@ -250,6 +250,7 @@ sudo pacman -Syu --noconfirm --needed \
     texlive-binextra texlive-latexrecommended \
     wl-clipboard grim slurp \
     xdg-user-dirs pipewire pipewire-pulse pipewire-jack pipewire-alsa wireplumber alsa-utils \
+    realtime-privileges easyeffects \
     noto-fonts noto-fonts-emoji ttf-jetbrains-mono-nerd ttf-firacode-nerd \
     terminus-font \
     bitwarden bitwarden-cli \
@@ -1032,6 +1033,18 @@ log "Installing /etc/systemd/coredump.conf.d/10-retain-more.conf..."
 sudo install -m 644 -D "$SCRIPT_DIR/system-files/systemd/coredump.conf.d/10-retain-more.conf" \
     /etc/systemd/coredump.conf.d/10-retain-more.conf
 sudo systemctl daemon-reload
+
+# ---------- 1k. Realtime audio scheduling (glitch-proofing under load) ----------
+# realtime-privileges ships PAM limits for @realtime (rtprio 98, memlock
+# unlimited); with tom in the group, PipeWire's module-rt puts its data
+# loops on SCHED_FIFO directly at login (no rtkit round-trip), so audio
+# survives extreme CPU load. The rest of the stack is user-config in dots:
+# quantum floors (dot_config/pipewire/*.conf.d), oomd avoid-marks on the
+# audio units, and the EasyEffects autogain daemon (easyeffects.service).
+if ! id -nG tom | grep -qw realtime; then
+    sudo usermod -aG realtime tom
+    warn "Added tom to realtime group — log out and back in for RT audio scheduling."
+fi
 
 # ---------- 2. yay bootstrap ----------
 if ! command -v yay >/dev/null; then
@@ -2278,6 +2291,7 @@ fi
 #   swayosd-server.service  this repo's chezmoi (dots)
 #   iio-hyprland.service    this repo's chezmoi (dots)
 #   display-watchdog.service this repo's chezmoi (dots)
+#   easyeffects.service     this repo's chezmoi (dots) — autogain DSP chain
 #
 # WantedBy=graphical-session.target so they all auto-start once §0 of
 # exec.conf brings that target up. The is-active guard is a no-op-on-
@@ -2285,7 +2299,7 @@ fi
 log "Enabling promoted graphical-session daemons..."
 systemctl --user daemon-reload
 for u in hypridle.service cliphist.service swayosd-server.service \
-         iio-hyprland.service display-watchdog.service; do
+         iio-hyprland.service display-watchdog.service easyeffects.service; do
     systemctl --user enable --now "$u" 2>/dev/null \
         || warn "$u enable failed — re-run inside a graphical session (systemctl --user enable --now $u)."
 done
@@ -2790,6 +2804,8 @@ check "greetd installed"    "pacman -Q greetd"
 check "greetd-regreet"      "pacman -Q greetd-regreet"
 check "greetd disabled (TTY-login mode)" "! systemctl is-enabled greetd 2>/dev/null"
 check "pipewire"            "pacman -Q pipewire wireplumber"
+check "realtime audio pkgs" "pacman -Q realtime-privileges easyeffects"
+check "tom in realtime group" "id -nG tom | grep -qw realtime"
 check "bluetooth"           "systemctl is-enabled bluetooth"
 
 echo "-- printing (Canon Pro 9000 Mk II via USB) --"
