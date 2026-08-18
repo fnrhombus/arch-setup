@@ -1141,6 +1141,10 @@ AUR_PACKAGES=(
     # is written in §7a below to include the hyprlock auth stack.
     physlock
     bibata-cursor-theme
+    # Bitwig Studio: Digital audio workstation for music production, remixing
+    # and live performance. DAW with VST/AU support, MIDI I/O, and deep JACK
+    # integration. Essential for professional audio work.
+    bitwig-studio
     # Meta package — pulls in every ttf-*-nerd variant from extra/. The
     # explicit ttf-jetbrains-mono-nerd / ttf-firacode-nerd in §1's pacman
     # list stay as a safety net if AUR is unreachable on first run.
