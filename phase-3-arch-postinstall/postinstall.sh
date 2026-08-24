@@ -1145,6 +1145,14 @@ AUR_PACKAGES=(
     # and live performance. DAW with VST/AU support, MIDI I/O, and deep JACK
     # integration. Essential for professional audio work.
     bitwig-studio
+    # pwvucontrol: native-PipeWire mixer (GTK4/libadwaita). Bound to
+    # right-click on waybar's volume module (dots: waybar/config.jsonc).
+    # Complements [extra]/pavucontrol in §1 rather than replacing it —
+    # pavucontrol keeps the card-profile tab (analog/HDMI/digital,
+    # bluetooth A2DP-vs-headset) that pwvucontrol's equivalent doesn't
+    # yet cover. Builds from source; rust/clang land as makedepends and
+    # --rmdeps cleans them up after.
+    pwvucontrol
     # Meta package — pulls in every ttf-*-nerd variant from extra/. The
     # explicit ttf-jetbrains-mono-nerd / ttf-firacode-nerd in §1's pacman
     # list stay as a safety net if AUR is unreachable on first run.
