@@ -269,6 +269,7 @@ sudo pacman -Syu --noconfirm --needed \
     iio-sensor-proxy libwacom wtype \
     mission-center \
     remmina freerdp dialog openbsd-netcat \
+    tigervnc xfce4-session xfwm4 xfce4-panel xfdesktop thunar xfce4-terminal xfce4-appfinder xfce4-settings \
     ufw \
     azure-cli lego rclone \
     memtest86+ memtest86+-efi \
@@ -281,6 +282,20 @@ sudo pacman -Syu --noconfirm --needed \
     cmake cpio
 
 sudo pkgfile -u
+
+# ---------- 1-vnc. Headless remote desktop (TigerVNC + XFCE on :1) ----------
+# Metis is reached from Android over IPv6 at metis.rhombus.rocks. Xvnc runs an
+# XFCE session on its own virtual display, so remote access does not depend on
+# the physical TV (DP-1) being powered on, and does not disturb the Hyprland
+# session when it is.
+#
+# The router pinhole passes ALL ports to this host's MAC, so Xvnc is bound to
+# loopback (`localhost` in ~/.vnc/config, shipped via chezmoi) and reached only
+# through SSH port-forwarding. VNC's native auth is never exposed to the WAN.
+log "Configuring TigerVNC headless desktop on :1..."
+echo ":1=tom" | sudo tee /etc/tigervnc/vncserver.users >/dev/null
+sudo systemctl enable vncserver@:1.service
+
 
 # ---------- 1-print. CUPS + gutenprint (Canon Pro 9000 Mk II via USB) ----------
 # CUPS is the spooler; gutenprint ships the open-source PPDs that cover
