@@ -1360,12 +1360,16 @@ log "  WinApps installed (target=callisto.rhombus.rocks). Run 'winapps-setup --u
 # ---------- 3-cdm. Widevine for Chromium (Netflix/Spotify/DRM playback) ----------
 # Arch's chromium (pulled in transitively by mermaid-cli §1) ships WITHOUT the
 # Widevine CDM — DRM-gated sites (Netflix, Spotify web, Disney+) won't play.
-# google-chrome (§3 AUR) bundles a self-updating WidevineCdm; symlink its tree
-# into chromium's lib dir so chromium loads the same .so. Layout must be the
-# full tree (manifest.json + _platform_specific/linux_x64/libwidevinecdm.so) —
-# copying the bare .so doesn't work. Symlinking the whole dir means Chrome's
-# auto-updates keep chromium's CDM fresh for free. pacman doesn't own this
-# path, so the chromium package won't clobber it.
+# google-chrome (§3 AUR) bundles a WidevineCdm; symlink its tree into
+# chromium's lib dir so chromium loads the same .so. Layout must be the full
+# tree (manifest.json + _platform_specific/linux_x64/libwidevinecdm.so) —
+# copying the bare .so doesn't work. Symlinking the whole dir means every
+# google-chrome package upgrade refreshes chromium's CDM too. pacman doesn't
+# own this path, so the chromium package won't clobber it.
+# NOTE: Chrome on Linux has NO in-place auto-updater — the AUR package (and
+# this CDM) only move when `yay -Syu` runs. Chrome's "out of date" nag means
+# the system hasn't been upgraded in a while, not that Chrome needs a
+# reinstall.
 # NOTE: even with Widevine, Netflix on Linux chromium caps at 720p (Netflix
 # only serves 1080p+ to whitelisted browsers). Spotify/most others are fine.
 chrome_wv=/opt/google/chrome/WidevineCdm
