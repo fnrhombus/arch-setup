@@ -243,7 +243,6 @@ sudo pacman -Syu --noconfirm --needed \
     inetutils bind \
     zsh tmux helix \
     bat fd ripgrep eza lsd btop jq fzf zoxide direnv \
-    kmscon \
     sd go-yq xh glow mermaid-cli \
     man-db man-pages pkgfile tldr \
     pandoc-cli typst \
@@ -909,67 +908,27 @@ sudo systemctl mask systemd-pcrproduct.service
 log "Disabling greetd.service (TTY login mode)..."
 sudo systemctl disable greetd.service 2>/dev/null || true
 
-# ---------- 1g. btop-lock lockscreen ----------
-# A DRM-aware (kmscon-rendered) screensaver-style lock invoked from hypridle
-# (rhombu5/dots' hypridle.conf binds `lock_cmd = sudo /usr/local/bin/btop-lock`).
-# Flow:
-#   • outer btop-lock launches kmscon on a free VT at 4K with a 32px font;
-#   • kmscon's "login" program is btop-lock-inner, which loops:
-#       - btop running as non-privileged `lockuser` (de-elevated; hidden by
-#         /proc hidepid=2,gid=proc so the process pane shows only lockuser's
-#         own procs — tom is in `proc` so his own btop/htop/ps aren't gimped),
-#       - press `e` within 0.5s of btop exiting → `pamtester btop-lock tom
-#         authenticate` (password only via pam_unix; fingerprint+PIN don't
-#         work via pamtester's basic conv — in-person physlock still has
-#         the full grosshack stack). Any other key or no input → btop resumes;
-#   • on auth success the inner signals kmscon to terminate (otherwise kmscon
-#     getty-style respawns the login program), and the outer wrapper chvts
-#     back to tty1 / Hyprland.
+# ---------- 1g. escape-lock recovery hook for the physlock lockscreen ----------
+# hypridle's lock_cmd calls `~/.local/bin/tty-lock` (chezmoi-managed, in
+# rhombu5/dots — not provisioned here): a thin wrapper that runs physlock
+# (setuid root, no sudo needed) then `loginctl unlock-session` so hypridle's
+# unlock_cmd fires and restores DPMS / waybar health-checks. physlock itself
+# and its PAM stack (fingerprint + PIN + password, same concurrent stack as
+# sudo/hyprlock/polkit-1) are provisioned in §1 and §7a above.
 #
-# Recovery: `sudo escape-lock` (NOPASSWD'd) kills the lock + chvts back —
-# intended for SSH-from-phone when the user can't reach the keyboard.
-log "btop-lock lockscreen: lockuser, /proc hidepid, scripts, PAM, sudoers..."
+# escape-lock is the wedge recovery for that stack: `sudo escape-lock`
+# (NOPASSWD'd) kills a stuck physlock, releases its VT-switch lock, chvts
+# back to tty1, and fires the same loginctl unlock signal tty-lock's normal
+# exit does — intended for SSH-from-phone when the user can't reach the
+# keyboard.
+log "escape-lock recovery hook: script + sudoers..."
 
-# Non-privileged user that btop runs as inside the lockscreen.
-if ! id lockuser >/dev/null 2>&1; then
-    sudo useradd --system --home-dir /var/lib/lockuser --create-home \
-        --shell /usr/sbin/nologin lockuser
-fi
-
-# lockuser's btop config — 500ms refresh + disks_filter trimming noise.
-sudo install -d -m 755 -o lockuser -g lockuser /var/lib/lockuser/.config/btop
-sudo install -m 644 -o lockuser -g lockuser \
-    "$SCRIPT_DIR/system-files/lockscreen/lockuser-btop.conf" \
-    /var/lib/lockuser/.config/btop/btop.conf
-
-# tom in `proc` so /proc hidepid=2 doesn't gimp his own btop/htop/ps.
-sudo usermod -aG proc tom
-
-# /proc hidepid takes effect on next boot (remount-on-live would gut tom's
-# already-running shell/Hyprland visibility until he re-logged in).
-if ! grep -qE '^proc.*hidepid' /etc/fstab; then
-    echo 'proc /proc proc rw,nosuid,nodev,noexec,relatime,hidepid=2,gid=proc 0 0' | \
-        sudo tee -a /etc/fstab >/dev/null
-fi
-
-# Outer wrapper + inner loop.
-sudo install -m 755 -D "$SCRIPT_DIR/system-files/lockscreen/btop-lock" \
-    /usr/local/bin/btop-lock
-sudo install -m 755 -D "$SCRIPT_DIR/system-files/lockscreen/btop-lock-inner" \
-    /usr/local/bin/btop-lock-inner
-
-# Emergency recovery binary, NOPASSWD via sudoers below.
 sudo install -m 755 -D "$SCRIPT_DIR/system-files/lockscreen/escape-lock" \
     /usr/local/sbin/escape-lock
 
-# PAM stack: password-only via pam_unix.
-sudo install -m 644 -D "$SCRIPT_DIR/system-files/pam.d/btop-lock" \
-    /etc/pam.d/btop-lock
-
-# Sudoers: tom invokes btop-lock + escape-lock without a password prompt.
-sudo install -m 440 -D "$SCRIPT_DIR/system-files/lockscreen/sudoers-btop-lock" \
-    /etc/sudoers.d/btop-lock
-sudo visudo -c -f /etc/sudoers.d/btop-lock >/dev/null
+sudo install -m 440 -D "$SCRIPT_DIR/system-files/lockscreen/sudoers-escape-lock" \
+    /etc/sudoers.d/escape-lock
+sudo visudo -c -f /etc/sudoers.d/escape-lock >/dev/null
 
 # ---------- 1h. Allow tom to hibernate without polkit auth ----------
 # Manual hibernate (Super+Shift+H / fuzzel control-panel) runs `systemctl
@@ -1151,8 +1110,9 @@ AUR_PACKAGES=(
     # see runbook/post-reinstall-followups.md §4 for the revert path
     # once an extra/waybar bumps past 0.15.0 with the fixes.
     waybar-git
-    # physlock: TTY-based screen lock. dots' hypridle.conf invokes this
-    # as the lock_cmd (replaced hyprlock 2026-05-05). /etc/pam.d/physlock
+    # physlock: TTY-based screen lock. dots' hypridle.conf lock_cmd calls
+    # `tty-lock`, a thin wrapper (chezmoi-managed, not provisioned here)
+    # that runs physlock then `loginctl unlock-session`. /etc/pam.d/physlock
     # is written in §7a below to include the hyprlock auth stack.
     physlock
     bibata-cursor-theme
@@ -1195,9 +1155,6 @@ AUR_PACKAGES=(
     # earlier `winapps-git` AUR pkg referenced an upstream that has since
     # migrated from Fmstrat/winapps to winapps-org/winapps. We install it
     # from upstream source in §3-winapps below — clone-and-symlink, no AUR.
-    # pamtester: tiny CLI for invoking PAM ops from scripts; btop-lock's
-    # auth loop uses it to test password against /etc/pam.d/btop-lock.
-    pamtester
     # bemoji: emoji/symbol picker for the super+; bind (binds.conf). Pure
     # POSIX shell, no compile. Auto-detects the installed menu — fuzzel here
     # (§F decisions.md) — and self-downloads its emoji db from unicode.org on

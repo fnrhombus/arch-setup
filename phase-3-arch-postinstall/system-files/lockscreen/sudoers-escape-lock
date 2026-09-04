@@ -1,0 +1,5 @@
+# Recovery hook: `sudo escape-lock` over SSH (or in person) kills a stuck
+# physlock, releases its VT lock, and chvts back to tty1 / Hyprland.
+# NOPASSWD because fprintd doesn't work over SSH and typing the password
+# under duress is hostile UX.
+tom ALL=(root) NOPASSWD: /usr/local/sbin/escape-lock

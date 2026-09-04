@@ -1,14 +1,22 @@
 #!/bin/bash
-# Emergency unwedge for a stuck btop-lock invocation. Granted NOPASSWD to
-# tom via /etc/sudoers.d/btop-lock so it can be run from a phone-side SSH
-# session without prompting (no fprintd over SSH anyway).
+# Emergency unwedge for a stuck physlock lock (tty-lock's wrapped call).
+# Granted NOPASSWD to tom via /etc/sudoers.d/escape-lock so it can be run
+# from a phone-side SSH session without prompting (no fprintd over SSH
+# anyway).
 #
-# Action: kill the lockscreen process tree, release physlock's VT-switch
-# lock, return foreground to tty1 (Hyprland). Prints the final fgconsole
-# so the caller can see whether recovery worked.
+# Action: kill any stuck physlock, release its VT-switch lock, return
+# foreground to tty1 (Hyprland), and fire the same loginctl unlock signal
+# tty-lock sends on its normal exit path — otherwise hypridle's unlock_cmd
+# never runs and Hyprland's outputs stay in their pre-lock DPMS state until
+# the next keypress. Prints the final fgconsole so the caller can see
+# whether recovery worked.
 
-pkill -9 -f 'btop-lock|kmscon' 2>/dev/null || true
+pkill -9 -f 'physlock' 2>/dev/null || true
 sleep 0.3
 physlock -L 2>/dev/null || true
 chvt 1
+
+session_id=$(loginctl show-user "${SUDO_USER:-tom}" -p Display --value 2>/dev/null)
+[ -n "$session_id" ] && loginctl unlock-session "$session_id" 2>/dev/null || true
+
 echo "recovered: fgconsole=$(fgconsole)"
