@@ -93,16 +93,16 @@ station wlan0 connect <YourSSID>
 exit
 ```
 
-## 3.5 If the `btop-lock` lockscreen wedged
+## 3.5 If the `physlock` lockscreen wedged
 
-The idle-lock — `btop-lock` (kmscon-rendered btop + password unlock) — holds
-VT switching via `physlock -l` while it owns its virtual terminal. If
-something goes wrong (auth keeps failing, kmscon hangs, the prompt won't
-appear), **`Ctrl+Alt+F<N>` won't work** because VT switching is locked.
+The idle-lock — `physlock`, invoked via `tty-lock` — holds VT switching
+while it owns its virtual terminal. If something goes wrong (auth keeps
+failing, the prompt won't appear), **`Ctrl+Alt+F<N>` won't work** because
+VT switching is locked.
 
 The escape hatch is `escape-lock` — a NOPASSWD'd helper at
-`/usr/local/sbin/escape-lock` that pkills `btop-lock` + `kmscon`, releases
-the VT lock, and `chvt`s back to tty1 (Hyprland).
+`/usr/local/sbin/escape-lock` that pkills `physlock`, releases the VT
+lock, and `chvt`s back to tty1 (Hyprland).
 
 You need to reach metis via SSH from your phone, then run it:
 

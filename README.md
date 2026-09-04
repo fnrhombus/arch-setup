@@ -114,16 +114,14 @@ later by chezmoi are catalogued separately in the
   - `~/.zprofile` execs `uwsm start hyprland-uwsm.desktop`
   - `numlock-on.service` enables NumLock before login
   - `logind.conf.d/10-lid.conf` delegates lid handling to the user session
-- **btop-lock lockscreen** — invoked by hypridle via `lock_cmd = sudo /usr/local/bin/btop-lock`
-  (the hypridle config lives in `rhombu5/dots`). The wrapper launches `kmscon` on a free VT at
-  4K with a 32px font; kmscon's "login" program is `/usr/local/bin/btop-lock-inner`, which loops
-  btop running as non-privileged `lockuser` ↔ a 3s-timeout `pamtester btop-lock tom authenticate`
-  (password-only via `/etc/pam.d/btop-lock` → `pam_unix`). On auth success the inner signals
-  kmscon to terminate and the outer wrapper `chvt`s back to tty1. `/proc` mounted
-  `hidepid=2,gid=proc` so btop's process pane shows only `lockuser`'s own procs; `tom` is in
-  the `proc` group so his own btop/htop/ps aren't gimped. Emergency recovery:
-  `sudo /usr/local/sbin/escape-lock` (NOPASSWD'd via `/etc/sudoers.d/btop-lock`) kills the lock
-  + chvts back, intended for SSH-from-phone when the user can't reach the keyboard.
+- **physlock lockscreen** — hypridle's `lock_cmd` calls `~/.local/bin/tty-lock` (chezmoi-managed,
+  in `rhombu5/dots`), a thin wrapper that runs `physlock` — TTY-based, chvts to a free VT and
+  blocks console switching while it prompts — then `loginctl unlock-session` so hypridle's
+  `unlock_cmd` fires on exit. Auth goes through `/etc/pam.d/physlock`, the same concurrent
+  fingerprint + PIN + password stack as sudo/hyprlock/polkit-1 (§7a). Emergency recovery:
+  `sudo /usr/local/sbin/escape-lock` (NOPASSWD'd via `/etc/sudoers.d/escape-lock`) kills a
+  stuck physlock, releases the VT lock, and chvts back, intended for SSH-from-phone when the
+  user can't reach the keyboard.
 - **greetd + ReGreet** — installed but **disabled** (kept inert as a recoverable fallback;
   see memory note `project_greetd_not_in_use.md`)
 - Hyprland session entry shipped by the `hyprland` pacman package; configs come from `rhombu5/dots` via chezmoi
@@ -143,7 +141,7 @@ Grouped by purpose. Full list lives in `install.sh`/`chroot.sh`/`postinstall.sh`
 - **Desktop shell / UI** — `waybar-git` (AUR; tracking master for post-0.15.0 GdkMonitor crash fixes), `swaync`, `swayosd`, `fuzzel`, `cliphist`, `wl-clipboard`, `grim`, `slurp`, `satty`, `hyprshot`
 - **File managers / viewers** — `nautilus`, `yazi`, `imv`, `zathura`, `zathura-pdf-poppler`, `mpv`, `vlc`
 - **Terminal / editors** — `ghostty`, `helix`, `vim`, `tmux`, `zsh`
-- **CLI utilities** — `bat`, `fd`, `ripgrep`, `eza`, `lsd`, `btop`, `jq`, `fzf`, `zoxide`, `direnv`, `sd`, `go-yq`, `xh`, `glow`, `tldr`, `pkgfile`, `man-db`, `man-pages`, `pandoc-cli` + `typst` + `texlive-binextra` (markdown → booklet PDF via pandoc → typst → pdfjam; powers `runbook/*.pdf` gen — also uses `pdfinfo` from poppler, transitively installed via `zathura-pdf-poppler`), `kmscon` (DRM-aware VT terminal; powers the btop-lock lockscreen)
+- **CLI utilities** — `bat`, `fd`, `ripgrep`, `eza`, `lsd`, `btop`, `jq`, `fzf`, `zoxide`, `direnv`, `sd`, `go-yq`, `xh`, `glow`, `tldr`, `pkgfile`, `man-db`, `man-pages`, `pandoc-cli` + `typst` + `texlive-binextra` (markdown → booklet PDF via pandoc → typst → pdfjam; powers `runbook/*.pdf` gen — also uses `pdfinfo` from poppler, transitively installed via `zathura-pdf-poppler`)
 - **Fonts / icons** — `noto-fonts`, `noto-fonts-emoji`, `ttf-jetbrains-mono-nerd`, `ttf-firacode-nerd`, `ttf-material-symbols-variable`, `terminus-font`, `papirus-icon-theme`
 - **Theming** — `nwg-look`, `nwg-displays`, `qt5ct`, `qt6ct`
 - **2-in-1 hardware** — `iio-sensor-proxy`, `libwacom`, `wtype`
@@ -168,7 +166,6 @@ Grouped by purpose. Full list lives in `install.sh`/`chroot.sh`/`postinstall.sh`
 - **Terminal / shell** — `sesh-bin`, `powershell-bin`, `tdf-git` (terminal PDF viewer; kitty graphics protocol)
 - **Bluetooth** — `overskride`
 - **Pacman / boot** — `pacseek`, `limine-snapper-sync`
-- **PAM tooling** — `pamtester` (used by the btop-lock auth loop)
 - **NVIDIA compute (display blacklisted)** — `nvidia-470xx-dkms`, `nvidia-470xx-utils` (CUDA only — MX250 Pascal can't drive Wayland)
 - **Forked / pinned** (in `phase-3-arch-postinstall/aur-overrides/`)
   - `pinpam-fnrhombus` — adds `try_first_pass` / `use_first_pass` for concurrent PIN auth
@@ -194,7 +191,7 @@ Configuration written by `chroot.sh` and `postinstall.sh` (sources under
 - **Hardware quirks**
   - `/etc/modprobe.d/blacklist-nvidia.conf` — display modules blacklisted, CUDA modules allowed
   - `/etc/modprobe.d/rtl8723be.conf` — `aspm=0 ant_sel=2 fwlps=N ips=N` (PCIe AER storm fix)
-- **Login / session** — `/etc/systemd/logind.conf.d/10-lid.conf`, PAM stacks (`sudo`, `hyprlock`, `polkit-1`, `physlock`, `login`, `greetd`, `btop-lock`), `/usr/local/bin/btop-lock`, `/usr/local/bin/btop-lock-inner`, `/usr/local/sbin/escape-lock`, `/etc/sudoers.d/btop-lock`, `/var/lib/lockuser/.config/btop/btop.conf` (lockuser's btop tuning), `/etc/polkit-1/rules.d/49-hibernate-tom.rules` (lets `tom` hibernate without polkit auth — required for the manual `Super+Shift+H` / fuzzel control-panel hibernate path; the automatic headless-hibernate path runs as root and bypasses polkit entirely)
+- **Login / session** — `/etc/systemd/logind.conf.d/10-lid.conf`, PAM stacks (`sudo`, `hyprlock`, `polkit-1`, `physlock`, `login`, `greetd`), `/usr/local/sbin/escape-lock`, `/etc/sudoers.d/escape-lock`, `/etc/polkit-1/rules.d/49-hibernate-tom.rules` (lets `tom` hibernate without polkit auth — required for the manual `Super+Shift+H` / fuzzel control-panel hibernate path; the automatic headless-hibernate path runs as root and bypasses polkit entirely)
 - **Headless hibernate** — `/usr/local/bin/headless-hibernate` (condition script: hibernate iff lid closed + no external display + on battery; keyed on DRM connector status, not DPMS), `/etc/udev/rules.d/99-headless-hibernate.rules` (triggers on AC plug/unplug and display hotplug), `/etc/systemd/system/headless-hibernate-check.service` (root oneshot that runs the condition script)
 - **Network** — `/etc/NetworkManager/system-connections/*.nmconnection` (pre-seeded Wi-Fi)
 - **Pacman** — `/etc/pacman.conf` + the three hooks above in `/etc/pacman.d/hooks/`

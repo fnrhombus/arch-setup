@@ -82,10 +82,10 @@ for username + password; `/etc/pam.d/login` is the cold-boot stack —
 `pam_fprintd_grosshack` races finger vs typed input, `pam_unix` tests
 the typed value as password. **PIN is NOT a login factor** (libpinpam
 excluded at this surface by design). PIN works at the in-session
-re-auth surfaces (sudo, physlock, hyprlock, polkit-1). physlock
-replaced hyprlock as the active `lock_cmd` 2026-05-05 — same PAM
-stack (`/etc/pam.d/physlock` includes hyprlock), TTY-based UX. See
-postinstall.sh §7a's design notes. On successful login, `~/.zprofile`
+re-auth surfaces (sudo, physlock, hyprlock, polkit-1). physlock is
+the active screen lock — same PAM stack (`/etc/pam.d/physlock`
+includes hyprlock), TTY-based UX. See postinstall.sh §7a's design
+notes. On successful login, `~/.zprofile`
 checks for tty1 + no existing Wayland/X session, then execs
 `uwsm start hyprland-uwsm.desktop`. uwsm hands Hyprland a proper
 graphical-session.target lifecycle (env import, dependent-unit
@@ -280,14 +280,11 @@ popup on every dispatched bind, so an unbound key is visually obvious
   (90 min total). No idle-hibernate timer — the user explicitly does not want
   hibernation triggered while on AC regardless of activity.
   - `timeout 3600 → loginctl lock-session` (lock, 60 min)
-  - screen-off is *not* a hypridle listener: kmscon's own `--dpms-timeout=1800`
-    (set in `btop-lock`) blanks the panel after 30 min of in-lock idle, and
-    restores wake-on-keypress itself.
+  - screen-off is *not* a hypridle listener: the panel stays lit for the
+    duration of the lock — physlock has no DPMS-off of its own, and
+    Hyprland-side dpms-off can't substitute (it releases DRM master and
+    traps the user behind a dead panel physlock can't wake).
   - On `before-sleep` (manual hibernate path): also lock first.
-
-  Hyprland-side DPMS-off was removed 2026-05-21 — it ran 2 min *before* lock,
-  so kmscon inherited the DPMS-off state and couldn't wake it (Hyprland had
-  already released DRM master), trapping the user behind a dead panel.
 
 ### Manual hibernate workflow (current, until battery is replaced)
 
