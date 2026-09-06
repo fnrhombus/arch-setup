@@ -265,7 +265,7 @@ sudo pacman -Syu --noconfirm --needed \
     imv zathura zathura-pdf-poppler mpv vlc vlc-plugin-ffmpeg \
     libva-utils mesa-utils \
     vlc-plugin-matroska vlc-plugin-freetype vlc-plugin-ass \
-    nautilus-python \
+    nautilus-python ffmpeg \
     qbittorrent inotify-tools \
     waydroid \
     iio-sensor-proxy libwacom wtype \
