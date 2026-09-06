@@ -281,6 +281,7 @@ sudo pacman -Syu --noconfirm --needed \
     docker docker-compose docker-buildx nvidia-container-toolkit \
     libvirt qemu-full virt-manager edk2-ovmf swtpm \
     snapper snap-pac \
+    pacman-contrib \
     cmake cpio
 
 sudo pkgfile -u
