@@ -263,6 +263,7 @@ sudo pacman -Syu --noconfirm --needed \
     nwg-look nwg-displays \
     qt5ct qt6ct papirus-icon-theme \
     imv zathura zathura-pdf-poppler mpv vlc vlc-plugin-ffmpeg \
+    libva-utils mesa-utils \
     qbittorrent inotify-tools \
     waydroid \
     iio-sensor-proxy libwacom wtype \
