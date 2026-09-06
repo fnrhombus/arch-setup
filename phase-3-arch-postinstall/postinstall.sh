@@ -264,6 +264,8 @@ sudo pacman -Syu --noconfirm --needed \
     qt5ct qt6ct papirus-icon-theme \
     imv zathura zathura-pdf-poppler mpv vlc vlc-plugin-ffmpeg \
     libva-utils mesa-utils \
+    vlc-plugin-matroska vlc-plugin-freetype \
+    nautilus-python \
     qbittorrent inotify-tools \
     waydroid \
     iio-sensor-proxy libwacom wtype \
