@@ -1513,6 +1513,27 @@ sudo ufw allow 22/tcp comment 'sshd (Callisto + others)'
 sudo ufw --force enable
 sudo systemctl enable --now ufw.service
 
+# ---------- 4c2. NetworkManager: Wi-Fi is a fallback for the wire, never a peer ----------
+# NM picks the default route per address family, so with wire + Wi-Fi both up
+# IPv4 and IPv6 can land on different links (seen 2026-09-09 on metis: the
+# dock NIC wedged, its RA-learned default expired, IPv6 drifted to Wi-Fi while
+# IPv4 stayed on the dead wire). The dispatcher script keeps exactly one
+# uplink: Wi-Fi devices are disconnected and barred from autoconnect while any
+# ethernet device is connected, and released the moment none is. See the
+# script header for why it toggles device autoconnect rather than the radio.
+log "Installing /etc/NetworkManager/dispatcher.d/70-wifi-wired-exclusive..."
+sudo install -m 755 -D "$SCRIPT_DIR/system-files/NetworkManager/dispatcher.d/70-wifi-wired-exclusive" \
+    /etc/NetworkManager/dispatcher.d/70-wifi-wired-exclusive
+
+# Companion sysctl: with wire + Wi-Fi on one LAN, the Wi-Fi radio answers the
+# wire's ARP address-conflict probe for the wire's OWN address (arp_ignore=0 =
+# reply for any local address on any interface), and NM drops the wire's IPv4
+# gateway. arp_ignore=1 confines ARP replies to the receiving interface.
+log "Installing /etc/sysctl.d/60-arp-ignore.conf..."
+sudo install -m 644 -D "$SCRIPT_DIR/system-files/sysctl.d/60-arp-ignore.conf" \
+    /etc/sysctl.d/60-arp-ignore.conf
+sudo sysctl -q -p /etc/sysctl.d/60-arp-ignore.conf
+
 # Disable any leftover keyd from the previous Super-tap-to-launcher
 # attempt (mapping leftmeta -> overload(meta, f20) made F20 trigger the
 # volume OSD on this hardware — root cause unclear, see git history
@@ -2861,6 +2882,8 @@ check "callisto authorized" "grep -q 'thoma@callisto' $HOME/.ssh/authorized_keys
 check "ufw enabled"         "sudo ufw status | grep -q 'Status: active'"
 check "ufw ssh allowed"     "sudo ufw status | grep -E '^22/tcp|^22 ' | grep -q ALLOW"
 check "ufw default deny in" "sudo ufw status verbose | grep -qi 'Default: deny (incoming)'"
+check "wifi-wired-exclusive"  "test -x /etc/NetworkManager/dispatcher.d/70-wifi-wired-exclusive"
+check "arp_ignore=1"          "[[ \$(sysctl -n net.ipv4.conf.all.arp_ignore) == 1 ]]"
 
 echo "-- DDNS + Let's Encrypt --"
 check "azure-cli"           "command -v az"

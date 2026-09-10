@@ -12,8 +12,13 @@ system-files/
 │   ├── config.toml      → /etc/greetd/config.toml
 │   ├── regreet.toml     → /etc/greetd/regreet.toml
 │   └── (regreet.css comes from matugen at runtime — see below)
-└── pam.d/
-    └── greetd           → /etc/pam.d/greetd
+├── NetworkManager/
+│   └── dispatcher.d/
+│       └── 70-wifi-wired-exclusive → /etc/NetworkManager/dispatcher.d/ (Wi-Fi off while any ethernet is connected)
+├── pam.d/
+│   └── greetd           → /etc/pam.d/greetd
+└── sysctl.d/
+    └── 60-arp-ignore.conf → /etc/sysctl.d/ (ARP replies only for the receiving interface's addresses)
 ```
 
 ## ReGreet CSS theming

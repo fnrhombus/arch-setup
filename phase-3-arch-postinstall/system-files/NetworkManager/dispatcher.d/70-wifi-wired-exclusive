@@ -1,0 +1,42 @@
+#!/bin/sh
+# Wi-Fi is a fallback for the wire, never a peer.
+#
+# NetworkManager picks the default route per address family, so with both
+# links up IPv4 can sit on the wire while IPv6 drifts to Wi-Fi (seen
+# 2026-09-09 when the dock NIC wedged and its RA-learned default expired).
+# Keep exactly one uplink: while any ethernet device is connected, every
+# Wi-Fi device is disconnected and barred from auto-connecting; the moment
+# no ethernet is connected, Wi-Fi is allowed back and reconnects.
+#
+# Device-level autoconnect (not `nmcli radio`) on purpose: the radio state
+# persists across reboots, so "off" could survive into a boot with no cable
+# and leave the machine offline. Device autoconnect resets on every NM start.
+# `-w 0`: never block inside the dispatcher waiting for an activation.
+export LC_ALL=C
+
+case "$2" in
+    up|down) ;;
+    *) exit 0 ;;
+esac
+
+wired_connected() {
+    nmcli -t -f TYPE,STATE device status | grep -qx 'ethernet:connected'
+}
+
+nmcli -t -f TYPE,DEVICE,STATE device status | awk -F: '$1 == "wifi" { print $2, $3 }' |
+while read -r dev state; do
+    if wired_connected; then
+        nmcli device set "$dev" autoconnect no
+        case "$state" in
+            disconnected|unavailable|unmanaged) ;;
+            *) nmcli -w 0 device disconnect "$dev" >/dev/null 2>&1 || true ;;
+        esac
+    else
+        nmcli device set "$dev" autoconnect yes
+        # Only kick a fully idle device: re-activating one that is already
+        # connecting restarts its activation and slows the failover.
+        case "$state" in
+            disconnected) nmcli -w 0 device connect "$dev" >/dev/null 2>&1 || true ;;
+        esac
+    fi
+done
