@@ -1860,6 +1860,14 @@ fi
 #                                These are in-session re-auth; PIN is fine.
 #   login (TTY)                — finger + password ONLY; libpinpam excluded
 #                                by design. Cold-boot is not a PIN surface.
+#                                Also carries pam_gnome_keyring (as the greetd
+#                                stack does): a typed password unlocks the
+#                                `login` keyring that holds e.g. the gh token;
+#                                a fingerprint login has no password to hand
+#                                over, so the keyring stays locked until
+#                                something prompts. Without it the keyring is
+#                                locked after EVERY boot and gh hangs on a
+#                                prompt (metis 2026-09-09).
 #
 # Why not lid-aware: the fingerprint reader is on the keyboard deck and
 # IS physically blocked when the lid is closed. Earlier designs branched
@@ -1933,23 +1941,30 @@ CONCEOF
 # on this design. system-local-login (NOT system-auth) chains pam_systemd
 # via system-login, which sets XDG_RUNTIME_DIR for the tty1 → uwsm flow
 # from .zprofile (without it Hyprland dies on launch and tty1 loops back).
+# pam_gnome_keyring sits AFTER that include in the session phase on purpose:
+# auto_start needs the user's systemd instance / XDG_RUNTIME_DIR that
+# pam_systemd just set up. Both keyring lines are `optional` — they can
+# never block a login.
 read -r -d '' LOGIN_STACK <<'LOGINEOF' || true
 #%PAM-1.0
 # arch-setup: cold-boot TTY login — fingerprint or password (NO PIN).
 # PIN is intentionally excluded at this surface; available at sudo /
 # hyprlock / polkit-1 (in-session re-auth). See postinstall.sh §7a.
+# pam_gnome_keyring: a typed password also unlocks the `login` keyring.
 auth        sufficient    pam_fprintd_grosshack.so
 auth        required      pam_unix.so try_first_pass nullok
+auth        optional      pam_gnome_keyring.so
 
 account     include     system-local-login
 session     include     system-local-login
+session     optional    pam_gnome_keyring.so auto_start
 LOGINEOF
 
 for pam_file in sudo hyprlock polkit-1; do
     log "  /etc/pam.d/${pam_file}"
     printf '%s\n' "$CONCURRENT_STACK" | sudo tee "/etc/pam.d/${pam_file}" >/dev/null
 done
-log "  /etc/pam.d/login (no PIN — cold-boot surface)"
+log "  /etc/pam.d/login (no PIN — cold-boot surface; unlocks login keyring on password)"
 printf '%s\n' "$LOGIN_STACK" | sudo tee /etc/pam.d/login >/dev/null
 
 # /etc/pam.d/physlock — TTY-based screen lock invoked from hypridle.
@@ -2846,6 +2861,7 @@ check "grosshack-fnrhombus pkg" "pacman -Q pam-fprint-grosshack-fnrhombus"
 check "grosshack .so present" "test -f /usr/lib/security/pam_fprintd_grosshack.so"
 check "PIN actually persisted" "! pinutil test < /dev/null 2>&1 | grep -q NoPinSet"
 check "lid-closed helper removed" "! test -e /usr/local/bin/lid-closed"
+check "login PAM unlocks keyring" "grep -q 'pam_gnome_keyring.so auto_start' /etc/pam.d/login"
 # Unattended-sudo escape hatch (claude-askpass + sudoa) — owned by
 # rhombu5/dots. Surfaces a missing chezmoi apply or a renamed Bitwarden
 # entry; doesn't gate install. See ~/.claude/CLAUDE.linux.md "Two sudo
