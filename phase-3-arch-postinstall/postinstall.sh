@@ -885,6 +885,15 @@ sudo systemctl mask systemd-tpm2-setup.service
 log "Masking systemd-pcrproduct.service (same TPM limitation, systemd 260+)..."
 sudo systemctl mask systemd-pcrproduct.service
 
+# systemd 261 added systemd-pcrlogin@UID.service (started by logind at first
+# login) to measure the user record into a 'login' NvPCR. On metis
+# systemd-tpm2-setup reports "The TPM's NV index space is exhausted, skipping
+# allocation of NvPCR 'login'", so the unit has nothing to extend and fails on
+# every boot (surfacing as a misleading "Device not a stream"). Pure
+# measurement, nothing depends on it -- mask the template.
+log "Masking systemd-pcrlogin@.service (no NV index space for the 'login' NvPCR, systemd 261+)..."
+sudo systemctl mask systemd-pcrlogin@.service
+
 # Deliberately NOT masked: systemd-tpm2-setup-early.service. On metis the
 # root LUKS keyslot carries a systemd-tpm2 token (PCR 7, sha1 bank,
 # tpm2-srk: true), and this unit is what re-provisions the SRK that token
@@ -2837,6 +2846,7 @@ check "physlock PAM stack (includes hyprlock)" "grep -qE 'include[[:space:]]+hyp
 check "pam_unix in sys-auth" "grep -q pam_unix /etc/pam.d/system-auth"
 check "LUKS root TPM2"      "sudo systemd-cryptenroll /dev/disk/by-partlabel/ArchRoot 2>/dev/null | awk 'NR>1 && \$2==\"tpm2\"{f=1} END{exit !f}'"
 check "PCR signing keypair exists" "[[ -f /etc/systemd/tpm2-pcr-public.pem && -f /etc/systemd/tpm2-pcr-private.pem ]]"
+check "systemd-pcrlogin@ masked" "[[ \$(systemctl is-enabled systemd-pcrlogin@.service 2>/dev/null) == masked ]]"
 check "btrfs swapfile present"     "test -f /swap/swapfile"
 check "swap active"                "swapon --show=NAME --noheadings | grep -q /swap/swapfile"
 check "ssh agent wired"     "grep -q bitwarden-ssh-agent.sock $HOME/.ssh/config"
