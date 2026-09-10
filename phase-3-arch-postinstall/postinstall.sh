@@ -1133,7 +1133,7 @@ AUR_PACKAGES=(
     # physlock: TTY-based screen lock. dots' hypridle.conf lock_cmd calls
     # `tty-lock`, a thin wrapper (chezmoi-managed, not provisioned here)
     # that runs physlock then `loginctl unlock-session`. /etc/pam.d/physlock
-    # is written in §7a below to include the hyprlock auth stack.
+    # gets its own stack in §7a below (no grosshack — see the surface split).
     physlock
     bibata-cursor-theme
     # Bitwig Studio: Digital audio workstation for music production, remixing
@@ -1875,6 +1875,21 @@ fi
 #                                something prompts. Without it the keyring is
 #                                locked after EVERY boot and gh hangs on a
 #                                prompt (metis 2026-09-09).
+#   physlock (lockscreen)      — password + PIN, NO grosshack. physlock enters
+#                                pam_authenticate at lock time and blocks in
+#                                the conversation until the user comes back.
+#                                grosshack's ~30 s verify timer expires long
+#                                before that and it returns WITHOUT stashing
+#                                the typed entry, so the first thing typed
+#                                lands in pam_unix's fallback prompt and is
+#                                tested as a password — every first PIN after
+#                                a >30 s lock was rejected (metis 2026-09-08;
+#                                `timeout=` is inert in our grosshack build).
+#                                pam_unix owns the prompt instead (no timer,
+#                                stashes the entry even when it rejects it)
+#                                and libpinpam re-tests that entry as a PIN.
+#                                Fingerprint is moot here: the reader is under
+#                                the closed lid.
 #
 # Why not lid-aware: the fingerprint reader is on the keyboard deck and
 # IS physically blocked when the lid is closed. Earlier designs branched
@@ -1975,18 +1990,25 @@ log "  /etc/pam.d/login (no PIN — cold-boot surface; unlocks login keyring on 
 printf '%s\n' "$LOGIN_STACK" | sudo tee /etc/pam.d/login >/dev/null
 
 # /etc/pam.d/physlock — TTY-based screen lock invoked from hypridle.
-# Just includes the hyprlock stack so physlock and hyprlock stay in
-# sync (same in-session auth surface: finger / PIN / password). If
-# we ever re-introduce hyprlock as the lock_cmd, this file still
-# applies — physlock is harmless when unused.
+# Its own auth stack, not the concurrent one: see "physlock (lockscreen)"
+# in the surface split above. Order matters — libpinpam prompting for
+# itself does NOT hand the entry down to pam_unix (verified 2026-09-09:
+# a password typed at its prompt died with "auth could not identify
+# password"), so pam_unix must be the one that prompts. Every PIN unlock
+# therefore logs one pam_unix "authentication failure" line; there is no
+# faillock in this stack, so that line is noise, not a lockout.
 log "  /etc/pam.d/physlock"
 sudo tee /etc/pam.d/physlock >/dev/null <<'PHYSEOF'
 #%PAM-1.0
-# arch-setup: physlock includes the hyprlock stack (in-session re-auth:
-# fingerprint + PIN + password). See postinstall.sh §7a.
-auth     include    hyprlock
-account  include    hyprlock
-session  include    hyprlock
+# arch-setup: physlock lockscreen — password + PIN, no fingerprint race.
+# pam_unix prompts (it never times out, unlike grosshack) and stashes the
+# entry; libpinpam re-tests that same entry as a PIN. See postinstall.sh §7a.
+auth     sufficient  pam_unix.so nullok
+auth     sufficient  libpinpam.so use_first_pass
+auth     required    pam_deny.so
+
+account  include     hyprlock
+session  include     hyprlock
 PHYSEOF
 
 # ---------- 7.5 LUKS TPM2 autounlock — VERIFY-ONLY (FDE per decisions.md §Q11) ----------
@@ -2886,7 +2908,7 @@ check "login PAM (no PIN, cold-boot)" "grep -q pam_fprintd_grosshack /etc/pam.d/
 # physlock — TTY-based screen lock. Pkg from AUR; PAM file written in §7a.
 check "physlock pkg" "pacman -Q physlock"
 check "physlock setuid" "test -u /usr/bin/physlock"
-check "physlock PAM stack (includes hyprlock)" "grep -qE 'include[[:space:]]+hyprlock' /etc/pam.d/physlock"
+check "physlock PAM stack (pam_unix prompts, libpinpam re-tests, no grosshack)" "grep -qE '^auth[[:space:]]+sufficient[[:space:]]+libpinpam.so use_first_pass' /etc/pam.d/physlock && ! grep -q grosshack /etc/pam.d/physlock"
 check "pam_unix in sys-auth" "grep -q pam_unix /etc/pam.d/system-auth"
 check "LUKS root TPM2"      "sudo systemd-cryptenroll /dev/disk/by-partlabel/ArchRoot 2>/dev/null | awk 'NR>1 && \$2==\"tpm2\"{f=1} END{exit !f}'"
 check "PCR signing keypair exists" "[[ -f /etc/systemd/tpm2-pcr-public.pem && -f /etc/systemd/tpm2-pcr-private.pem ]]"
