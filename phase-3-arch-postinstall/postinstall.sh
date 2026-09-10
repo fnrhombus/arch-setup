@@ -1119,9 +1119,16 @@ AUR_PACKAGES=(
     # output remove/re-add (Waybar #3530 / #4361) — six SIGSEGVs in 4
     # days on a clamshell+HDMI setup where eDP-1 is repeatedly disabled
     # by the lid-handler. Fixes for that class landed on master after
-    # 0.15.0 was tagged (PR #4938 / #4946 / #5007). Switched 2026-05-08;
-    # see runbook/post-reinstall-followups.md §4 for the revert path
-    # once an extra/waybar bumps past 0.15.0 with the fixes.
+    # 0.15.0 was tagged (PR #4938 / #4946 / #5007). Switched 2026-05-08.
+    # Still required as of 2026-09-10: upstream's latest tag is 0.15.0 and
+    # [extra] ships 0.15.0-3. The monthly claude.ai/code routine 'waybar
+    # upstream watch' tracks the next release; revert path when it lands
+    # with the fixes = swap this line back to `waybar` and reinstall
+    # (`pacman -Rns waybar-git && pacman -S waybar`). Being a foreign
+    # package, waybar-git is NOT rebuilt by -Syu: after an upgrade that
+    # bumps a linked soname (jsoncpp .26 → .27 on 2026-09-06) it keeps
+    # running from memory and fails only at the next reboot — `ldd
+    # /usr/bin/waybar | grep 'not found'` before rebooting.
     waybar-git
     # physlock: TTY-based screen lock. dots' hypridle.conf lock_cmd calls
     # `tty-lock`, a thin wrapper (chezmoi-managed, not provisioned here)

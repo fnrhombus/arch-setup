@@ -1,8 +1,8 @@
 # System-level config files (not chezmoi-managed)
 
 These files target paths under `/etc/` and are installed by
-`postinstall.sh` during the reinstall (script-implementation pass —
-TODO).
+`postinstall.sh` during the reinstall (`sudo install -m … -D
+"$SCRIPT_DIR/system-files/<path>" /etc/<path>` in the relevant section).
 
 ## Layout
 
